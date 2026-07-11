@@ -62,6 +62,27 @@ final class VoiceCallService: NSObject, @preconcurrency CXProviderDelegate, @pre
     try session.setActive(true)
   }
 
+  func requestMicrophoneAndPrepare(_ completion: @escaping @MainActor (Bool) -> Void) {
+    switch AVAudioApplication.shared.recordPermission {
+    case .granted:
+      completion((try? prepareForegroundAudio()) != nil)
+    case .denied:
+      completion(false)
+    case .undetermined:
+      AVAudioApplication.requestRecordPermission { granted in
+        Task { @MainActor in
+          guard granted else {
+            completion(false)
+            return
+          }
+          completion((try? self.prepareForegroundAudio()) != nil)
+        }
+      }
+    @unknown default:
+      completion(false)
+    }
+  }
+
   func pushRegistry(
     _ registry: PKPushRegistry,
     didUpdate pushCredentials: PKPushCredentials,

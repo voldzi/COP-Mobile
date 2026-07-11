@@ -220,11 +220,8 @@ struct WebHostView: UIViewRepresentable {
         decisionHandler(.deny)
         return
       }
-      do {
-        try VoiceCallService.shared.prepareForegroundAudio()
-        decisionHandler(.grant)
-      } catch {
-        decisionHandler(.deny)
+      VoiceCallService.shared.requestMicrophoneAndPrepare { granted in
+        decisionHandler(granted ? .grant : .deny)
       }
     }
 
