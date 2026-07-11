@@ -45,14 +45,31 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: [self-hosted, macOS, ARM64, xcode-27-beta]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout trusted revision
+        shell: bash
+        env:
+          COP_MOBILE_GIT_URL: git@github.com:${{ github.repository }}.git
+        run: |
+          set -euo pipefail
+          if [[ ! -d .git ]]; then
+            git init .
+            git remote add origin "$COP_MOBILE_GIT_URL"
+          else
+            git remote set-url origin "$COP_MOBILE_GIT_URL"
+          fi
+          GIT_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=8' \
+            git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
 
       - name: Verify approved Xcode 27 beta
         run: bash scripts/verify-apple-toolchain.sh
 
       - name: Install XcodeGen
-        run: brew install xcodegen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
+          xcodegen --version
 
       - name: Validate pinned contract and configuration
         run: |

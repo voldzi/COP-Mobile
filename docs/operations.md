@@ -40,6 +40,11 @@ credentials a pracovní adresář zůstávají mimo repozitář. GitHub run-serv
 endpoint musí být dostupný přes odchozí HTTPS, jinak při převzetí jobu nastane
 timeout bez ohledu na stav projektu.
 
+Self-hosted job načítá přesný trusted push commit přímo přes SSH a nestahuje
+`actions/checkout`; pull request event jej vůbec nespustí. XcodeGen se instaluje
+jen pokud na runneru chybí. Tím se omezuje síťová závislost jobu po jeho
+přidělení, ale neodstraňuje se nutnost dostupnosti GitHub Actions control plane.
+
 ## Inicializace a lokální build
 
 ```bash

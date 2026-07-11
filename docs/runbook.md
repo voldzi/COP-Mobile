@@ -42,10 +42,13 @@ krok.
 3. Ověřte odchozí HTTPS pro `pipelines*.actions.githubusercontent.com`,
    `broker.actions.githubusercontent.com` a přidělený
    `run-actions-*.actions.githubusercontent.com` endpoint.
-4. Lokální runner `.env` používá HTTP/1.1 kompatibilní režim. Neměňte VPN,
+4. Self-hosted job checkoutuje přesný `$GITHUB_SHA` přes SSH; ověřte proto také
+   `ssh -T git@github.com`. Nepřepisujte checkout na pull request head z
+   nedůvěryhodného forku.
+5. Lokální runner `.env` používá HTTP/1.1 kompatibilní režim. Neměňte VPN,
    firewall ani segmentaci jako automatický workaround; síťovou změnu musí
    schválit vlastník infrastruktury.
-5. Pull request z veřejného forku se na self-hosted runneru nesmí spustit.
+6. Pull request z veřejného forku se na self-hosted runneru nesmí spustit.
 
 ## Aplikace se nespustí nebo zůstane prázdná
 
