@@ -36,6 +36,10 @@ permission request, location event nese monotónní sequence a invalidace sessio
 zastaví senzorové updates. Konfigurační validátor vyžaduje When In Use purpose
 string a současně zakazuje Always/background deklarace.
 
+WebView smoke test na fyzickém zařízení navíc ověřuje, že selection haptika
+nastane po tapnutí, ale nevzniká při scrollu a neblokuje aktivaci webového
+ovládacího prvku.
+
 Fyzický smoke test musí navíc potvrdit systémový dialog až po explicitní akci,
 Full/Reduced Accuracy stav, GPS accuracy a reakci headingu při rotaci zařízení.
 

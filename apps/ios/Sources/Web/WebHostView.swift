@@ -57,6 +57,11 @@ struct WebHostView: UIViewRepresentable {
     #endif
 
     handler.webView = webView
+    let tapHaptics = UITapGestureRecognizer(
+      target: context.coordinator, action: #selector(Coordinator.webContentTapped))
+    tapHaptics.cancelsTouchesInView = false
+    tapHaptics.delegate = context.coordinator
+    webView.addGestureRecognizer(tapHaptics)
     bridge.eventSink = { [weak webView] event in
       guard let webView else { return }
       Task { @MainActor in
@@ -75,6 +80,7 @@ struct WebHostView: UIViewRepresentable {
       contentController: contentController,
       contentWorld: contentWorld
     )
+    context.coordinator.tapHaptics = tapHaptics
     context.coordinator.loadInitialPage()
     return webView
   }
@@ -89,7 +95,7 @@ struct WebHostView: UIViewRepresentable {
   }
 
   @MainActor
-  final class Coordinator: NSObject, WKNavigationDelegate {
+  final class Coordinator: NSObject, WKNavigationDelegate, UIGestureRecognizerDelegate {
     private let appConfiguration: AppConfiguration
     private let model: AppModel
     private let originPolicy: OriginPolicy
@@ -99,6 +105,7 @@ struct WebHostView: UIViewRepresentable {
     private weak var contentController: WKUserContentController?
     private var contentWorld: WKContentWorld?
     private var lastReloadToken = 0
+    fileprivate weak var tapHaptics: UITapGestureRecognizer?
 
     init(configuration: AppConfiguration, model: AppModel) {
       appConfiguration = configuration
@@ -190,8 +197,24 @@ struct WebHostView: UIViewRepresentable {
       model.webDidFail()
     }
 
+    @objc func webContentTapped() {
+      let feedback = UISelectionFeedbackGenerator()
+      feedback.prepare()
+      feedback.selectionChanged()
+    }
+
+    func gestureRecognizer(
+      _ gestureRecognizer: UIGestureRecognizer,
+      shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+      true
+    }
+
     func teardown() {
       bridge?.invalidateSession()
+      if let tapHaptics {
+        webView?.removeGestureRecognizer(tapHaptics)
+      }
       if let contentWorld {
         contentController?.removeScriptMessageHandler(
           forName: BridgeScripts.handlerName, contentWorld: contentWorld)
