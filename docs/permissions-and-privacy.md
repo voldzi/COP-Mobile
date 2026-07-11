@@ -62,8 +62,9 @@ a předávají se platné bridge session, nikoli do nativních logů nebo teleme
 APNs implementace znovu používá schválený topic
 `cz.zeleznalady.csm.messenger`, vyžaduje explicitní zapnutí oznámení a registruje
 aktuální device token přímo u CSM Messaging jednorázovým ticketem. Raw APNs
-token se nikdy neposílá do COP webu nebo COP API. Background mode je omezen na
-`remote-notification`; audio, VoIP a location background modes nejsou aktivní.
+token ani samostatný PushKit VoIP token se nikdy neposílá do COP webu nebo COP
+API. Background modes jsou omezeny na `remote-notification` a `voip`; druhý je
+podle ADR 0008 vyhrazen výhradně skutečnému Matrix hlasovému hovoru.
 
 | Funkce | Deklarace / capability | Kdy se žádá | Chování při odmítnutí | Povinná pro core app |
 | --- | --- | --- | --- | --- |
@@ -108,7 +109,7 @@ Tracking Transparency pro analytické nebo reklamní sledování.
 - `remote-notification` není náhradou za kontinuální proces a přidá se jen pro
   konkrétní, otestovaný silent-push scénář.
 - `voip` se nesmí použít k imitaci vyzvánění. PushKit/CallKit patří pouze ke
-  skutečnému VoIP hovoru.
+  skutečnému VoIP hovoru a implementace je vymezena ADR 0008.
 - `audio`, Bluetooth background modes ani background location se nesmějí použít
   k udržování budoucí relay služby při životě.
 - Background execution je best effort podle iOS. Force-quit uživatelem je

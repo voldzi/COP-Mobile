@@ -212,8 +212,9 @@ prostor. Export důkazů obsahuje pouze agregované metriky nebo redigovanou tra
 - token rotation/reinstall a backend unregister při logout/revokaci;
 - Critical Alert pouze po doloženém entitlementu; bez něj musí být capability a
   produktové copy vypnuté;
-- PushKit/CallKit se v MVP nesmí objevit v podepsaných entitlements/background
-  modes ani v testovaném chování.
+- PushKit/CallKit podle ADR 0008: příchozí a ended VoIP push, CallKit answer,
+  reject a end, cold start, suspended/terminated stav, zámek obrazovky, expirovaný
+  call a potvrzení, že safety ani běžné notifikace nepoužijí VoIP topic.
 
 ## Offline, lifecycle a chaos scénáře
 
@@ -271,7 +272,8 @@ soubory:
 
 - deployment target je iOS 26 a release používá schválený stabilní Xcode/SDK;
 - entitlements obsahují jen Push, App Groups, Associated Domains, schválený
-  background mode a případně Time Sensitive; žádný nevyužitý relay/VoIP gate;
+  background modes `remote-notification` a skutečný `voip`; žádný nevyužitý
+  relay, location nebo audio keepalive gate;
 - Info.plist obsahuje pouze používané a lokalizované purpose strings;
 - App Transport Security, App-Bound/allowlist politika a production originy jsou
   přesné; debug originy a Web Inspector chybějí;

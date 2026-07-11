@@ -169,9 +169,9 @@ ADR 0003 stanoví, proč první verze nebalí kopii celého web buildu.
 CSM Messaging posílá minimální APNs payload. Host zpracuje kategorii a opaque
 identifikátor, aktivuje aplikaci a předá bezpečně validovanou COP web route.
 Citlivý obsah není součástí systémové notifikace bez explicitní serverové
-politiky. Critical Alerts a CallKit nejsou součástí základního kontraktu:
-Critical Alerts vyžadují Apple entitlement a CallKit smí reprezentovat pouze
-skutečný VoIP hovor.
+politiky. Critical Alerts vyžadují Apple entitlement. CallKit je podle ADR 0008
+součástí skutečné VoIP cesty: PushKit probudí host, CallKit převezme systémový
+call lifecycle a Matrix ve WebView nadále vlastní signalizaci a média.
 
 ## Úložiště a vlastnictví dat
 

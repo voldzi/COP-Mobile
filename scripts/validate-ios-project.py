@@ -73,8 +73,8 @@ def main() -> int:
             failures.append(f"{name} must contain the approved location purpose string")
         if plist.get("NSMicrophoneUsageDescription") != microphone_purpose:
             failures.append(f"{name} must contain the approved voice-call microphone purpose string")
-        if plist.get("UIBackgroundModes") != ["remote-notification"]:
-            failures.append(f"{name} must enable only the remote-notification background mode")
+        if set(plist.get("UIBackgroundModes", [])) != {"remote-notification", "voip"}:
+            failures.append(f"{name} must enable only remote-notification and real-call voip background modes")
         if set(plist.get("UISupportedInterfaceOrientations", [])) != required_phone_orientations:
             failures.append(f"{name} must support the approved iPhone orientations")
         if set(plist.get("UISupportedInterfaceOrientations~ipad", [])) != required_pad_orientations:

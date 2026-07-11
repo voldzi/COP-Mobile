@@ -124,11 +124,9 @@ kde chybí rozhodnutí nebo fyzický důkaz.
 
 ## OQ-014: Skutečný VoIP požadavek
 
-- Stav: běžný webový hovor ve foreground `WKWebView` je podporován včetně
-  originově omezeného přístupu k mikrofonu; native CallKit/PushKit scope není
-  schválen
+- Stav: rozhodnuto ADR 0008; foreground hovor používá řízený `AVAudioSession`
+  a background/terminated příjem používá skutečný PushKit/CallKit lifecycle
 - Vlastník: produkt + messaging
 - Dopad: telefonní incoming-call UX při background/terminated stavu
-- Rozhodnutí potřebné do: samostatná post-MVP VoIP feasibility fáze
-- Bezpečný fallback: standardní call notification otevře web; PushKit/CallKit
-  se nepoužije jako alarmový workaround.
+- Rozhodnutí: implementovat pouze pro skutečný Matrix hlasový hovor; force-quit
+  uživatelem zůstává negarantovaný a VoIP cesta se nesmí použít pro alarmy.

@@ -220,7 +220,12 @@ struct WebHostView: UIViewRepresentable {
         decisionHandler(.deny)
         return
       }
-      decisionHandler(.grant)
+      do {
+        try VoiceCallService.shared.prepareForegroundAudio()
+        decisionHandler(.grant)
+      } catch {
+        decisionHandler(.deny)
+      }
     }
 
     @objc func webContentTapped() {

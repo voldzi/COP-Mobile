@@ -28,6 +28,9 @@ final class PushNotificationService: NSObject, PushNotificationProviding, UNUser
   private override init() {
     super.init()
     center.delegate = self
+    VoiceCallService.shared.eventReceiver = { [weak self] type, payload in
+      self?.eventReceiver?(type, payload)
+    }
     registerCategories()
   }
 
@@ -57,6 +60,7 @@ final class PushNotificationService: NSObject, PushNotificationProviding, UNUser
       baseURL.host == "msg.zeleznalady.cz", baseURL.user == nil, baseURL.password == nil
     else { throw PushRegistrationError.invalidRequest }
     let token = try await currentDeviceToken()
+    let voipToken = try await VoiceCallService.shared.currentPushToken()
     let endpoint = baseURL.appending(path: "api/v1/devices")
     var request = URLRequest(url: endpoint)
     request.httpMethod = "POST"
@@ -66,8 +70,9 @@ final class PushNotificationService: NSObject, PushNotificationProviding, UNUser
     request.httpBody = try JSONSerialization.data(withJSONObject: [
       "appBundleId": "cz.zeleznalady.csm.messenger",
       "appInstanceId": appInstanceID,
-      "capabilities": ["e2ee": true, "criticalAlerts": false, "liveActivities": false],
+      "capabilities": ["e2ee": true, "criticalAlerts": false, "liveActivities": false, "voip": true],
       "deviceToken": token,
+      "voipDeviceToken": voipToken,
       "locale": Locale.current.identifier.replacingOccurrences(of: "_", with: "-"),
       "platform": "ios",
       "preferences": ["categories": ["message.direct", "message.voice_call", "safety.alert", "system"]],
@@ -200,6 +205,14 @@ enum PushRegistrationError: Error {
 }
 
 final class COPMobileAppDelegate: NSObject, UIApplicationDelegate {
+  func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+  ) -> Bool {
+    _ = PushNotificationService.shared
+    return true
+  }
+
   func application(
     _ application: UIApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data

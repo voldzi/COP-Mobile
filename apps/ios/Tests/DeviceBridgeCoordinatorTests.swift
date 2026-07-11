@@ -130,11 +130,36 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     XCTAssertEqual(provider.stopAllCount, 1)
   }
 
-  private func makeBridge(location: DeviceLocationProviding? = nil) throws -> DeviceBridgeCoordinator {
+  func testCallActionQueuedBeforeHandshakeIsDeliveredAfterBridgeReady() async throws {
+    let notifications = FakeNotificationProvider()
+    let bridge = try makeBridge(notifications: notifications)
+    var events: [[String: Any]] = []
+    bridge.eventSink = { events.append($0) }
+    notifications.emit(
+      type: "calls.answerRequested",
+      payload: ["callId": "call-1", "roomId": "!ops:example.cz"])
+    bridge.navigationDidCommit(url: productionURL)
+
+    _ = await bridge.handle(message: hello(), context: allowedContext())
+    await Task.yield()
+    await Task.yield()
+
+    XCTAssertEqual(events.first?["type"] as? String, "calls.answerRequested")
+    XCTAssertEqual((events.first?["payload"] as? [String: Any])?["callId"] as? String, "call-1")
+  }
+
+  private func makeBridge(
+    location: DeviceLocationProviding? = nil,
+    notifications: PushNotificationProviding? = nil
+  ) throws -> DeviceBridgeCoordinator {
     let origin = try WebOrigin(configurationValue: "https://cop.zeleznalady.cz")
     let policy = OriginPolicy(bridgeOrigins: [origin], navigationOrigins: [origin])
-    if let location {
-      return DeviceBridgeCoordinator(originPolicy: policy, location: location, isForeground: { true })
+    if location != nil || notifications != nil {
+      return DeviceBridgeCoordinator(
+        originPolicy: policy,
+        location: location ?? FakeLocationProvider(),
+        notifications: notifications ?? FakeNotificationProvider(),
+        isForeground: { true })
     }
     return DeviceBridgeCoordinator(originPolicy: policy)
   }
@@ -159,6 +184,24 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
       "sessionId": sessionID, "method": method, "sentAt": "2026-07-11T10:00:01.000Z",
       "params": params,
     ]
+  }
+}
+
+@MainActor
+private final class FakeNotificationProvider: PushNotificationProviding {
+  var deviceToken: String?
+  var eventReceiver: ((String, [String: Any]) -> Void)?
+
+  func status() async -> [String: Any] { ["authorization": "authorized"] }
+  func requestAuthorization() async -> [String: Any] { ["authorization": "authorized"] }
+  func registrationContext() -> [String: Any] { [:] }
+  func registerRemote(ticket: String, messagingBaseURL: String) async throws -> [String: Any] { [:] }
+  func recordDeviceToken(_ data: Data) {}
+  func recordRegistrationFailure(_ error: any Error) {}
+  func receiveRemoteNotification(_ userInfo: [AnyHashable: Any], interaction: Bool) {}
+
+  func emit(type: String, payload: [String: Any]) {
+    eventReceiver?(type, payload)
   }
 }
 

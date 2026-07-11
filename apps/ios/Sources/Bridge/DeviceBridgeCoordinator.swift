@@ -23,6 +23,7 @@ final class DeviceBridgeCoordinator {
   private var navigationIsEligible = false
   private var sessionID: String?
   private var eventSequence = 0
+  private var pendingEvents: [(String, Any)] = []
   private struct CachedResponse {
     let requestDigest: String
     let response: [String: Any]
@@ -126,6 +127,7 @@ final class DeviceBridgeCoordinator {
     self.sessionID = sessionID
     responseCache.removeAll(keepingCapacity: true)
     responseOrder.removeAll(keepingCapacity: true)
+    flushPendingEvents()
     return [
       "kind": "ready",
       "id": id,
@@ -293,13 +295,26 @@ final class DeviceBridgeCoordinator {
   }
 
   private func emit(type: String, payload: Any) {
-    guard let sessionID else { return }
+    guard let sessionID else {
+      if pendingEvents.count >= 8 { pendingEvents.removeFirst() }
+      pendingEvents.append((type, payload))
+      return
+    }
     eventSequence += 1
     eventSink?([
       "kind": "event", "protocolVersion": DeviceCapabilities.protocolVersion,
       "eventId": UUID().uuidString.lowercased(), "sessionId": sessionID,
       "sequence": eventSequence, "type": type, "occurredAt": timestamp(), "payload": payload,
     ])
+  }
+
+  private func flushPendingEvents() {
+    guard sessionID != nil else { return }
+    let events = pendingEvents
+    pendingEvents.removeAll(keepingCapacity: true)
+    for (type, payload) in events {
+      emit(type: type, payload: payload)
+    }
   }
 
   private func mapError(_ error: any Error) -> (String, String) {

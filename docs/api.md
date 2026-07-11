@@ -261,6 +261,11 @@ Nesmí nařídit navigaci na libovolnou URL.
 
 Implementovaný kontrakt zachovává tyto hranice:
 
+- iOS registrace předá CSM Messaging běžný `deviceToken` a oddělený
+  `voipDeviceToken`; veřejná odpověď ani následné čtení zařízení nevrací žádný;
+- `voipDeviceToken` se smí použít pouze pro `chat.voice_call.incoming` a
+  `chat.voice_call.ended` podle ADR 0008;
+
 - COP `POST /api/v1/mobile/devices` neukládá APNs token;
 - CSM Messaging `POST /api/v1/devices` dnes očekává uživatelský access token;
 - web vlastní OIDC relaci a nativní host ji nemá kopírovat.

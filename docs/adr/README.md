@@ -24,3 +24,4 @@ Use ADRs for important, costly, risky, or hard-to-reverse technical decisions.
 - `0005-notification-delivery-boundaries.md` — audible, Critical and VoIP limits
 - `0006-relay-experiment-production-gate.md` — relay POC and production gates
 - `0007-approved-xcode-27-beta-toolchain.md` — pinned Xcode 27 beta build and CI boundary
+- `0008-real-voip-pushkit-callkit.md` — real incoming-call wake and CallKit lifecycle
