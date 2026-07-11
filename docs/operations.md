@@ -12,24 +12,25 @@ bash scripts/check.sh
 
 `scripts/check.sh` validuje skeleton, připnutý kontrakt, iOS konfiguraci,
 vygeneruje projekt a spustí testy na dostupném iOS 26 simulátoru. Podepsaný
-archive ani upload zatím definován není.
+generic-device Debug build s potvrzeným Teamem a bundle ID prošel; archive ani
+upload zatím definován není.
 
 ## Prostředí a předpoklady
 
 Aktuálně ověřeno na workstation:
 
 - Node.js 24 a pnpm 10 jsou dostupné pro související COP práci;
-- lokální Xcode je beta Xcode 27, a proto není schváleným production release
-  baseline;
+- schválený toolchain je Xcode 27.0 beta build `27A5218g` s iOS SDK 27.0;
 - Java/Android SDK/adb/Gradle nejsou nainstalované;
 - XcodeGen 2.44.1 je dostupný;
 - produkční COP origin je `https://cop.zeleznalady.cz`;
 - minimum nového app targetu je iOS/iPadOS 26.0.
 
-CI používá runner `macos-26`, explicitně vybírá stabilní Xcode 26.5 a před
-buildem ověřuje Xcode/iOS SDK major, Swift 6 a
-`IPHONEOS_DEPLOYMENT_TARGET=26.0`. Lokální Xcode 27 beta tímto gate správně
-neprojde.
+GitHub-hosted macOS obrazy v době rozhodnutí Xcode 27 beta neobsahují. iOS CI
+proto používá důvěryhodný ARM64 macOS self-hosted runner s labelem
+`xcode-27-beta` a přesně ověřuje Xcode build i iOS SDK. Job je vypnutý pro
+`pull_request` eventy, aby veřejný fork nemohl spustit kód na interním runneru.
+Deployment target zůstává `IPHONEOS_DEPLOYMENT_TARGET=26.0`.
 
 ## Inicializace a lokální build
 
@@ -51,7 +52,8 @@ generovány do typed build configuration; secrets zůstávají v Keychain/CI/ser
 | Název | Povinný | Bezpečný default | Účel |
 | --- | --- | --- | --- |
 | `COP_MOBILE_ENVIRONMENT` | ano | `development` | Výběr debug/staging/release veřejné konfigurace |
-| `COP_IOS_BUNDLE_ID` | ano | `cz.zeleznalady.csm.messenger` | Kompatibilní App ID, APNs topic a deep-link identita; podléhá signing auditu |
+| `COP_IOS_BUNDLE_ID` | ano | `cz.zeleznalady.csm.messenger` | Potvrzená kompatibilní App ID, APNs topic a deep-link identita |
+| `COP_IOS_DEVELOPMENT_TEAM` | ano | `LM6W548X36` | Potvrzený veřejný Apple Team identifikátor; nejde o signing secret |
 | `COP_IOS_MINIMUM_VERSION` | ano | `26.0` | Závazný deployment target |
 | `COP_WEB_ORIGIN` | ano | `https://cop.zeleznalady.cz` | Přesný hlavní release origin; ne wildcard |
 | `COP_OIDC_ISSUER` | ano | `https://login.zeleznalady.cz/realms/cop` | Navigační OIDC origin, nikdy bridge origin |
@@ -89,8 +91,9 @@ S prvními targety se doplní a v `AGENTS.md` přesně zopakují tyto kroky:
 6. podepsaný archive a export pro interní TestFlight;
 7. oddělený real-device test report před promotion stejného buildu.
 
-Produkční app se nebuildí z `04 CSM messenger`. Tento projekt má vlastní signing
-a release historii; legacy repo zůstává referencí.
+Produkční app se nebuildí z `04 CSM messenger`. Tento projekt používá potvrzený
+Team `LM6W548X36` a legacy bundle ID, ale má vlastní build a release historii;
+legacy repo zůstává referencí.
 
 ## Rollout
 

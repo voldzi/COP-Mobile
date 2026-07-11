@@ -27,6 +27,10 @@ def main() -> int:
         failures.append("Base.xcconfig must pin IPHONEOS_DEPLOYMENT_TARGET to 26.0")
     if "SWIFT_VERSION = 6.0" not in base:
         failures.append("Base.xcconfig must pin Swift 6.0")
+    if "PRODUCT_BUNDLE_IDENTIFIER = cz.zeleznalady.csm.messenger" not in base:
+        failures.append("Base.xcconfig must use the approved legacy bundle ID")
+    if "DEVELOPMENT_TEAM: LM6W548X36" not in project:
+        failures.append("project.yml must use the approved Apple Development Team")
 
     if release.get("COPWebOrigin") != "https://cop.zeleznalady.cz":
         failures.append("release COP origin must be exact production HTTPS origin")
@@ -42,10 +46,22 @@ def main() -> int:
         failures.append("staging must remain fail-closed until OQ-001 supplies exact origins")
 
     forbidden_keys = {"NSLocationAlwaysUsageDescription", "UIBackgroundModes"}
+    required_phone_orientations = {
+        "UIInterfaceOrientationPortrait",
+        "UIInterfaceOrientationLandscapeLeft",
+        "UIInterfaceOrientationLandscapeRight",
+    }
+    required_pad_orientations = required_phone_orientations | {
+        "UIInterfaceOrientationPortraitUpsideDown"
+    }
     for name, plist in (("debug", debug), ("staging", staging), ("release", release)):
         present = forbidden_keys.intersection(plist)
         if present:
             failures.append(f"{name} enables out-of-scope phase 2 capabilities: {sorted(present)}")
+        if set(plist.get("UISupportedInterfaceOrientations", [])) != required_phone_orientations:
+            failures.append(f"{name} must support the approved iPhone orientations")
+        if set(plist.get("UISupportedInterfaceOrientations~ipad", [])) != required_pad_orientations:
+            failures.append(f"{name} must support every iPad orientation")
 
     if list(IOS.rglob("*.entitlements")):
         failures.append("phase 2 feasibility host must not add entitlements")
@@ -54,7 +70,10 @@ def main() -> int:
         for failure in failures:
             print(f"FAIL: {failure}", file=sys.stderr)
         return 1
-    print("iOS project configuration is fail-closed and pinned to iOS 26.0 / Swift 6.")
+    print(
+        "iOS project configuration is fail-closed and pinned to iOS 26.0 / "
+        "Swift 6 / approved signing identity."
+    )
     return 0
 
 

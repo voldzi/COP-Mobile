@@ -10,13 +10,13 @@ experimentální device-to-device relay. Vlastníkem produktu je tým COP.
 
 Repozitář je ve fázi 2 — iOS feasibility host. Obsahuje XcodeGen/Swift 6 target
 pro iOS/iPadOS 26, bezpečný `WKWebView` baseline, handshake Device API `1.0.0`,
-lokální fallback a unit/contract testy. Fáze ještě není přijata: chybí stable
-Xcode CI důkaz, signing a fyzické iPhone/iPad ověření.
+lokální fallback a unit/contract testy. Fáze ještě není přijata: chybí Xcode 27
+beta CI důkaz, instalace na fyzický iPhone a fyzické iPad ověření.
 
 Závazný baseline:
 
 - minimum iOS/iPadOS 26;
-- stabilní Xcode a stabilní Apple SDK, nikoli beta-only produkční závislosti;
+- schválený a přesně připnutý Xcode 27 beta / iOS SDK 27 toolchain;
 - existující COP web zůstává jediným UI a zdrojem business logiky;
 - nativní vrstva neimplementuje vlastní chat, mapu, report workflow ani AI;
 - relay je mimo MVP, v produkci vypnutý a označený jako experiment;
@@ -61,9 +61,9 @@ Projekt neposkytuje vlastní REST API. Popis konzumovaných kontraktů je v
 bash scripts/check.sh
 ```
 
-Aktuálně vybraný lokální Xcode 27 beta slouží pouze pro kompatibilitní ověření.
-Release gate vyžaduje stabilní Xcode 26 a kontroluje jej samostatně přes
-`scripts/verify-stable-apple-toolchain.sh`.
+Závazný toolchain je Xcode 27.0 beta build `27A5218g` s iOS SDK 27.0. Kontroluje
+jej `scripts/verify-apple-toolchain.sh`; minimum aplikace zůstává iOS/iPadOS
+26.0.
 
 ## Dokumentace
 

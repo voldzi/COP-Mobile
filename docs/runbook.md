@@ -15,10 +15,14 @@ krok.
    změny `.xcodeproj` nejsou zdroj pravdy.
 3. Spusťte `bash scripts/test-ios.sh`. Skript vybere dostupný iOS 26 iPhone
    simulátor nebo respektuje `COP_IOS_SIMULATOR_ID`.
-4. Pro release/CI spusťte `bash scripts/verify-stable-apple-toolchain.sh`.
-   Lokální Xcode 27 beta má selhat; neobcházejte gate změnou major verze.
+4. Pro release/CI spusťte `bash scripts/verify-apple-toolchain.sh`. Musí projít
+   pouze schválený Xcode 27.0 beta build a iOS SDK 27.0; změna pinu vyžaduje
+   vědomou aktualizaci ADR 0007 a ověřovacích důkazů.
 5. Zkontrolujte `docs/implementation-report-phase-2.md` a nerozšiřujte
    simulátorový výsledek na fyzický, OIDC nebo offline důkaz.
+6. Pro instalaci na fyzické zařízení musí být zařízení odemčené, spárované,
+   dostupné v `xcrun devicectl list devices` a musí mít zapnutý Developer Mode.
+   Tento režim vyžaduje potvrzení a restart přímo na zařízení; neobcházejte jej.
 
 ## Skeleton validation selže
 

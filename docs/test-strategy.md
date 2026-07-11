@@ -5,7 +5,7 @@
 Repozitář je ve fázi 2 a obsahuje první buildovatelný iOS host. Aktuální unit a
 contract testy pokrývají origin policy, handshake a capability baseline;
 `implementation-report-phase-2.md` pravdivě odděluje simulátor, beta toolchain,
-stable CI a dosud neprovedené fyzické/backendové scénáře.
+schválený Xcode 27 beta CI a dosud neprovedené fyzické/backendové scénáře.
 
 Minimální platforma je **iOS 26**. Úspěšný build nebo simulátor sám o sobě není
 důkaz funkčního kompasu, motion, APNs, background location, Share Extension ani

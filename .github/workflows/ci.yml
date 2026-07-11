@@ -1,10 +1,12 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
       - main
+      - "codex/**"
 
 permissions:
   contents: read
@@ -40,15 +42,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   ios-feasibility:
-    runs-on: macos-26
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, macOS, ARM64, xcode-27-beta]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select approved stable Xcode
-        run: |
-          sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
-          bash scripts/verify-stable-apple-toolchain.sh
+      - name: Verify approved Xcode 27 beta
+        run: bash scripts/verify-apple-toolchain.sh
 
       - name: Install XcodeGen
         run: brew install xcodegen

@@ -33,13 +33,12 @@ kde chybí rozhodnutí nebo fyzický důkaz.
 
 ## OQ-004: Bundle ID, signing a nástupnictví staré aplikace
 
-- Stav: nepodepsaný target používá doporučený default
-  `cz.zeleznalady.csm.messenger`, čeká signing audit
+- Stav: uzavřeno — potvrzen Team `LM6W548X36` a kompatibilní bundle ID
+  `cz.zeleznalady.csm.messenger`; XcodeGen target obě hodnoty používá
 - Vlastník: Apple Developer/App Store správce
 - Dopad: APNs topic, AASA, `csm://` deep links, instalace vedle legacy aplikace
-- Rozhodnutí potřebné do: vytvoření podepsaného app targetu
-- Bezpečný fallback: nevytvářet nový App ID ani provisioning profil; dokumenty
-  předpokládají kompatibilní náhradu, nikoli paralelní produkční aplikaci.
+- Rozhodnutí: nový host pokračuje jako náhrada legacy aplikace, nikoli jako
+  paralelní produkční App ID. Provisioning profil není součástí repozitáře.
 
 ## OQ-005: Critical Alerts entitlement
 
@@ -79,12 +78,13 @@ kde chybí rozhodnutí nebo fyzický důkaz.
 
 ## OQ-009: Testovací zařízení a účty
 
-- Stav: iOS 26.5 simulátor ověřen; fyzický inventář nepotvrzen
+- Stav: iOS 26.5 simulátor ověřen; spárovaný iPhone 15 má iOS 26.5.2, ale
+  vypnutý Developer Mode; fyzický iPad a testovací účty nejsou potvrzené
 - Vlastník: QA/provoz
 - Dopad: real-device release gate
 - Rozhodnutí potřebné do: první podepsaný TestFlight build
-- Bezpečný fallback: simulátorové výsledky se označí pouze jako dílčí; release
-  bez dvou iPhonů a relevantního iPadu nevznikne.
+- Bezpečný fallback: podepsaný generic-device build ani simulátor se neoznačí
+  za fyzický test; release bez dvou iPhonů a relevantního iPadu nevznikne.
 
 ## OQ-010: Veřejný App Store, Custom App nebo MDM
 

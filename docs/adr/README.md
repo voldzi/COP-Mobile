@@ -23,3 +23,4 @@ Use ADRs for important, costly, risky, or hard-to-reverse technical decisions.
 - `0004-native-owned-background-tracking.md` — durable tracking outside WebView
 - `0005-notification-delivery-boundaries.md` — audible, Critical and VoIP limits
 - `0006-relay-experiment-production-gate.md` — relay POC and production gates
+- `0007-approved-xcode-27-beta-toolchain.md` — pinned Xcode 27 beta build and CI boundary

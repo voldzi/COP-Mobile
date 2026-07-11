@@ -7,8 +7,8 @@ existing COP web application and a future Android host. Native code exposes
 device capabilities; it must not duplicate COP chat, map, reporting, domain
 workflow, authorization decisions, or AI orchestration.
 
-The deployment target is iOS/iPadOS 26 or newer. Use stable production
-toolchains and capability-gate newer APIs.
+The deployment target is iOS/iPadOS 26 or newer. Use the approved, exactly
+pinned Xcode 27 beta toolchain and capability-gate newer APIs.
 
 ## Working Style
 
@@ -72,15 +72,15 @@ the owning repository.
 
 ## Environment
 
-- Current phase: iOS feasibility host; XcodeGen/Swift target exists, but stable
-  CI and physical-device acceptance are still open.
+- Current phase: iOS feasibility host; XcodeGen/Swift target exists, but Xcode
+  27 beta CI and physical-device acceptance are still open.
 - Minimum target: iOS/iPadOS 26.
 - Planned iOS baseline: Swift 6, SwiftUI, Observation, Swift Concurrency,
   WebKit, Core Location, Core Motion, UserNotifications, Keychain, and XcodeGen.
 - Planned Android baseline: Kotlin, Compose, Coroutines, AndroidX WebKit, and
   the same device contract after iOS stabilization.
-- Production builds must use the latest approved stable Xcode/SDK in CI. A
-  local beta Xcode is not a release baseline.
+- Production builds must use the approved exact Xcode 27 beta / iOS SDK 27
+  build recorded in ADR 0007 and enforced by the toolchain verifier.
 - No REST server is provided by this repository, so it has no OpenAPI document.
 
 ## Validation
@@ -93,9 +93,8 @@ python3 scripts/validate-device-contract.py
 python3 scripts/validate-ios-project.py
 ```
 
-CI must additionally run `bash scripts/verify-stable-apple-toolchain.sh` before
-`scripts/check.sh`. The current workstation selects Xcode 27 beta, so local
-builds are compatibility evidence only. Radio, background execution, push,
+`scripts/check.sh` includes `scripts/verify-apple-toolchain.sh`; do not bypass
+the exact Xcode/SDK pin. Radio, background execution, push,
 Share Extension, auth/offline acceptance and sensors require physical devices;
 simulator success is insufficient.
 

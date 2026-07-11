@@ -43,14 +43,14 @@ chování; mock umí deterministicky otestovat denied/unsupported/degraded stavy
 
 ## Fáze 2 — iOS feasibility host
 
-Stav: implementace probíhá; aktuální důkazy a zbývající fyzické/stable gates
+Stav: implementace probíhá; aktuální důkazy a zbývající fyzické/CI gates
 jsou v `implementation-report-phase-2.md`.
 
 Vlastník: tento repozitář.
 
 Výstupy:
 
-- XcodeGen projekt, Swift 6, SwiftUI app target a stable-SDK CI;
+- XcodeGen projekt, Swift 6, SwiftUI app target a připnutý Xcode 27 beta CI;
 - `WKWebView` s persistent data store, přesným release/staging/debug allowlistem,
   main-frame bridge a lokálním fresh-install fallbackem;
 - protocol handshake a pouze read-only `system.getCapabilities()` spike;
