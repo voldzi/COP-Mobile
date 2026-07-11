@@ -17,6 +17,7 @@ final class DeviceBridgeCoordinator {
 
   private let originPolicy: OriginPolicy
   private let location: DeviceLocationProviding
+  private let notifications: PushNotificationProviding
   private let isForeground: () -> Bool
   var eventSink: (([String: Any]) -> Void)?
   private var navigationIsEligible = false
@@ -33,11 +34,14 @@ final class DeviceBridgeCoordinator {
   init(
     originPolicy: OriginPolicy,
     location: DeviceLocationProviding = CoreLocationService(),
+    notifications: PushNotificationProviding = PushNotificationService.shared,
     isForeground: @escaping () -> Bool = { UIApplication.shared.applicationState == .active }
   ) {
     self.originPolicy = originPolicy
     self.location = location
+    self.notifications = notifications
     self.isForeground = isForeground
+    notifications.eventReceiver = { [weak self] type, payload in self?.emit(type: type, payload: payload) }
   }
 
   func navigationDidCommit(url: URL?) {
@@ -242,6 +246,23 @@ final class DeviceBridgeCoordinator {
       guard params.isEmpty else { throw DeviceLocationError.invalidSample }
       location.stopHeadingUpdates()
       return ["stopped": true]
+    case "notifications.getStatus":
+      guard params.isEmpty else { throw DeviceLocationError.invalidSample }
+      return await notifications.status()
+    case "notifications.requestAuthorization":
+      guard params.isEmpty else { throw DeviceLocationError.invalidSample }
+      guard isForeground() else { throw BridgeExecutionError.notForeground }
+      return await notifications.requestAuthorization()
+    case "notifications.getRegistrationContext":
+      guard params.isEmpty else { throw DeviceLocationError.invalidSample }
+      return notifications.registrationContext()
+    case "notifications.registerRemote":
+      guard Set(params.keys) == ["ticket", "messagingBaseUrl"],
+        let ticket = params["ticket"] as? String,
+        let messagingBaseURL = params["messagingBaseUrl"] as? String
+      else { throw DeviceLocationError.invalidSample }
+      guard isForeground() else { throw BridgeExecutionError.notForeground }
+      return try await notifications.registerRemote(ticket: ticket, messagingBaseURL: messagingBaseURL)
     default:
       throw BridgeExecutionError.unsupported
     }

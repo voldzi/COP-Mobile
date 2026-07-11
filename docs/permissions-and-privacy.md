@@ -59,6 +59,12 @@ heading. Všechny tři konfigurace obsahují schválený
 background mode ani entitlement. Přesné souřadnice a heading jsou pouze v paměti
 a předávají se platné bridge session, nikoli do nativních logů nebo telemetry.
 
+APNs implementace znovu používá schválený topic
+`cz.zeleznalady.csm.messenger`, vyžaduje explicitní zapnutí oznámení a registruje
+aktuální device token přímo u CSM Messaging jednorázovým ticketem. Raw APNs
+token se nikdy neposílá do COP webu nebo COP API. Background mode je omezen na
+`remote-notification`; audio, VoIP a location background modes nejsou aktivní.
+
 | Funkce | Deklarace / capability | Kdy se žádá | Chování při odmítnutí | Povinná pro core app |
 | --- | --- | --- | --- | --- |
 | Jednorázová poloha a heading | `NSLocationWhenInUseUsageDescription` | Po akci vyžadující polohu nebo kompas | Web pokračuje bez polohy; zobrazí stav a volitelný odkaz do Nastavení | Ne |

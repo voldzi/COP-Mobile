@@ -48,7 +48,6 @@ def main() -> int:
     forbidden_keys = {
         "NSLocationAlwaysUsageDescription",
         "NSLocationAlwaysAndWhenInUseUsageDescription",
-        "UIBackgroundModes",
     }
     location_purpose = (
         "CSM používá polohu při práci s COP k zobrazení vaší pozice, směru a "
@@ -68,20 +67,31 @@ def main() -> int:
             failures.append(f"{name} enables out-of-scope phase 2 capabilities: {sorted(present)}")
         if plist.get("NSLocationWhenInUseUsageDescription") != location_purpose:
             failures.append(f"{name} must contain the approved location purpose string")
+        if plist.get("UIBackgroundModes") != ["remote-notification"]:
+            failures.append(f"{name} must enable only the remote-notification background mode")
         if set(plist.get("UISupportedInterfaceOrientations", [])) != required_phone_orientations:
             failures.append(f"{name} must support the approved iPhone orientations")
         if set(plist.get("UISupportedInterfaceOrientations~ipad", [])) != required_pad_orientations:
             failures.append(f"{name} must support every iPad orientation")
 
-    if list(IOS.rglob("*.entitlements")):
-        failures.append("phase 2 feasibility host must not add entitlements")
+    entitlements = list(IOS.rglob("*.entitlements"))
+    expected_entitlements = [IOS / "Config" / "COPMobile.entitlements"]
+    if entitlements != expected_entitlements:
+        failures.append("iOS host must contain only Config/COPMobile.entitlements")
+    else:
+        with entitlements[0].open("rb") as handle:
+            entitlement_values = plistlib.load(handle)
+        if entitlement_values != {"aps-environment": "development"}:
+            failures.append("COPMobile.entitlements must contain only development aps-environment")
+    if "CODE_SIGN_ENTITLEMENTS: Config/COPMobile.entitlements" not in project:
+        failures.append("application target must sign with the approved APNs entitlements file")
 
     if failures:
         for failure in failures:
             print(f"FAIL: {failure}", file=sys.stderr)
         return 1
     print(
-        "iOS project configuration is fail-closed, location-When-In-Use only, and pinned "
+        "iOS project configuration is fail-closed, APNs-enabled, location-When-In-Use only, and pinned "
         "to iOS 26.0 / Swift 6 / approved signing identity."
     )
     return 0

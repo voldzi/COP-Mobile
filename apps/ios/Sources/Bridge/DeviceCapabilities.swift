@@ -42,6 +42,12 @@ enum DeviceCapabilities {
       "supportsBackground": false,
       "requiresForeground": true,
     ]
+    let notifications: [String: Any] = [
+      "availability": "supported",
+      "permission": "notDetermined",
+      "supportsBackground": true,
+      "limitations": ["Remote delivery requires a CSM Messaging registration ticket."],
+    ]
     return [
       "system": system,
       "permissions": permissions,
@@ -52,7 +58,7 @@ enum DeviceCapabilities {
       "connectivity": unsupported,
       "media": unsupported,
       "shares": unsupported,
-      "notifications": unsupported,
+      "notifications": notifications,
       "relay": unsupported,
     ]
   }

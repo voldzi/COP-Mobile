@@ -257,23 +257,22 @@ První kontrakt počítá minimálně s těmito skupinami:
 Notifikační/deep-link event nese pouze validovanou interní route nebo opaque ID.
 Nesmí nařídit navigaci na libovolnou URL.
 
-## Push registrační ticket — nutná změna serverových kontraktů
+## Push registrační ticket
 
-Současný stav:
+Implementovaný kontrakt zachovává tyto hranice:
 
 - COP `POST /api/v1/mobile/devices` neukládá APNs token;
 - CSM Messaging `POST /api/v1/devices` dnes očekává uživatelský access token;
 - web vlastní OIDC relaci a nativní host ji nemá kopírovat.
 
-Před remote-push implementací se proto v `01 COP/openapi/openapi.json` zavede
-autentizovaný endpoint:
+`01 COP/openapi/openapi.json` obsahuje autentizovaný endpoint:
 
 ```http
 POST /api/v1/mobile/device-registration-tickets
 Authorization: Bearer <COP web access token>
 ```
 
-Vrátí krátkodobý jednorázový bearer ticket omezený na:
+Vrací 120 sekund platný jednorázový bearer ticket omezený na:
 
 - subject aktuálně přihlášeného uživatele;
 - audience CSM Messaging device registration;
@@ -281,12 +280,14 @@ Vrátí krátkodobý jednorázový bearer ticket omezený na:
 - platformu iOS, bundle ID a app-instance ID;
 - krátkou expiraci a unikátní `jti`.
 
-Web předá ticket metodě `notifications.registerRemote`. Native připojí APNs
+Web po explicitním zapnutí oznámení předá ticket metodě
+`notifications.registerRemote`. Native připojí APNs
 token až do přímého požadavku na CSM Messaging. Ticket nesmí autorizovat běžné
 COP/Matrix API a CSM Messaging musí zabránit opakovanému použití `jti`.
-Konkrétní response schema, maximální TTL a ověření podpisu vzniknou ve společné
-COP/CSM změně; do té doby je remote push capability
-`temporarilyUnavailable`.
+CSM Messaging ověřuje HMAC podpis, audience, účel, subject, platformu, bundle,
+app-instance binding, expiraci a jednorázové `jti`. Sdílený signing secret je
+pouze serverová konfigurace a musí mít nejméně 32 bytes; není součástí aplikace,
+ticketu ani logů.
 
 ## Offline report a synchronizace
 
