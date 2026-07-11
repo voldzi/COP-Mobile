@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cop.local/device/v1/bridge-handshake.schema.json",
+  "title": "COP Device Bridge Handshake",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "sentAt", "supportedVersions", "webBuildId"],
+      "properties": {
+        "kind": { "const": "hello" },
+        "id": { "$ref": "common.schema.json#/$defs/uuid" },
+        "sentAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "supportedVersions": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true
+        },
+        "webBuildId": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "sentAt", "selectedVersion", "sessionId", "capabilities", "limits"],
+      "properties": {
+        "kind": { "const": "ready" },
+        "id": { "$ref": "common.schema.json#/$defs/uuid" },
+        "sentAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "selectedVersion": { "$ref": "common.schema.json#/$defs/protocolVersion" },
+        "sessionId": { "$ref": "common.schema.json#/$defs/uuid" },
+        "capabilities": { "$ref": "device-capabilities.schema.json#/properties/capabilities" },
+        "limits": { "$ref": "common.schema.json#/$defs/limits" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "sentAt", "error"],
+      "properties": {
+        "kind": { "const": "blocked" },
+        "id": { "$ref": "common.schema.json#/$defs/uuid" },
+        "sentAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "error": { "$ref": "common.schema.json#/$defs/error" }
+      }
+    }
+  ]
+}

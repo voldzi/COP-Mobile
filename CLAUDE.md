@@ -72,7 +72,8 @@ the owning repository.
 
 ## Environment
 
-- Current phase: documentation and feasibility only; no build target exists.
+- Current phase: iOS feasibility host; XcodeGen/Swift target exists, but stable
+  CI and physical-device acceptance are still open.
 - Minimum target: iOS/iPadOS 26.
 - Planned iOS baseline: Swift 6, SwiftUI, Observation, Swift Concurrency,
   WebKit, Core Location, Core Motion, UserNotifications, Keychain, and XcodeGen.
@@ -84,16 +85,19 @@ the owning repository.
 
 ## Validation
 
-Current mandatory check:
+Current mandatory checks:
 
 ```bash
-bash scripts/validate-skeleton.sh
+bash scripts/check.sh
+python3 scripts/validate-device-contract.py
+python3 scripts/validate-ios-project.py
 ```
 
-When platform targets are introduced, add exact XcodeGen, build, unit,
-integration, UI, contract, lint, and Android commands here before considering
-the target ready. Radio, background execution, push, Share Extension, and
-sensor acceptance require physical devices; simulator success is insufficient.
+CI must additionally run `bash scripts/verify-stable-apple-toolchain.sh` before
+`scripts/check.sh`. The current workstation selects Xcode 27 beta, so local
+builds are compatibility evidence only. Radio, background execution, push,
+Share Extension, auth/offline acceptance and sensors require physical devices;
+simulator success is insufficient.
 
 If retrieval scope changes, run:
 

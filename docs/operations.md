@@ -2,16 +2,17 @@
 
 ## Současný stav
 
-Repozitář je ve fázi 0: dokumentace, ADR a prázdné platformní hranice. Není zde
-Xcode/Gradle target, spustitelná aplikace ani produkční deployment. Jediný
-aktuální provozní check je:
+Repozitář je ve fázi 2 a má generovaný SwiftUI/Xcode target. Není zde produkční
+deployment, signing material, Android target ani přijatý fyzický test. Lokální
+kontrola je:
 
 ```bash
-bash scripts/validate-skeleton.sh
+bash scripts/check.sh
 ```
 
-Build, test, archive ani upload příkaz se nesmí doplnit dříve, než existuje
-odpovídající target a reprodukovatelný CI job.
+`scripts/check.sh` validuje skeleton, připnutý kontrakt, iOS konfiguraci,
+vygeneruje projekt a spustí testy na dostupném iOS 26 simulátoru. Podepsaný
+archive ani upload zatím definován není.
 
 ## Prostředí a předpoklady
 
@@ -25,14 +26,16 @@ Aktuálně ověřeno na workstation:
 - produkční COP origin je `https://cop.zeleznalady.cz`;
 - minimum nového app targetu je iOS/iPadOS 26.0.
 
-Budoucí release CI musí použít schválený stabilní Xcode/SDK, připnutou XcodeGen
-verzi, Swift 6 a explicitně ověřit `IPHONEOS_DEPLOYMENT_TARGET=26.0`.
+CI používá runner `macos-26`, explicitně vybírá stabilní Xcode 26.5 a před
+buildem ověřuje Xcode/iOS SDK major, Swift 6 a
+`IPHONEOS_DEPLOYMENT_TARGET=26.0`. Lokální Xcode 27 beta tímto gate správně
+neprojde.
 
-## Inicializace dokumentačního repozitáře
+## Inicializace a lokální build
 
 ```bash
 git status --short --branch
-bash scripts/validate-skeleton.sh
+bash scripts/check.sh
 "/Users/voldzi/Documents/Development/18 2026/chromadb/tools/chroma-dev.sh" reindex --root .
 ```
 

@@ -1,0 +1,12 @@
+{
+  "sampleId": "40000000-0000-4000-8000-000000000003",
+  "measuredAt": "2026-07-11T10:00:04.000Z",
+  "receivedAt": "2026-07-11T10:00:04.010Z",
+  "source": "live",
+  "referenceFrame": "xTrueNorthZVertical",
+  "quaternion": { "x": 0.1, "y": 0.2, "z": 0.3, "w": 0.92736185 },
+  "rollRad": 0.1,
+  "pitchRad": 0.2,
+  "yawRad": 0.3,
+  "valid": true
+}

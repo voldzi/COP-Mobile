@@ -1,0 +1,11 @@
+{
+  "authorization": "granted",
+  "alertsEnabled": true,
+  "soundsEnabled": true,
+  "badgesEnabled": true,
+  "timeSensitiveEnabled": true,
+  "criticalAlertsEnabled": false,
+  "remoteRegistration": "registered",
+  "observedAt": "2026-07-11T10:02:00.000Z",
+  "apnsToken": "must-never-cross-the-bridge"
+}

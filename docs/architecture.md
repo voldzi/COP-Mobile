@@ -3,8 +3,9 @@
 ## Stav dokumentu
 
 Tento dokument popisuje schválenou cílovou architekturu. Repozitář je ve fázi
-0: obsahuje pouze projektový skeleton a dokumentaci, nikoli Swift, Kotlin ani
-produkční bridge kód.
+2: obsahuje iOS feasibility host s bezpečným WebView baseline, bridge handshake
+a read-only capability snapshotem. Senzory, tracking, push, Share Extension,
+relay a Android zatím implementované nejsou.
 
 První podporovanou platformou bude iOS/iPadOS 26.0. Android bude následovat nad
 stejným kontraktem; nesmí kvůli němu vzniknout druhá webová nebo doménová

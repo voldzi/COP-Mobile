@@ -1,14 +1,14 @@
 # Otevřené otázky a externí brány
 
-Fáze 0 nemá otevřený blocker. Následující položky musí být uzavřeny před
-uvedeným milníkem; do té doby platí bezpečný fallback.
+Fáze 2 má níže uvedené externí akceptační brány. Host zůstává fail-closed tam,
+kde chybí rozhodnutí nebo fyzický důkaz.
 
 ## OQ-001: Staging a debug originy
 
-- Stav: otevřeno
+- Stav: částečně uzavřeno — release a debug jsou explicitní, staging chybí
 - Vlastník: COP provoz
 - Dopad: release/debug allowlist, App-Bound Domains, integrační testy
-- Rozhodnutí potřebné do: zahájení iOS feasibility hostu
+- Rozhodnutí potřebné do: funkční staging build ve fázi 2
 - Bezpečný fallback: release povolí pouze `https://cop.zeleznalady.cz`; lokální
   origin existuje jen v explicitním debug buildu.
 
@@ -33,7 +33,8 @@ uvedeným milníkem; do té doby platí bezpečný fallback.
 
 ## OQ-004: Bundle ID, signing a nástupnictví staré aplikace
 
-- Stav: doporučený default `cz.zeleznalady.csm.messenger`, čeká signing audit
+- Stav: nepodepsaný target používá doporučený default
+  `cz.zeleznalady.csm.messenger`, čeká signing audit
 - Vlastník: Apple Developer/App Store správce
 - Dopad: APNs topic, AASA, `csm://` deep links, instalace vedle legacy aplikace
 - Rozhodnutí potřebné do: vytvoření podepsaného app targetu
@@ -78,7 +79,7 @@ uvedeným milníkem; do té doby platí bezpečný fallback.
 
 ## OQ-009: Testovací zařízení a účty
 
-- Stav: inventář nepotvrzen
+- Stav: iOS 26.5 simulátor ověřen; fyzický inventář nepotvrzen
 - Vlastník: QA/provoz
 - Dopad: real-device release gate
 - Rozhodnutí potřebné do: první podepsaný TestFlight build
@@ -111,7 +112,8 @@ uvedeným milníkem; do té doby platí bezpečný fallback.
 
 ## OQ-013: WebKit cached-start důkaz
 
-- Stav: unit testy PWA prošly, fyzický WKWebView test neproběhl
+- Stav: lokální fallback a simulátorový WebView build existují; fyzický cached
+  start neproběhl
 - Vlastník: iOS implementace + QA
 - Dopad: tvrzení o offline startu po prvním online spuštění
 - Rozhodnutí potřebné do: ukončení fáze 2

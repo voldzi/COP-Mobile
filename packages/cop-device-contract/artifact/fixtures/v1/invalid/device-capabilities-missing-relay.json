@@ -1,0 +1,18 @@
+{
+  "adapter": "mock",
+  "protocolVersion": "1.0.0",
+  "observedAt": "2026-07-11T10:00:00.000Z",
+  "limits": { "maxAssetBytes": 0, "maxJsonBytes": 65536, "requestTimeoutMs": 15000 },
+  "capabilities": {
+    "system": { "availability": "supported", "permission": "granted", "supportsBackground": false },
+    "permissions": { "availability": "supported", "permission": "granted", "supportsBackground": false },
+    "location": { "availability": "unsupported", "permission": "unavailable", "supportsBackground": false },
+    "heading": { "availability": "unsupported", "permission": "unavailable", "supportsBackground": false },
+    "attitude": { "availability": "unsupported", "permission": "unavailable", "supportsBackground": false },
+    "tracking": { "availability": "unsupported", "permission": "unavailable", "supportsBackground": false },
+    "connectivity": { "availability": "supported", "permission": "granted", "supportsBackground": false },
+    "media": { "availability": "unsupported", "permission": "unavailable", "supportsBackground": false },
+    "shares": { "availability": "unsupported", "permission": "unavailable", "supportsBackground": false },
+    "notifications": { "availability": "unsupported", "permission": "unavailable", "supportsBackground": false }
+  }
+}

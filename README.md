@@ -8,8 +8,10 @@ experimentální device-to-device relay. Vlastníkem produktu je tým COP.
 
 ## Stav
 
-Repozitář je ve fázi 0 — analýza, architektonická rozhodnutí a dokumentační
-skeleton. Neobsahuje produkční Swift ani Kotlin kód.
+Repozitář je ve fázi 2 — iOS feasibility host. Obsahuje XcodeGen/Swift 6 target
+pro iOS/iPadOS 26, bezpečný `WKWebView` baseline, handshake Device API `1.0.0`,
+lokální fallback a unit/contract testy. Fáze ještě není přijata: chybí stable
+Xcode CI důkaz, signing a fyzické iPhone/iPad ověření.
 
 Závazný baseline:
 
@@ -53,14 +55,15 @@ Projekt neposkytuje vlastní REST API. Popis konzumovaných kontraktů je v
 
 ## Lokální ověření
 
-V dokumentační fázi je jediným build-independent checkem:
+Úplná lokální kontrola:
 
 ```bash
-bash scripts/validate-skeleton.sh
+bash scripts/check.sh
 ```
 
-Swift/Xcode a Android příkazy budou přidány společně s prvními build targety;
-dokumentace je nesmí předstírat dříve, než existují.
+Aktuálně vybraný lokální Xcode 27 beta slouží pouze pro kompatibilitní ověření.
+Release gate vyžaduje stabilní Xcode 26 a kontroluje jej samostatně přes
+`scripts/verify-stable-apple-toolchain.sh`.
 
 ## Dokumentace
 
@@ -73,6 +76,7 @@ Rozcestník je v [`docs/README.md`](docs/README.md). Nejdůležitější vstupy:
 - [`docs/security.md`](docs/security.md)
 - [`docs/test-strategy.md`](docs/test-strategy.md)
 - [`docs/open-questions.md`](docs/open-questions.md)
+- [`docs/implementation-report-phase-2.md`](docs/implementation-report-phase-2.md)
 
 ## Retrieval
 

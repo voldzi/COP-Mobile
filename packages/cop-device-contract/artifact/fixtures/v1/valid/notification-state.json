@@ -1,0 +1,10 @@
+{
+  "authorization": "granted",
+  "alertsEnabled": true,
+  "soundsEnabled": true,
+  "badgesEnabled": true,
+  "timeSensitiveEnabled": true,
+  "criticalAlertsEnabled": false,
+  "remoteRegistration": "notRegistered",
+  "observedAt": "2026-07-11T10:02:00.000Z"
+}

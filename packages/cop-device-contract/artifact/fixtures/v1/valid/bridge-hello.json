@@ -1,0 +1,7 @@
+{
+  "kind": "hello",
+  "id": "10000000-0000-4000-8000-000000000001",
+  "sentAt": "2026-07-11T10:00:00.000Z",
+  "supportedVersions": ["1.0.0"],
+  "webBuildId": "cop-web-fixture"
+}

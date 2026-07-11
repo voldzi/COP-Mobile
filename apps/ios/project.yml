@@ -1,0 +1,76 @@
+name: COPMobile
+
+options:
+  minimumXcodeGenVersion: 2.44.1
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+configs:
+  Debug: debug
+  Staging: release
+  Release: release
+
+configFiles:
+  Debug: Config/Debug.xcconfig
+  Staging: Config/Staging.xcconfig
+  Release: Config/Release.xcconfig
+
+settings:
+  base:
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+
+targets:
+  COPMobile:
+    type: application
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_NAME: COPMobile
+        TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies: []
+    scheme:
+      gatherCoverageData: true
+      testTargets:
+        - COPMobileTests
+
+  COPMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Tests
+      - path: ../../packages/cop-device-contract/artifact/fixtures
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - target: COPMobile
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: ""
+        PRODUCT_BUNDLE_IDENTIFIER: cz.zeleznalady.cop-mobile.tests
+
+schemes:
+  COPMobile-Staging:
+    build:
+      targets:
+        COPMobile: all
+        COPMobileTests: [test]
+    run:
+      config: Staging
+    test:
+      config: Staging
+      gatherCoverageData: true
+      targets:
+        - COPMobileTests
+    archive:
+      config: Staging

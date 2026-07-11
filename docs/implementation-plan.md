@@ -9,7 +9,7 @@ brány.
 
 ## Fáze 0 — dokumentace a rozhodnutí
 
-Stav: připravený baseline v tomto repozitáři.
+Stav: dokončeno v commitu `f109784`.
 
 Výstupy:
 
@@ -23,6 +23,9 @@ Akceptace: skeleton validace projde a repozitář neobsahuje produkční app kó
 secret ani tvrzení o neprovedeném testu.
 
 ## Fáze 1 — autoritativní COP Device kontrakt
+
+Stav: dokončeno v COP větvi `codex/cop-mobile-device-contract`, commit
+`38db4442fc6aa4d5df0cf788e9e0e9d9aa61e576`.
 
 Vlastník: hlavní COP repozitář.
 
@@ -39,6 +42,9 @@ Akceptace: COP build, lint a testy projdou; browser adapter zachová současné 
 chování; mock umí deterministicky otestovat denied/unsupported/degraded stavy.
 
 ## Fáze 2 — iOS feasibility host
+
+Stav: implementace probíhá; aktuální důkazy a zbývající fyzické/stable gates
+jsou v `implementation-report-phase-2.md`.
 
 Vlastník: tento repozitář.
 

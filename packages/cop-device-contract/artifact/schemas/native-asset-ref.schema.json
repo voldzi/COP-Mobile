@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cop.local/device/v1/native-asset-ref.schema.json",
+  "title": "COP Device Native Asset Reference",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["assetId", "mimeType", "fileName", "sizeBytes", "sha256", "createdAt", "expiresAt", "source"],
+  "properties": {
+    "assetId": { "$ref": "common.schema.json#/$defs/uuid" },
+    "mimeType": { "type": "string", "pattern": "^[a-z0-9.+-]+/[a-z0-9.+-]+$", "maxLength": 128 },
+    "fileName": { "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^/\\\\]+$" },
+    "sizeBytes": { "type": "integer", "minimum": 1 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "createdAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "expiresAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "source": { "enum": ["camera", "photoPicker", "documentPicker", "shareExtension"] },
+    "widthPx": { "type": "integer", "minimum": 1 },
+    "heightPx": { "type": "integer", "minimum": 1 }
+  }
+}

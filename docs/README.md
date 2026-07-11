@@ -19,6 +19,7 @@ překonané analýzy patří do `archive/`.
 | [observability.md](observability.md) | Privacy-safe logy, metriky, diagnostika a korelace |
 | [runbook.md](runbook.md) | Konkrétní provozní a testovací scénáře |
 | [open-questions.md](open-questions.md) | Zbývající rozhodovací a externí brány |
+| [implementation-report-phase-2.md](implementation-report-phase-2.md) | Skutečně implementovaný a ověřený stav iOS feasibility hostu |
 | [adr/](adr/) | Architektonická rozhodnutí |
 | [archive/](archive/) | Historické a superseded materiály |
 
@@ -26,9 +27,10 @@ překonané analýzy patří do `archive/`.
 
 COP Mobile neposkytuje REST API, a proto nemá vlastní `openapi/openapi.json`.
 Autoritativní COP REST kontrakt je `01 COP/openapi/openapi.json`. Autoritativní
-Device API schémata a TypeScript web SDK budou vznikat v COP repozitáři; tento
-repozitář spotřebuje připnutý export a ověří stejné fixtures ve Swiftu a později
-v Kotlinu.
+Device API schémata a TypeScript web SDK jsou v COP repozitáři. Tento repozitář
+spotřebovává kontrakt `1.0.0` připnutý přes
+`packages/cop-device-contract/contract.lock.json` a vybrané společné fixtures
+ověřuje ve Swift testech; pozdější Kotlin použije stejný artifact.
 
 ## Pravidla údržby
 

@@ -1,0 +1,15 @@
+{
+  "sampleId": "40000000-0000-4000-8000-000000000001",
+  "measuredAt": "2026-07-11T10:00:02.000Z",
+  "receivedAt": "2026-07-11T10:00:02.050Z",
+  "source": "live",
+  "latitude": 50.0755,
+  "longitude": 14.4378,
+  "horizontalAccuracyM": 4.2,
+  "altitudeM": 235.1,
+  "verticalAccuracyM": 7.1,
+  "speedMps": 0.3,
+  "courseDeg": null,
+  "reducedAccuracy": false,
+  "valid": true
+}

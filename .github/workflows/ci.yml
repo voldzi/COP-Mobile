@@ -39,6 +39,26 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Add a macOS build/test job together with the first generated iOS target.
-  # It must use an approved stable Xcode and enforce IPHONEOS_DEPLOYMENT_TARGET=26.0.
+  ios-feasibility:
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select approved stable Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
+          bash scripts/verify-stable-apple-toolchain.sh
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Validate pinned contract and configuration
+        run: |
+          python3 scripts/validate-device-contract.py
+          python3 scripts/validate-ios-project.py
+
+      - name: Build and test iOS 26 host
+        run: bash scripts/test-ios.sh
+
   # Add Android Gradle jobs only when the Android phase starts.

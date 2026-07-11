@@ -1,0 +1,39 @@
+{
+  "adapter": "native",
+  "protocolVersion": "1.0.0",
+  "observedAt": "2026-07-11T10:00:00.000Z",
+  "limits": { "maxAssetBytes": 52428800, "maxJsonBytes": 65536, "requestTimeoutMs": 15000 },
+  "capabilities": {
+    "system": { "availability": "supported", "permission": "granted", "supportsBackground": false },
+    "permissions": { "availability": "supported", "permission": "granted", "supportsBackground": false },
+    "location": { "availability": "supported", "permission": "granted", "supportsBackground": false },
+    "heading": { "availability": "supported", "permission": "granted", "supportsBackground": false },
+    "attitude": {
+      "availability": "supported",
+      "permission": "granted",
+      "supportsBackground": false,
+      "requiresForeground": true
+    },
+    "tracking": { "availability": "supported", "permission": "granted", "supportsBackground": true },
+    "connectivity": { "availability": "supported", "permission": "granted", "supportsBackground": false },
+    "media": {
+      "availability": "supported",
+      "permission": "limited",
+      "supportsBackground": false,
+      "requiresForeground": true
+    },
+    "shares": { "availability": "supported", "permission": "granted", "supportsBackground": true },
+    "notifications": {
+      "availability": "temporarilyUnavailable",
+      "permission": "notDetermined",
+      "supportsBackground": true,
+      "limitations": ["Remote registration ticket is not available"]
+    },
+    "relay": {
+      "availability": "experimental",
+      "permission": "notDetermined",
+      "supportsBackground": false,
+      "requiresForeground": true
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "sessionId": "50000000-0000-4000-8000-000000000001",
+  "state": "active",
+  "startedAt": "2026-07-11T09:55:00.000Z",
+  "updatedAt": "2026-07-11T10:00:02.000Z",
+  "stoppedAt": null,
+  "supportsBackground": true,
+  "sampleCount": 61,
+  "lastSampleAt": "2026-07-11T10:00:02.000Z",
+  "degradedReason": null
+}

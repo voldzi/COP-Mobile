@@ -1,0 +1,32 @@
+{
+  "contractVersion": "1.0.0",
+  "cases": [
+    { "file": "valid/bridge-hello.json", "schema": "bridge-handshake.schema.json", "valid": true },
+    { "file": "valid/bridge-request.json", "schema": "bridge-request.schema.json", "valid": true },
+    { "file": "valid/bridge-response.json", "schema": "bridge-response.schema.json", "valid": true },
+    { "file": "valid/bridge-event.json", "schema": "bridge-event.schema.json", "valid": true },
+    { "file": "valid/device-capabilities.json", "schema": "device-capabilities.schema.json", "valid": true },
+    { "file": "valid/location-sample.json", "schema": "location-sample.schema.json", "valid": true },
+    { "file": "valid/heading-sample.json", "schema": "heading-sample.schema.json", "valid": true },
+    { "file": "valid/attitude-sample.json", "schema": "attitude-sample.schema.json", "valid": true },
+    { "file": "valid/tracking-session.json", "schema": "tracking-session.schema.json", "valid": true },
+    { "file": "valid/tracking-sample-page.json", "schema": "tracking-sample-page.schema.json", "valid": true },
+    { "file": "valid/native-asset-ref.json", "schema": "native-asset-ref.schema.json", "valid": true },
+    { "file": "valid/share-item.json", "schema": "share-item.schema.json", "valid": true },
+    { "file": "valid/notification-state.json", "schema": "notification-state.schema.json", "valid": true },
+    { "file": "invalid/bridge-request-missing-session.json", "schema": "bridge-request.schema.json", "valid": false },
+    { "file": "invalid/bridge-response-ambiguous.json", "schema": "bridge-response.schema.json", "valid": false },
+    {
+      "file": "invalid/device-capabilities-missing-relay.json",
+      "schema": "device-capabilities.schema.json",
+      "valid": false
+    },
+    { "file": "invalid/location-out-of-range.json", "schema": "location-sample.schema.json", "valid": false },
+    { "file": "invalid/native-asset-path.json", "schema": "native-asset-ref.schema.json", "valid": false },
+    {
+      "file": "invalid/notification-state-extra-token.json",
+      "schema": "notification-state.schema.json",
+      "valid": false
+    }
+  ]
+}

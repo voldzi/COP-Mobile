@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cop.local/device/v1/share-item.schema.json",
+  "title": "COP Device Share Inbox Item",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["shareId", "receivedAt", "state", "asset"],
+  "properties": {
+    "shareId": { "$ref": "common.schema.json#/$defs/uuid" },
+    "receivedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "state": { "enum": ["available", "claimed", "discarded", "expired"] },
+    "asset": { "$ref": "native-asset-ref.schema.json" },
+    "sourceApplication": { "type": ["string", "null"], "maxLength": 255 }
+  }
+}

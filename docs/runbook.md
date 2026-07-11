@@ -2,10 +2,23 @@
 
 ## Použití
 
-V současné fázi lze řešit pouze chyby skeletonu a dokumentace. Runtime kroky
-níže jsou závazný návrh pro budoucí iOS 26 host a musí být doplněny skutečnými
-názvy buildů/panelů současně s implementací. Nikdy nemažte WebKit/Matrix nebo
-native data jako první diagnostický krok.
+Fáze 2 má spustitelný feasibility host a níže uvedené WebView/bridge kroky jsou
+aktuální. Senzory, tracking, Share Extension a push části zůstávají budoucím
+runbookem. Nikdy nemažte WebKit/Matrix nebo native data jako první diagnostický
+krok.
+
+## iOS build nebo test selže
+
+1. Spusťte `python3 scripts/validate-device-contract.py` a
+   `python3 scripts/validate-ios-project.py`.
+2. Vygenerujte projekt znovu přes `cd apps/ios && xcodegen generate`; ruční
+   změny `.xcodeproj` nejsou zdroj pravdy.
+3. Spusťte `bash scripts/test-ios.sh`. Skript vybere dostupný iOS 26 iPhone
+   simulátor nebo respektuje `COP_IOS_SIMULATOR_ID`.
+4. Pro release/CI spusťte `bash scripts/verify-stable-apple-toolchain.sh`.
+   Lokální Xcode 27 beta má selhat; neobcházejte gate změnou major verze.
+5. Zkontrolujte `docs/implementation-report-phase-2.md` a nerozšiřujte
+   simulátorový výsledek na fyzický, OIDC nebo offline důkaz.
 
 ## Skeleton validation selže
 

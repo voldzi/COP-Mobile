@@ -12,16 +12,18 @@ repozitáři nevzniká `openapi/openapi.json`. Aplikace:
 3. jako nativní klient volá pouze úzce vymezené technické endpointy, například
    registraci APNs zařízení u CSM Messaging.
 
-Ve fázi 0 nejsou zde popsané bridge metody implementovány.
+Ve fázi 2 je implementován handshake protokolu `1.0.0` a read-only
+`system.getCapabilities`. Ostatní namespace host vrací jako `unsupported`;
+jejich popis níže je cílový kontrakt, nikoli tvrzení o hotové funkci.
 
 ## Autorita kontraktů
 
 | Kontrakt | Autoritativní umístění | Spotřebitel |
 | --- | --- | --- |
 | COP REST API | `01 COP/openapi/openapi.json` | COP web; výjimečně nativní technická služba |
-| COP Device JSON Schema | plánované `01 COP/packages/cop-device-contract` | web, iOS, později Android |
-| TypeScript `CopDevice` SDK | plánované `01 COP/packages/cop-device-sdk` | COP web a browser/mock adapter |
-| Bridge contract fixtures | plánovaný contract package v `01 COP` | TypeScript, Swift a Kotlin CI |
+| COP Device JSON Schema | `01 COP/packages/cop-device-contract` | web, iOS, později Android |
+| TypeScript `CopDevice` SDK | `01 COP/packages/cop-device-sdk` | COP web a browser/mock adapter |
+| Bridge contract fixtures | contract package v `01 COP`; zde připnutý artifact `1.0.0` | TypeScript, Swift a Kotlin CI |
 | CSM Messaging REST | autoritativní OpenAPI služby CSM Messaging | native push registrace |
 
 Mobilní repozitář nesmí ručně založit konkurenční „master“ kopii TypeScript
