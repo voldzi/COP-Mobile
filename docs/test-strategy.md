@@ -79,7 +79,8 @@ Minimální společná sada:
 - validní push deep link a route s nepovoleným originem;
 - `communications.openChat` pouze s prázdným payloadem;
 - `calls.updatePresentation` pro všechny direction/phase hodnoty, bounded ID a
-  title, foreground a povolené state transitions, plus odmítnutí SDP/ICE,
+  title, direct/group kind, bounded participant/eligible seznam, foreground a
+  povolené state transitions, plus odmítnutí SDP/ICE,
   tokenu, druhé aktivní identity, překročení procesní kvóty a neznámého pole;
 - malformed JSON, neznámá metoda, neznámé pole, příliš velký request a timeout;
 - event sequence v pořadí, mezera v sequence, duplicita a event staré session;
@@ -225,6 +226,9 @@ Modely, OS buildy a fyzická dostupnost se evidují v implementačním reportu.
   idempotence a serverové potvrzení bez dvojité zprávy;
 - incoming i outgoing hovor přes Wi-Fi a mobilní síť, TURN relay, změna sítě,
   Bluetooth připojení/odpojení, audio interruption a zamčená obrazovka;
+- skupinový start z nativního detailu, postupné přizvání alespoň dvou dalších
+  členů, obousměrný zvuk mezi všemi účastníky, serverové odmítnutí identity mimo
+  místnost a UI/server limit šesti osob;
 - PushKit → CallKit při foreground, background a system-terminated procesu;
 - pokračování obousměrného zvuku po lock/background pouze během aktivní
   CallKit session a jeho zastavení po end/failure;

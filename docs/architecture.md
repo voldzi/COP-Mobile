@@ -106,6 +106,10 @@ autentizované kontrakty a vlastní svůj oddělený nativní OIDC/Matrix lifecy
 9. **Staged call ownership.** Native vlastní CallKit, SwiftUI prezentaci,
    proximity a audio routing. Dokud neprojde native-WebRTC gate, web vlastní
    Matrix call signalizaci a WebRTC média.
+10. **Bounded group calls.** Nativní chat může spustit a aktivní call view
+    rozšířit Matrix skupinový hovor, ale přes bridge teče jen bounded participant
+    metadata a opaque action. Web vlastní encrypted peer mesh s limitem šesti
+    účastníků a server je autoritou pro členství cílových identit.
 
 ## Hlavní komponenty
 
@@ -211,6 +215,9 @@ politiky. Critical Alerts vyžadují Apple entitlement. Podle ADR 0009 PushKit
 probudí host, CallKit a SwiftUI převezmou systémovou prezentaci a proximity;
 Matrix `matrix-js-sdk` ve WebView přechodně vlastní signalizaci a WebRTC média.
 Bridge zrcadlí pouze bounded presentation state, nikdy SDP/ICE nebo credentials.
+U skupinového hovoru obsahuje presentation pouze typ hovoru a jméno/user ID/
+connected flag členů. `start` a `addParticipants` se vracejí jako spolehlivé
+opaque akce; cílové členství ověřuje web a COP API, nikoli SwiftUI seznam.
 Call action vzniklá před bridge handshake se drží v omezené paměťové frontě;
 každý povel má stabilní `actionId`, native jej do bounded timeoutu opakuje a
 CallKit action splní až po Matrix ACK vedeném zpět přes chat, host a Device
@@ -261,7 +268,7 @@ milníku před implementací příslušné služby.
 | --- | --- | --- |
 | COP web/PWA | mapa, hlášení, vrstvy a business workflow; přechodný Matrix/WebRTC call engine | repozitář `01 COP` |
 | COP API | doménová data, pairing, device audit, snapshot, attachments, mesh gateway | `01 COP/openapi/openapi.json` |
-| `CSMCommunicationKit` | nativní chat UI, OIDC/Keychain, Matrix Rust E2EE a offline communication state | GitHub Swift Package `voldzi/CSM-messenger`, exact revision `9246d533ca42f9609bbfe698de49f986d8a478ff` + ADR 0009 |
+| `CSMCommunicationKit` | nativní chat UI, OIDC/Keychain, Matrix Rust E2EE, offline communication state a metadata-only voice-call launch callback | GitHub Swift Package `voldzi/CSM-messenger`, exact revision `ad26c3fbdabd452b223311f9fcc28b57be2f7fe9` + ADR 0009 |
 | Keycloak | oddělené OIDC relace pro web a veřejný nativní PKCE klient | konfigurace a runbooky `01 COP` |
 | CSM Messaging / Matrix | APNs registry, push, conversation metadata, Matrix bootstrap a E2EE transport | kontrakt služby CSM Messaging/Matrix |
 | APNs | systémové doručení notifikací | Apple capability/provisioning |

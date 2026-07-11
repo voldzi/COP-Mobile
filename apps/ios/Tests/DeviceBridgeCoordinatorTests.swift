@@ -259,9 +259,12 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
   }
 
   func testCallPresentationAcceptsOnlyBoundedStateWithoutMediaPayload() async throws {
-    var updates: [(String, String, String?, String, String)] = []
+    var updates: [(
+      String, String, String?, String, String, VoiceCallKind, [VoiceCallParticipant],
+      [VoiceCallParticipant]
+    )] = []
     let bridge = try makeBridge(updateCallPresentation: {
-      updates.append(($0, $1, $2, $3, $4))
+      updates.append(($0, $1, $2, $3, $4, $5, $6, $7))
       return true
     })
     bridge.navigationDidCommit(url: productionURL)
@@ -274,7 +277,13 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
         sessionID: sessionID,
         params: [
           "callId": "call-1", "roomId": "!ops:example.cz", "title": "COP Operator",
-          "direction": "incoming", "phase": "connected",
+          "direction": "incoming", "phase": "connected", "kind": "group",
+          "participants": [
+            ["userId": "@alice:example.cz", "displayName": "Alice", "connected": true]
+          ],
+          "eligibleParticipants": [
+            ["userId": "@bob:example.cz", "displayName": "Bob", "connected": false]
+          ],
         ]),
       context: allowedContext())
 
@@ -282,6 +291,9 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     XCTAssertEqual(updates.count, 1)
     XCTAssertEqual(updates.first?.0, "call-1")
     XCTAssertEqual(updates.first?.4, "connected")
+    XCTAssertEqual(updates.first?.5, .group)
+    XCTAssertEqual(updates.first?.6.first?.userID, "@alice:example.cz")
+    XCTAssertEqual(updates.first?.7.first?.userID, "@bob:example.cz")
 
     let rejected = await bridge.handle(
       message: request(
@@ -301,7 +313,7 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     var invalidations = 0
     let bridge = try makeBridge(
       isForeground: { false },
-      updateCallPresentation: { _, _, _, _, _ in
+      updateCallPresentation: { _, _, _, _, _, _, _, _ in
         updates += 1
         return true
       },
@@ -328,7 +340,7 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
   }
 
   func testCallPresentationRateLimitSurvivesBridgeRehandshake() async throws {
-    let bridge = try makeBridge(updateCallPresentation: { _, _, _, _, _ in true })
+    let bridge = try makeBridge(updateCallPresentation: { _, _, _, _, _, _, _, _ in true })
     bridge.navigationDidCommit(url: productionURL)
     var ready = await bridge.handle(message: hello(), context: allowedContext())
     var sessionID = try XCTUnwrap(ready["sessionId"] as? String)
@@ -367,8 +379,11 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     notifications: PushNotificationProviding? = nil,
     isForeground: @escaping () -> Bool = { true },
     openNativeChat: @escaping () -> Void = {},
-    updateCallPresentation: @escaping (String, String, String?, String, String) -> Bool = {
-      _, _, _, _, _ in true
+    updateCallPresentation: @escaping (
+      String, String, String?, String, String, VoiceCallKind, [VoiceCallParticipant],
+      [VoiceCallParticipant]
+    ) -> Bool = {
+      _, _, _, _, _, _, _, _ in true
     },
     acknowledgeCallAction: @escaping (String, String, String, String) -> Bool = {
       _, _, _, _ in false

@@ -33,12 +33,18 @@ struct RootView: View {
           )
         }
 
-        if model.phase == .webContent, model.surface == .cop {
-          NativeChatLauncher(action: model.openNativeChat)
-        }
-
         if model.surface == .chat {
-          CSMCommunicationHost(onClose: model.closeNativeChat)
+          CSMCommunicationHost(
+            onClose: model.closeNativeChat,
+            onStartVoiceCall: { roomID, title, isGroup in
+              model.closeNativeChat()
+              VoiceCallService.shared.startVoiceCall(
+                roomID: roomID,
+                title: title,
+                isGroup: isGroup
+              )
+            }
+          )
             .background(Color(.systemBackground))
             .transition(.move(edge: .trailing).combined(with: .opacity))
             .zIndex(50)
@@ -65,31 +71,6 @@ struct RootView: View {
         retry: nil
       )
     }
-  }
-}
-
-private struct NativeChatLauncher: View {
-  let action: () -> Void
-
-  var body: some View {
-    VStack {
-      Spacer()
-      HStack {
-        Button(action: action) {
-          Label("Nativní chat", systemImage: "bubble.left.and.bubble.right.fill")
-            .font(.subheadline.weight(.semibold))
-            .padding(.horizontal, 14)
-            .frame(height: 48)
-        }
-        .buttonStyle(.glassProminent)
-        .tint(Color(red: 0.08, green: 0.46, blue: 0.38))
-        .accessibilityIdentifier("nativeChat.open")
-        Spacer()
-      }
-      .padding(.horizontal, 18)
-      .padding(.bottom, 88)
-    }
-    .allowsHitTesting(true)
   }
 }
 

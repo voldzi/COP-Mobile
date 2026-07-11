@@ -28,6 +28,19 @@ enum VoiceCallPhase: String, Equatable, Sendable {
   }
 }
 
+enum VoiceCallKind: String, Equatable, Sendable {
+  case direct
+  case group
+}
+
+struct VoiceCallParticipant: Equatable, Identifiable, Sendable {
+  let userID: String
+  let displayName: String
+  let connected: Bool
+
+  var id: String { userID }
+}
+
 private enum VoiceCallOwnership {
   case pushAwaitingWebMedia
   case webMedia
@@ -39,6 +52,9 @@ struct VoiceCallPresentation: Equatable, Identifiable, Sendable {
   let roomID: String
   let title: String
   let direction: VoiceCallDirection
+  let eligibleParticipants: [VoiceCallParticipant]
+  let kind: VoiceCallKind
+  let participants: [VoiceCallParticipant]
   let phase: VoiceCallPhase
   let connectedAt: Date?
 }
@@ -97,6 +113,7 @@ final class VoiceCallService:
     case answer
     case end
     case mute
+    case addParticipants
     case reject
     case resetEnd
 
@@ -105,6 +122,7 @@ final class VoiceCallService:
       case .answer: "calls.answerRequested"
       case .end, .resetEnd: "calls.endRequested"
       case .mute: "calls.muteRequested"
+      case .addParticipants: "calls.addParticipantsRequested"
       case .reject: "calls.rejectRequested"
       }
     }
@@ -119,6 +137,7 @@ final class VoiceCallService:
     let kind: ReliableActionKind
     let callKitAction: CXAction?
     let muted: Bool?
+    let participantUserIDs: [String]?
   }
 
   private struct CallContext {
@@ -126,6 +145,9 @@ final class VoiceCallService:
     let roomID: String
     var title: String
     var direction: VoiceCallDirection
+    var eligibleParticipants: [VoiceCallParticipant]
+    var kind: VoiceCallKind
+    var participants: [VoiceCallParticipant]
     var phase: VoiceCallPhase
     var answered: Bool
     var muted: Bool
@@ -236,7 +258,10 @@ final class VoiceCallService:
       roomId: roomID,
       title: title ?? "COP kontakt",
       direction: direction,
-      phase: phase
+      phase: phase,
+      kind: .direct,
+      participants: [],
+      eligibleParticipants: []
     )
   }
 
@@ -246,7 +271,10 @@ final class VoiceCallService:
     roomId: String,
     title: String,
     direction: String,
-    phase: String
+    phase: String,
+    kind: VoiceCallKind = .direct,
+    participants: [VoiceCallParticipant] = [],
+    eligibleParticipants: [VoiceCallParticipant] = []
   ) -> Bool {
     guard let normalizedCallID = boundedString(callId),
       let normalizedRoomID = boundedString(roomId),
@@ -276,6 +304,9 @@ final class VoiceCallService:
         roomID: normalizedRoomID,
         title: normalizedTitle,
         direction: parsedDirection,
+        eligibleParticipants: eligibleParticipants,
+        kind: kind,
+        participants: participants,
         phase: parsedPhase,
         answered: parsedPhase == .connected,
         muted: false,
@@ -285,6 +316,9 @@ final class VoiceCallService:
       )
     call.title = normalizedTitle
     call.direction = parsedDirection
+    call.eligibleParticipants = eligibleParticipants
+    call.kind = kind
+    call.participants = participants
     call.phase = parsedPhase
     call.ownership = .webMedia
     if parsedPhase == .connected {
@@ -369,6 +403,8 @@ final class VoiceCallService:
         calls[pending.callUUID] = call
         presentation.setMuted(muted)
       }
+    case .addParticipants:
+      break
     case .end, .reject:
       removeCall(pending.callUUID)
     case .resetEnd:
@@ -407,6 +443,41 @@ final class VoiceCallService:
     } catch {
       updateAudioRoute(using: session)
     }
+  }
+
+  func addParticipants(_ participantUserIDs: [String]) {
+    guard let call = presentation.activeCall,
+      call.kind == .group,
+      call.phase == .connected,
+      let context = calls[call.id]
+    else { return }
+    let eligible = Set(context.eligibleParticipants.map(\.userID))
+    let selected = Array(Set(participantUserIDs)).filter(eligible.contains).prefix(5)
+    guard !selected.isEmpty else { return }
+    queueReliableAction(
+      kind: .addParticipants,
+      uuid: call.id,
+      call: context,
+      callKitAction: nil,
+      participantUserIDs: Array(selected)
+    )
+  }
+
+  func startVoiceCall(roomID: String, title: String, isGroup: Bool) {
+    guard presentation.activeCall == nil,
+      let roomID = boundedString(roomID),
+      let title = boundedString(title)
+    else { return }
+    eventReceiver?(
+      "calls.startRequested",
+      [
+        "actionId": UUID().uuidString.lowercased(),
+        "callId": "start-\(UUID().uuidString.lowercased())",
+        "kind": isGroup ? "group" : "direct",
+        "roomId": roomID,
+        "title": title,
+      ]
+    )
   }
 
   func pushRegistry(
@@ -471,6 +542,9 @@ final class VoiceCallService:
       roomID: roomID,
       title: caller,
       direction: .incoming,
+      eligibleParticipants: [],
+      kind: .direct,
+      participants: [],
       phase: .ringing,
       answered: false,
       muted: false,
@@ -688,6 +762,9 @@ final class VoiceCallService:
         roomID: call.roomID,
         title: call.title,
         direction: call.direction,
+        eligibleParticipants: call.eligibleParticipants,
+        kind: call.kind,
+        participants: call.participants,
         phase: call.phase,
         connectedAt: call.connectedAt
       ),
@@ -714,6 +791,8 @@ final class VoiceCallService:
       switch pending.kind {
       case .end, .reject, .resetEnd:
         pending.callKitAction?.fulfill()
+      case .addParticipants:
+        break
       case .answer, .mute:
         pending.callKitAction?.fail()
       }
@@ -738,10 +817,12 @@ final class VoiceCallService:
     uuid: UUID,
     call: CallContext,
     callKitAction: CXAction?,
-    muted: Bool? = nil
+    muted: Bool? = nil,
+    participantUserIDs: [String]? = nil
   ) {
     if pendingCallActions.values.contains(where: {
-      $0.callUUID == uuid && $0.kind.eventType == kind.eventType && $0.callKitAction != nil
+      $0.callUUID == uuid && $0.kind.eventType == kind.eventType
+        && ($0.callKitAction != nil || kind == .addParticipants)
     }) {
       callKitAction?.fail()
       return
@@ -755,7 +836,8 @@ final class VoiceCallService:
       deadline: Date().addingTimeInterval(Self.actionAcknowledgementTimeout),
       kind: kind,
       callKitAction: callKitAction,
-      muted: muted
+      muted: muted,
+      participantUserIDs: participantUserIDs
     )
     pendingCallActions[actionID] = pending
     emit(pending)
@@ -783,6 +865,8 @@ final class VoiceCallService:
       switch pending.kind {
       case .end, .reject, .resetEnd:
         pending.callKitAction?.fulfill()
+      case .addParticipants:
+        break
       case .answer, .mute:
         pending.callKitAction?.fail()
       }
@@ -792,6 +876,9 @@ final class VoiceCallService:
   private func resolveFailedAction(actionID: String, pending: PendingCallAction) {
     pendingCallActionTasks.removeValue(forKey: actionID)?.cancel()
     pendingCallActions.removeValue(forKey: actionID)
+    if pending.kind == .addParticipants {
+      return
+    }
     requestWebMediaInvalidation()
     if calls[pending.callUUID] != nil {
       provider.reportCall(with: pending.callUUID, endedAt: Date(), reason: .failed)
@@ -801,6 +888,8 @@ final class VoiceCallService:
     switch pending.kind {
     case .end, .reject, .resetEnd:
       pending.callKitAction?.fulfill()
+    case .addParticipants:
+      break
     case .answer, .mute:
       pending.callKitAction?.fail()
     }
@@ -814,6 +903,9 @@ final class VoiceCallService:
     ]
     if let muted = pending.muted {
       payload["muted"] = muted
+    }
+    if let participantUserIDs = pending.participantUserIDs {
+      payload["participantUserIds"] = participantUserIDs
     }
     eventReceiver?(
       pending.kind.eventType,

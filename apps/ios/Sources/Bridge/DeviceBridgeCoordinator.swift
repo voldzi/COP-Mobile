@@ -21,7 +21,10 @@ final class DeviceBridgeCoordinator {
   private let notifications: PushNotificationProviding
   private let isForeground: () -> Bool
   private let openNativeChat: () -> Void
-  private let updateCallPresentation: (String, String, String?, String, String) -> Bool
+  private let updateCallPresentation: (
+    String, String, String?, String, String, VoiceCallKind, [VoiceCallParticipant],
+    [VoiceCallParticipant]
+  ) -> Bool
   private let acknowledgeCallAction: (String, String, String, String) -> Bool
   private let invalidateCallPresentation: () -> Void
   var eventSink: (([String: Any]) -> Void)?
@@ -45,14 +48,20 @@ final class DeviceBridgeCoordinator {
     notifications: PushNotificationProviding = PushNotificationService.shared,
     isForeground: @escaping () -> Bool = { UIApplication.shared.applicationState == .active },
     openNativeChat: @escaping () -> Void = {},
-    updateCallPresentation: @escaping (String, String, String?, String, String) -> Bool = {
-      callID, roomID, title, direction, phase in
+    updateCallPresentation: @escaping (
+      String, String, String?, String, String, VoiceCallKind, [VoiceCallParticipant],
+      [VoiceCallParticipant]
+    ) -> Bool = {
+      callID, roomID, title, direction, phase, kind, participants, eligibleParticipants in
       VoiceCallService.shared.updateFromWeb(
-        callID: callID,
-        roomID: roomID,
-        title: title,
+        callId: callID,
+        roomId: roomID,
+        title: title ?? "COP kontakt",
         direction: direction,
-        phase: phase
+        phase: phase,
+        kind: kind,
+        participants: participants,
+        eligibleParticipants: eligibleParticipants
       )
     },
     acknowledgeCallAction: @escaping (String, String, String, String) -> Bool = {
@@ -325,20 +334,28 @@ final class DeviceBridgeCoordinator {
       openNativeChat()
       return ["opened": true]
     case "calls.updatePresentation":
-      guard Set(params.keys).isSubset(of: ["callId", "direction", "phase", "roomId", "title"]),
+      guard Set(params.keys).isSubset(of: [
+        "callId", "direction", "eligibleParticipants", "kind", "participants", "phase",
+        "roomId", "title",
+      ]),
         let callID = boundedBridgeString(params["callId"], maximum: 512),
         let roomID = boundedBridgeString(params["roomId"], maximum: 512),
         let direction = params["direction"] as? String,
         ["incoming", "outgoing"].contains(direction),
         let phase = params["phase"] as? String,
-        ["ringing", "connecting", "connected", "ended", "failed"].contains(phase)
+        ["ringing", "connecting", "connected", "ended", "failed"].contains(phase),
+        let kind = VoiceCallKind(rawValue: params["kind"] as? String ?? "direct"),
+        let participants = boundedVoiceCallParticipants(params["participants"]),
+        let eligibleParticipants = boundedVoiceCallParticipants(params["eligibleParticipants"])
       else { throw DeviceLocationError.invalidSample }
       if phase != "ended" && phase != "failed" {
         guard isForeground() else { throw BridgeExecutionError.notForeground }
       }
       try consumeCallPresentationQuota(callID: callID, roomID: roomID)
       let title = boundedBridgeString(params["title"], maximum: 180)
-      guard updateCallPresentation(callID, roomID, title, direction, phase) else {
+      guard updateCallPresentation(
+        callID, roomID, title, direction, phase, kind, participants, eligibleParticipants
+      ) else {
         throw DeviceLocationError.invalidSample
       }
       return ["updated": true]
@@ -368,6 +385,25 @@ final class DeviceBridgeCoordinator {
     guard let value = value as? String else { return nil }
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty || trimmed.count > maximum ? nil : trimmed
+  }
+
+  private func boundedVoiceCallParticipants(_ value: Any?) -> [VoiceCallParticipant]? {
+    guard let value else { return [] }
+    guard let items = value as? [[String: Any]], items.count <= 20 else { return nil }
+    var participants: [VoiceCallParticipant] = []
+    var seen = Set<String>()
+    for item in items {
+      guard Set(item.keys) == ["connected", "displayName", "userId"],
+        let userID = boundedBridgeString(item["userId"], maximum: 160),
+        let displayName = boundedBridgeString(item["displayName"], maximum: 180),
+        let connected = item["connected"] as? Bool,
+        seen.insert(userID).inserted
+      else { return nil }
+      participants.append(
+        VoiceCallParticipant(userID: userID, displayName: displayName, connected: connected)
+      )
+    }
+    return participants
   }
 
   private func consumeCallPresentationQuota(callID: String, roomID: String) throws {

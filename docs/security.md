@@ -137,6 +137,11 @@ XSS ochrany.
   potvrzeného media enginu a `ended`/`failed` musí vždy vyčistit CallKit. Bridge
   povolí nejvýše 40 presentation aktualizací za minutu a čtyři nové call
   identity za pět minut v jednom procesu.
+- Skupinový call bridge přijímá pouze bounded `direct`/`group` kind a participant
+  presentation bez SDP, ICE, tokenů nebo Matrix eventů. `addParticipants` nese
+  nejvýše pět unikátních user ID, která pocházejí z aktuálního eligible seznamu;
+  COP API přesto každou identitu znovu ověřuje vůči aktivnímu členství v místnosti.
+  Webový E2EE peer mesh je omezen na šest osob.
 - CallKit user action používá náhodné stabilní `actionId`, bounded retry a
   identity-bound ACK. Native akci nefulfilluje na základě pouhého doručení do
   JavaScriptu; vyžaduje úspěšné dokončení Matrix commandu a při timeoutu nebo

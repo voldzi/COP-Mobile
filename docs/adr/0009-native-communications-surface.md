@@ -74,6 +74,12 @@ signalizace, ICE/TURN a médií a neúměrně zvýšilo riziko.
     Záporný ACK, nativní timeout i CallKit `timedOutPerforming` vynutí reload
     webového media enginu, report/remove call a deaktivaci audia. Teprve po
     forced close se `end`/`reject` může fulfillnout; `answer`/`mute` failuje.
+11. Skupinový hlasový hovor se zahajuje z nativního detailu skupiny a v aktivním
+    call view lze přes `+` postupně přizvat další aktivní členy místnosti. Native
+    přenáší pouze `group` kind, bounded participant presentation a opaque
+    `start`/`addParticipants` action; webový Matrix `GroupCall` zůstává jediným
+    vlastníkem E2EE signalizace a médií. Peer mesh je omezen na šest účastníků.
+    Server znovu ověřuje každého cílového uživatele vůči členství v místnosti.
 
 ## Superseded scope
 
@@ -135,6 +141,8 @@ signalizace, ICE/TURN a médií a neúměrně zvýšilo riziko.
 - příchozí i odchozí hovor, connecting/connected/failed/ended, mute, speaker,
   Bluetooth, interruption, proximity blackout, zamčený telefon, background a
   system-terminated start;
+- skupinový start z nativního chatu, postupné přizvání, odmítnutí uživatele mimo
+  místnost, limit šest osob a pokračování hovoru po lokálním odchodu jednoho člena;
 - důkaz, že přechodná média stále tečou webovým WebRTC enginem a že native UI
   nikdy neprohlašuje `connected` bez potvrzeného stavu enginu;
 - samostatný release blocker pro plně nativní WebRTC; existence call view tento

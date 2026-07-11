@@ -307,7 +307,11 @@ Nevytváří session, nepřijímá room ID a neposílá do webu chatový stav.
 - bounded opaque `callId` a `roomId`;
 - volitelný bounded display `title`;
 - `direction`: `incoming` nebo `outgoing`;
-- `phase`: `ringing`, `connecting`, `connected`, `ended` nebo `failed`.
+- `phase`: `ringing`, `connecting`, `connected`, `ended` nebo `failed`;
+- volitelný `kind`: `direct` nebo `group`;
+- pro skupinový hovor nejvýše 20 bounded presentation záznamů v
+  `participants`/`eligibleParticipants`, každý pouze s `userId`, display name a
+  boolean `connected`.
 
 Neterminální update je povolen jen aktivní aplikaci, pro nejvýše jednu call
 identity a po validním stavovém přechodu. `ended`/`failed` může pouze uklidit
@@ -330,6 +334,14 @@ invalidaci a reload webového media enginu, ukončení presentation a deaktivaci
 audio session. `answer`/`mute` v této větvi failnou; `end`/`reject` lze fulfillnout
 až po tomto nuceném lokálním uzavření. Remote `ended` zruší všechny čekající
 akce stejného call UUID, aby pozdější retry nemohl hovor obnovit.
+
+Nativní detail konverzace může vyslat `calls.startRequested` s opaque call/room
+ID a `kind`. Aktivní skupinový call view může vyslat
+`calls.addParticipantsRequested` s nejvýše pěti unikátními Matrix user ID z
+aktuálního `eligibleParticipants`. Obě akce používají stabilní `actionId` a
+bounded delivery; `addParticipants` navíc používá ACK/retry model aktivního
+hovoru. Seznam v UI není autorizační rozhodnutí: web a COP API musí členství
+znovu ověřit před odesláním cíleného VoIP wake.
 
 Metoda řídí pouze nativní presentation state. SDP, ICE candidates, TURN
 credentials, media tracks, Matrix access token ani celý Matrix event jsou

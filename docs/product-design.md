@@ -102,6 +102,7 @@ MVP neobsahuje:
 | První otevření nativního chatu | Tlačítko Chat nebo `communications.openChat` | Otevře se SwiftUI chat; bez nativní session proběhne OIDC/PKCE login a Matrix bootstrap | Cancel/denied/network chyba ponechá web COP funkční a nevystaví token diagnostice |
 | Nativní E2EE zpráva | Composer v konverzaci | Zpráva vstoupí do encrypted outboxu, Matrix ji odešle a UI rozliší pending/sent/failed | Offline položka zůstane lokálně, retry nevytvoří duplicitní serverový event |
 | Příchozí hovor | VoIP push nebo aktivní Matrix invite | CallKit okamžitě oznámí skutečný hovor a SwiftUI zobrazí ringing/connecting/connected | Expirovaný/ukončený hovor se zavře; presentation nikdy nepředstírá media connection |
+| Skupinový hovor | Telefon v detailu skupiny nebo `+` v aktivním hovoru | Uživatel zahájí hovor a v elegantním nativním pickeru postupně přizve dostupné členy; stav ukazuje počet připojených | Připojený či nečlenský uživatel se nenabídne/nepřijme; po dosažení šesti osob se přidávání skryje |
 | Hovor u ucha | Connected hovor se sluchátkovou routou | Proximity senzor zčerná povrch a blokuje náhodné tapy; po oddálení obnoví ovládání | Po ukončení se monitoring vždy vypne; Bluetooth/speaker nepoužívají falešný blackout |
 | Opakovaný offline start | Ikona CSM, bez sítě | Do 3 s se zobrazí cached web shell a pravdivý stav `OFFLINE_CACHED` | Poškozená/nekompatibilní cache přejde na lokální fallback, nikoli na prázdný WebView |
 | Čerstvá instalace offline | Ikona CSM, bez předchozího startu | Lokální obrazovka vysvětlí, že COP ještě nebyl stažen, ukáže konektivitu a Retry | Není dostupný nativní report formulář; nevzniká falešné „odesláno“ |
@@ -118,7 +119,7 @@ MVP neobsahuje:
 | --- | --- | --- | --- |
 | COP WebView | Mapa, hlášení, vrstvy, webový login a business workflow; přechodně call media engine | COP web | Nativní host neupravuje význam business stavů ani WebRTC connection state |
 | Nativní chat | Seznam, konverzace, composer, E2EE/offline stav a komunikační nastavení | `CSMCommunicationKit` | Vlastní OIDC/Matrix session; žádný token nebo decrypted payload přes bridge |
-| Aktivní hovor | Příchozí/odchozí full-screen UI, status, duration, mute, route a end | CSM native + CallKit | Web zrcadlí pouze bounded state; do dalšího gate vlastní média webový engine |
+| Aktivní hovor | Příchozí/odchozí full-screen UI, status, duration, mute, route, přizvání člena a end | CSM native + CallKit | Web zrcadlí pouze bounded state; do dalšího gate vlastní média webový engine; skupina má limit šest osob |
 | Proximity blackout | Ochrana obrazovky a dotyků při connected handset hovoru | iOS sensor + CSM native | Jen po dobu relevantního hovoru; není to auth/presence signál |
 | Launch/loading shell | Bezpečný start a rozlišení loading/offline/error | CSM native | Jen technický stav, žádná doménová data ani navigace COP |
 | Offline fallback | Čerstvý offline start nebo nepoužitelná cache | CSM native | Konektivita, Retry, verze a bezpečná nápověda; bez nativního reportu v MVP |

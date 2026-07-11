@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 struct ActiveCallView: View {
   let service: VoiceCallService
+  @State private var showingParticipantPicker = false
 
   private var state: VoiceCallPresentationState { service.presentation }
 
@@ -37,6 +38,15 @@ struct ActiveCallView: View {
     .animation(.easeInOut(duration: 0.25), value: state.activeCall?.phase)
     .preferredColorScheme(.dark)
     .accessibilityIdentifier("nativeCall.active")
+    .sheet(isPresented: $showingParticipantPicker) {
+      if let call = state.activeCall {
+        CallParticipantPicker(
+          participants: call.eligibleParticipants,
+          maximumSelection: max(0, 6 - call.participants.filter(\.connected).count),
+          onInvite: service.addParticipants
+        )
+      }
+    }
   }
 
   private func callContent(_ call: VoiceCallPresentation) -> some View {
@@ -84,6 +94,13 @@ struct ActiveCallView: View {
       callStatus(call)
         .padding(.top, 10)
 
+      if call.kind == .group {
+        Text(groupParticipantSummary(call))
+          .font(.subheadline.weight(.medium))
+          .foregroundStyle(.white.opacity(0.62))
+          .padding(.top, 8)
+      }
+
       Spacer(minLength: 42)
 
       HStack(spacing: 30) {
@@ -99,6 +116,18 @@ struct ActiveCallView: View {
           selected: state.isSpeakerEnabled,
           action: service.toggleSpeaker
         )
+        if call.kind == .group,
+          call.phase == .connected,
+          !call.eligibleParticipants.isEmpty,
+          call.participants.filter(\.connected).count < 6
+        {
+          CallControlButton(
+            title: "Přidat",
+            systemImage: "person.badge.plus",
+            selected: false,
+            action: { showingParticipantPicker = true }
+          )
+        }
       }
 
       HStack(spacing: 34) {
@@ -160,6 +189,11 @@ struct ActiveCallView: View {
     }
   }
 
+  private func groupParticipantSummary(_ call: VoiceCallPresentation) -> String {
+    let count = max(1, call.participants.filter(\.connected).count)
+    return count == 1 ? "1 účastník" : count < 5 ? "\(count) účastníci" : "\(count) účastníků"
+  }
+
   private func initials(_ title: String) -> String {
     let words = title.split(whereSeparator: { $0.isWhitespace }).prefix(2)
     let value = words.compactMap(\.first).map(String.init).joined()
@@ -174,6 +208,66 @@ struct ActiveCallView: View {
     return hours > 0
       ? String(format: "%d:%02d:%02d", hours, minutes, remainder)
       : String(format: "%02d:%02d", minutes, remainder)
+  }
+}
+
+private struct CallParticipantPicker: View {
+  @Environment(\.dismiss) private var dismiss
+  @State private var selectedUserIDs = Set<String>()
+
+  let participants: [VoiceCallParticipant]
+  let maximumSelection: Int
+  let onInvite: ([String]) -> Void
+
+  var body: some View {
+    NavigationStack {
+      List(participants) { participant in
+        Button {
+          toggle(participant.userID)
+        } label: {
+          HStack(spacing: 12) {
+            Text(initials(participant.displayName))
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(.white)
+              .frame(width: 40, height: 40)
+              .background(Color.accentColor, in: Circle())
+            Text(participant.displayName)
+              .foregroundStyle(.primary)
+            Spacer()
+            Image(systemName: selectedUserIDs.contains(participant.userID) ? "checkmark.circle.fill" : "circle")
+              .foregroundStyle(selectedUserIDs.contains(participant.userID) ? Color.accentColor : .secondary)
+          }
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+      }
+      .navigationTitle("Přidat do hovoru")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Zrušit") { dismiss() }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Pozvat") {
+            onInvite(Array(selectedUserIDs))
+            dismiss()
+          }
+          .disabled(selectedUserIDs.isEmpty)
+        }
+      }
+    }
+    .presentationDetents([.medium, .large])
+  }
+
+  private func toggle(_ userID: String) {
+    if selectedUserIDs.remove(userID) != nil { return }
+    guard selectedUserIDs.count < maximumSelection else { return }
+    selectedUserIDs.insert(userID)
+  }
+
+  private func initials(_ title: String) -> String {
+    let value = title.split(whereSeparator: { $0.isWhitespace }).prefix(2).compactMap(\.first).map(String.init).joined()
+    return value.isEmpty ? "COP" : value.uppercased()
   }
 }
 
