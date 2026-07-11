@@ -1,5 +1,11 @@
 import CryptoKit
 import Foundation
+import UIKit
+
+private enum BridgeExecutionError: Error {
+  case notForeground
+  case unsupported
+}
 
 @MainActor
 final class DeviceBridgeCoordinator {
@@ -10,8 +16,12 @@ final class DeviceBridgeCoordinator {
   }
 
   private let originPolicy: OriginPolicy
+  private let location: DeviceLocationProviding
+  private let isForeground: () -> Bool
+  var eventSink: (([String: Any]) -> Void)?
   private var navigationIsEligible = false
   private var sessionID: String?
+  private var eventSequence = 0
   private struct CachedResponse {
     let requestDigest: String
     let response: [String: Any]
@@ -20,8 +30,14 @@ final class DeviceBridgeCoordinator {
   private var responseCache: [String: CachedResponse] = [:]
   private var responseOrder: [String] = []
 
-  init(originPolicy: OriginPolicy) {
+  init(
+    originPolicy: OriginPolicy,
+    location: DeviceLocationProviding = CoreLocationService(),
+    isForeground: @escaping () -> Bool = { UIApplication.shared.applicationState == .active }
+  ) {
     self.originPolicy = originPolicy
+    self.location = location
+    self.isForeground = isForeground
   }
 
   func navigationDidCommit(url: URL?) {
@@ -30,13 +46,15 @@ final class DeviceBridgeCoordinator {
   }
 
   func invalidateSession() {
+    location.stopAllUpdates()
     navigationIsEligible = false
     sessionID = nil
+    eventSequence = 0
     responseCache.removeAll(keepingCapacity: true)
     responseOrder.removeAll(keepingCapacity: true)
   }
 
-  func handle(message body: Any, context: RequestContext) -> [String: Any] {
+  func handle(message body: Any, context: RequestContext) async -> [String: Any] {
     guard let dictionary = body as? [String: Any],
       JSONSerialization.isValidJSONObject(dictionary),
       let encoded = try? JSONSerialization.data(withJSONObject: dictionary),
@@ -70,7 +88,7 @@ final class DeviceBridgeCoordinator {
     case "hello":
       return handleHello(dictionary)
     case "request":
-      return handleRequest(dictionary, requestDigest: digest(dictionary))
+      return await handleRequest(dictionary, requestDigest: digest(dictionary))
     default:
       return blocked(
         id: messageID(from: dictionary), code: "INVALID_REQUEST",
@@ -110,12 +128,12 @@ final class DeviceBridgeCoordinator {
       "sentAt": timestamp(),
       "selectedVersion": DeviceCapabilities.protocolVersion,
       "sessionId": sessionID,
-      "capabilities": DeviceCapabilities.snapshot(),
+      "capabilities": DeviceCapabilities.snapshot(location: location),
       "limits": DeviceCapabilities.limits(),
     ]
   }
 
-  private func handleRequest(_ message: [String: Any], requestDigest: String) -> [String: Any] {
+  private func handleRequest(_ message: [String: Any], requestDigest: String) async -> [String: Any] {
     let requiredKeys: Set<String> = [
       "kind", "protocolVersion", "id", "sessionId", "method", "sentAt", "params",
     ]
@@ -150,14 +168,14 @@ final class DeviceBridgeCoordinator {
       }
       return cached.response
     }
-    guard method == "system.getCapabilities" else {
+    let result: Any
+    do {
+      result = try await execute(method: method, params: message["params"] as! [String: Any])
+    } catch {
+      let mapped = mapError(error)
       return cache(
-        responseError(
-          id: id, sessionID: requestSessionID, code: "UNSUPPORTED",
-          message: "Method is not implemented by this host."),
-        id: id,
-        requestDigest: requestDigest
-      )
+        responseError(id: id, sessionID: requestSessionID, code: mapped.0, message: mapped.1),
+        id: id, requestDigest: requestDigest)
     }
     let response: [String: Any] = [
       "kind": "response",
@@ -166,9 +184,124 @@ final class DeviceBridgeCoordinator {
       "sessionId": requestSessionID,
       "sentAt": timestamp(),
       "ok": true,
-      "result": DeviceCapabilities.fullSnapshot(observedAt: timestamp()),
+      "result": result,
     ]
     return cache(response, id: id, requestDigest: requestDigest)
+  }
+
+  private func execute(method: String, params: [String: Any]) async throws -> Any {
+    switch method {
+    case "system.getCapabilities":
+      guard params.isEmpty else { throw DeviceLocationError.invalidSample }
+      return DeviceCapabilities.fullSnapshot(observedAt: timestamp(), location: location)
+    case "permissions.getStatus":
+      try validateLocationPermissionParams(params)
+      return permissionResult()
+    case "permissions.request":
+      try validateLocationPermissionParams(params)
+      guard isForeground() else { throw BridgeExecutionError.notForeground }
+      let previous = location.permission
+      _ = await location.requestWhenInUseAuthorization()
+      if location.permission != previous {
+        emit(type: "permission.changed", payload: permissionResult())
+      }
+      return permissionResult()
+    case "permissions.openSettings":
+      try validateLocationPermissionParams(params)
+      guard isForeground() else { throw BridgeExecutionError.notForeground }
+      guard let url = URL(string: UIApplication.openSettingsURLString) else {
+        throw DeviceLocationError.unavailable
+      }
+      return ["opened": await UIApplication.shared.open(url)]
+    case "location.getCurrent":
+      try validateAccuracyParams(params)
+      guard isForeground() else { throw BridgeExecutionError.notForeground }
+      return try await location.currentLocation(timeout: .milliseconds(DeviceCapabilities.requestTimeoutMilliseconds))
+    case "location.startUpdates":
+      try validateAccuracyParams(params)
+      guard isForeground() else { throw BridgeExecutionError.notForeground }
+      try location.startLocationUpdates { [weak self] sample in
+        self?.emit(type: "location.updated", payload: sample)
+      }
+      return ["started": true]
+    case "location.stopUpdates":
+      guard params.isEmpty else { throw DeviceLocationError.invalidSample }
+      location.stopLocationUpdates()
+      return ["stopped": true]
+    case "heading.startUpdates":
+      guard params.isEmpty else { throw DeviceLocationError.invalidSample }
+      guard isForeground() else { throw BridgeExecutionError.notForeground }
+      try location.startHeadingUpdates { [weak self] sample in
+        self?.emit(type: "heading.updated", payload: sample)
+        if sample["calibration"] as? String == "uncalibrated" {
+          self?.emit(type: "heading.calibrationRequired", payload: ["required": true])
+        }
+      }
+      return ["started": true]
+    case "heading.stopUpdates":
+      guard params.isEmpty else { throw DeviceLocationError.invalidSample }
+      location.stopHeadingUpdates()
+      return ["stopped": true]
+    default:
+      throw BridgeExecutionError.unsupported
+    }
+  }
+
+  private func validateLocationPermissionParams(_ params: [String: Any]) throws {
+    guard Set(params.keys) == ["permission"], params["permission"] as? String == "location" else {
+      throw DeviceLocationError.invalidSample
+    }
+  }
+
+  private func validateAccuracyParams(_ params: [String: Any]) throws {
+    guard Set(params.keys).isSubset(of: ["desiredAccuracy"]) else {
+      throw DeviceLocationError.invalidSample
+    }
+    if let accuracy = params["desiredAccuracy"] {
+      guard let value = accuracy as? String, ["best", "balanced"].contains(value) else {
+        throw DeviceLocationError.invalidSample
+      }
+    }
+  }
+
+  private func permissionResult() -> [String: Any] {
+    [
+      "permission": "location", "status": location.permission,
+      "accuracy": location.permission == "granted" ? (location.reducedAccuracy ? "reduced" : "full") : "unavailable",
+    ]
+  }
+
+  private func emit(type: String, payload: Any) {
+    guard let sessionID else { return }
+    eventSequence += 1
+    eventSink?([
+      "kind": "event", "protocolVersion": DeviceCapabilities.protocolVersion,
+      "eventId": UUID().uuidString.lowercased(), "sessionId": sessionID,
+      "sequence": eventSequence, "type": type, "occurredAt": timestamp(), "payload": payload,
+    ])
+  }
+
+  private func mapError(_ error: any Error) -> (String, String) {
+    switch error {
+    case DeviceLocationError.permissionNotDetermined:
+      ("PERMISSION_NOT_DETERMINED", "Location permission has not been requested.")
+    case DeviceLocationError.permissionDenied:
+      ("PERMISSION_DENIED", "Location permission was denied.")
+    case DeviceLocationError.permissionRestricted:
+      ("PERMISSION_RESTRICTED", "Location permission is restricted.")
+    case DeviceLocationError.timeout:
+      ("TIMEOUT", "A location sample was not available in time.")
+    case is CancellationError:
+      ("CANCELLED", "The operation was cancelled.")
+    case BridgeExecutionError.notForeground:
+      ("NOT_FOREGROUND", "This operation requires the app to be active.")
+    case BridgeExecutionError.unsupported:
+      ("UNSUPPORTED", "Method is not implemented by this host.")
+    case DeviceLocationError.invalidSample:
+      ("INVALID_REQUEST", "Request parameters do not match the Device API contract.")
+    default:
+      ("TRANSPORT_UNAVAILABLE", "The requested sensor is currently unavailable.")
+    }
   }
 
   private func blocked(id: String, code: String, message: String) -> [String: Any] {

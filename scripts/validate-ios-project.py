@@ -45,7 +45,15 @@ def main() -> int:
     if staging.get("COPWebOrigin") or staging.get("COPOIDCOrigin"):
         failures.append("staging must remain fail-closed until OQ-001 supplies exact origins")
 
-    forbidden_keys = {"NSLocationAlwaysUsageDescription", "UIBackgroundModes"}
+    forbidden_keys = {
+        "NSLocationAlwaysUsageDescription",
+        "NSLocationAlwaysAndWhenInUseUsageDescription",
+        "UIBackgroundModes",
+    }
+    location_purpose = (
+        "CSM používá polohu při práci s COP k zobrazení vaší pozice, směru a "
+        "k připojení polohy pouze k akci, kterou spustíte."
+    )
     required_phone_orientations = {
         "UIInterfaceOrientationPortrait",
         "UIInterfaceOrientationLandscapeLeft",
@@ -58,6 +66,8 @@ def main() -> int:
         present = forbidden_keys.intersection(plist)
         if present:
             failures.append(f"{name} enables out-of-scope phase 2 capabilities: {sorted(present)}")
+        if plist.get("NSLocationWhenInUseUsageDescription") != location_purpose:
+            failures.append(f"{name} must contain the approved location purpose string")
         if set(plist.get("UISupportedInterfaceOrientations", [])) != required_phone_orientations:
             failures.append(f"{name} must support the approved iPhone orientations")
         if set(plist.get("UISupportedInterfaceOrientations~ipad", [])) != required_pad_orientations:
@@ -71,8 +81,8 @@ def main() -> int:
             print(f"FAIL: {failure}", file=sys.stderr)
         return 1
     print(
-        "iOS project configuration is fail-closed and pinned to iOS 26.0 / "
-        "Swift 6 / approved signing identity."
+        "iOS project configuration is fail-closed, location-When-In-Use only, and pinned "
+        "to iOS 26.0 / Swift 6 / approved signing identity."
     )
     return 0
 

@@ -14,7 +14,7 @@ final class BridgeMessageHandler: NSObject, WKScriptMessageHandlerWithReply {
     _ userContentController: WKUserContentController,
     didReceive message: WKScriptMessage
   ) async -> (Any?, String?) {
-    let response = bridge.handle(
+    let response = await bridge.handle(
       message: message.body,
       context: DeviceBridgeCoordinator.RequestContext(
         isMainFrame: message.frameInfo.isMainFrame,

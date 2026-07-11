@@ -57,6 +57,17 @@ struct WebHostView: UIViewRepresentable {
     #endif
 
     handler.webView = webView
+    bridge.eventSink = { [weak webView] event in
+      guard let webView else { return }
+      Task { @MainActor in
+        _ = try? await webView.callAsyncJavaScript(
+          "window.\(BridgeScripts.nativeReceiverName)(message)",
+          arguments: ["message": event],
+          in: nil,
+          contentWorld: contentWorld
+        )
+      }
+    }
     context.coordinator.attach(
       webView: webView,
       bridge: bridge,

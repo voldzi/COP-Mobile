@@ -2,8 +2,9 @@
 
 ## Stav a účel
 
-Repozitář je ve fázi 2 a obsahuje první buildovatelný iOS host. Aktuální unit a
-contract testy pokrývají origin policy, handshake a capability baseline;
+Repozitář obsahuje buildovatelný iOS host a první Location + Heading slice.
+Aktuální unit a contract testy pokrývají origin policy, handshake, capability
+baseline, jednorázovou polohu a lifecycle foreground subscription;
 `implementation-report-phase-2.md` pravdivě odděluje simulátor, beta toolchain,
 schválený Xcode 27 beta CI a dosud neprovedené fyzické/backendové scénáře.
 
@@ -28,6 +29,15 @@ budoucího rádiového transportu.
   důvodem a termínem opravy. Release gate zůstává explicitní.
 
 ## Vrstvy testů
+
+Aktuální automatizované pokrytí ověřuje, že handshake pravdivě hlásí foreground
+location/heading bez background supportu, `location.getCurrent` nevyvolá
+permission request, location event nese monotónní sequence a invalidace session
+zastaví senzorové updates. Konfigurační validátor vyžaduje When In Use purpose
+string a současně zakazuje Always/background deklarace.
+
+Fyzický smoke test musí navíc potvrdit systémový dialog až po explicitní akci,
+Full/Reduced Accuracy stav, GPS accuracy a reakci headingu při rotaci zařízení.
 
 | Vrstva | Účel | Prostředí | Gate |
 | --- | --- | --- | --- |

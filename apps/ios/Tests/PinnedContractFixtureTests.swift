@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class PinnedContractFixtureTests: XCTestCase {
-  func testPinnedValidHelloFixtureDrivesNativeHandshake() throws {
+  func testPinnedValidHelloFixtureDrivesNativeHandshake() async throws {
     let fixture = try fixtureJSON(subdirectory: "fixtures/v1/valid", name: "bridge-hello")
     let origin = try WebOrigin(configurationValue: "https://cop.zeleznalady.cz")
     let url = try XCTUnwrap(URL(string: "https://cop.zeleznalady.cz"))
@@ -13,7 +13,7 @@ final class PinnedContractFixtureTests: XCTestCase {
     )
     bridge.navigationDidCommit(url: url)
 
-    let response = bridge.handle(
+    let response = await bridge.handle(
       message: fixture,
       context: .init(isMainFrame: true, frameURL: url, mainFrameURL: url)
     )
@@ -22,7 +22,7 @@ final class PinnedContractFixtureTests: XCTestCase {
     XCTAssertEqual(response["id"] as? String, fixture["id"] as? String)
   }
 
-  func testPinnedInvalidRequestFixtureIsRejected() throws {
+  func testPinnedInvalidRequestFixtureIsRejected() async throws {
     let fixture = try fixtureJSON(
       subdirectory: "fixtures/v1/invalid",
       name: "bridge-request-missing-session"
@@ -34,7 +34,7 @@ final class PinnedContractFixtureTests: XCTestCase {
     )
     bridge.navigationDidCommit(url: url)
 
-    let response = bridge.handle(
+    let response = await bridge.handle(
       message: fixture,
       context: .init(isMainFrame: true, frameURL: url, mainFrameURL: url)
     )
