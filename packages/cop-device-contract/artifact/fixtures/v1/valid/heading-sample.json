@@ -1,0 +1,12 @@
+{
+  "sampleId": "40000000-0000-4000-8000-000000000002",
+  "measuredAt": "2026-07-11T10:00:03.000Z",
+  "receivedAt": "2026-07-11T10:00:03.020Z",
+  "source": "live",
+  "magneticHeadingDeg": 182.4,
+  "trueHeadingDeg": 185.1,
+  "accuracyDeg": 8.5,
+  "reference": "trueNorth",
+  "calibration": "calibrated",
+  "valid": true
+}

@@ -1,10 +1,12 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
       - main
+      - "codex/**"
 
 permissions:
   contents: read
@@ -39,6 +41,42 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Add a macOS build/test job together with the first generated iOS target.
-  # It must use an approved stable Xcode and enforce IPHONEOS_DEPLOYMENT_TARGET=26.0.
+  ios-feasibility:
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, macOS, ARM64, xcode-27-beta]
+    steps:
+      - name: Checkout trusted revision
+        shell: bash
+        env:
+          COP_MOBILE_GIT_URL: git@github.com:${{ github.repository }}.git
+        run: |
+          set -euo pipefail
+          if [[ ! -d .git ]]; then
+            git init .
+            git remote add origin "$COP_MOBILE_GIT_URL"
+          else
+            git remote set-url origin "$COP_MOBILE_GIT_URL"
+          fi
+          GIT_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=8' \
+            git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+
+      - name: Verify approved Xcode 27 beta
+        run: bash scripts/verify-apple-toolchain.sh
+
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Validate pinned contract and configuration
+        run: |
+          python3 scripts/validate-device-contract.py
+          python3 scripts/validate-ios-project.py
+
+      - name: Build and test iOS 26 host
+        run: bash scripts/test-ios.sh
+
   # Add Android Gradle jobs only when the Android phase starts.

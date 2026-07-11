@@ -53,6 +53,19 @@ volba „později“, po které se systémový dialog otevře bez další akce.
 
 ## iOS 26 permission matrix pro MVP
 
+Aktuální implementace zahrnuje pouze foreground When In Use slice pro polohu a
+heading. Všechny tři konfigurace obsahují schválený
+`NSLocationWhenInUseUsageDescription`; neobsahují Always klíč, location
+background mode ani entitlement. Přesné souřadnice a heading jsou pouze v paměti
+a předávají se platné bridge session, nikoli do nativních logů nebo telemetry.
+
+APNs implementace znovu používá schválený topic
+`cz.zeleznalady.csm.messenger`, vyžaduje explicitní zapnutí oznámení a registruje
+aktuální device token přímo u CSM Messaging jednorázovým ticketem. Raw APNs
+token ani samostatný PushKit VoIP token se nikdy neposílá do COP webu nebo COP
+API. Background modes jsou omezeny na `remote-notification` a `voip`; druhý je
+podle ADR 0008 vyhrazen výhradně skutečnému Matrix hlasovému hovoru.
+
 | Funkce | Deklarace / capability | Kdy se žádá | Chování při odmítnutí | Povinná pro core app |
 | --- | --- | --- | --- | --- |
 | Jednorázová poloha a heading | `NSLocationWhenInUseUsageDescription` | Po akci vyžadující polohu nebo kompas | Web pokračuje bez polohy; zobrazí stav a volitelný odkaz do Nastavení | Ne |
@@ -81,12 +94,17 @@ review. Význam nesmí být širší než implementace. Doporučený český bas
 | `NSLocationWhenInUseUsageDescription` | „CSM používá polohu při práci s COP k zobrazení vaší pozice, směru a k připojení polohy pouze k akci, kterou spustíte.“ |
 | `NSMotionUsageDescription` | „CSM používá údaje o natočení telefonu při aktivní práci s orientací v COP.“ |
 | `NSCameraUsageDescription` | „CSM použije fotoaparát pouze tehdy, když pořídíte fotografii jako přílohu ve workflow COP.“ |
+| `NSMicrophoneUsageDescription` | „CSM používá mikrofon pouze během hlasového hovoru, který zahájíte nebo přijmete v COP Chatu.“ |
 
 `NSLocationAlwaysAndWhenInUseUsageDescription`, `NSPhotoLibraryUsageDescription`,
-`NSMicrophoneUsageDescription`, `NSFaceIDUsageDescription` a
-`NSUserTrackingUsageDescription` se do MVP nepřidávají bez funkce, která je
-skutečně potřebuje. CSM nepoužívá App Tracking Transparency pro analytické nebo
-reklamní sledování.
+`NSFaceIDUsageDescription` a `NSUserTrackingUsageDescription` se do MVP
+nepřidávají bez funkce, která je skutečně potřebuje. Mikrofon je povolen pouze
+pro uživatelem zahájený nebo přijatý webový hlasový hovor. CSM nepoužívá App
+Tracking Transparency pro analytické nebo reklamní sledování.
+Integrovaný COP Chat může mikrofon požádat ze same-origin iframe; nativní host
+ověřuje shodu přesného originu iframe, hlavního COP dokumentu a žádosti WebKitu.
+Před udělením WebKit media-capture oprávnění host explicitně ověří nebo vyžádá
+`AVAudioApplication` record permission a teprve po souhlasu aktivuje audio session.
 
 ### Background modes a zakázané zkratky
 
@@ -95,7 +113,7 @@ reklamní sledování.
 - `remote-notification` není náhradou za kontinuální proces a přidá se jen pro
   konkrétní, otestovaný silent-push scénář.
 - `voip` se nesmí použít k imitaci vyzvánění. PushKit/CallKit patří pouze ke
-  skutečnému VoIP hovoru.
+  skutečnému VoIP hovoru a implementace je vymezena ADR 0008.
 - `audio`, Bluetooth background modes ani background location se nesmějí použít
   k udržování budoucí relay služby při životě.
 - Background execution je best effort podle iOS. Force-quit uživatelem je

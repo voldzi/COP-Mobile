@@ -8,13 +8,15 @@ experimentální device-to-device relay. Vlastníkem produktu je tým COP.
 
 ## Stav
 
-Repozitář je ve fázi 0 — analýza, architektonická rozhodnutí a dokumentační
-skeleton. Neobsahuje produkční Swift ani Kotlin kód.
+Repozitář je ve fázi 2 — iOS feasibility host. Obsahuje XcodeGen/Swift 6 target
+pro iOS/iPadOS 26, bezpečný `WKWebView` baseline, handshake Device API `1.0.0`,
+lokální fallback a unit/contract testy. Fáze ještě není přijata: chybí Xcode 27
+beta CI důkaz, fyzické iPad ověření a úplné iPhone auth/offline scénáře.
 
 Závazný baseline:
 
 - minimum iOS/iPadOS 26;
-- stabilní Xcode a stabilní Apple SDK, nikoli beta-only produkční závislosti;
+- schválený a přesně připnutý Xcode 27 beta / iOS SDK 27 toolchain;
 - existující COP web zůstává jediným UI a zdrojem business logiky;
 - nativní vrstva neimplementuje vlastní chat, mapu, report workflow ani AI;
 - relay je mimo MVP, v produkci vypnutý a označený jako experiment;
@@ -53,14 +55,15 @@ Projekt neposkytuje vlastní REST API. Popis konzumovaných kontraktů je v
 
 ## Lokální ověření
 
-V dokumentační fázi je jediným build-independent checkem:
+Úplná lokální kontrola:
 
 ```bash
-bash scripts/validate-skeleton.sh
+bash scripts/check.sh
 ```
 
-Swift/Xcode a Android příkazy budou přidány společně s prvními build targety;
-dokumentace je nesmí předstírat dříve, než existují.
+Závazný toolchain je Xcode 27.0 beta build `27A5218g` s iOS SDK 27.0. Kontroluje
+jej `scripts/verify-apple-toolchain.sh`; minimum aplikace zůstává iOS/iPadOS
+26.0.
 
 ## Dokumentace
 
@@ -73,6 +76,7 @@ Rozcestník je v [`docs/README.md`](docs/README.md). Nejdůležitější vstupy:
 - [`docs/security.md`](docs/security.md)
 - [`docs/test-strategy.md`](docs/test-strategy.md)
 - [`docs/open-questions.md`](docs/open-questions.md)
+- [`docs/implementation-report-phase-2.md`](docs/implementation-report-phase-2.md)
 
 ## Retrieval
 

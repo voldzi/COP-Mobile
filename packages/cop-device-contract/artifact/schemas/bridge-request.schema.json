@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cop.local/device/v1/bridge-request.schema.json",
+  "title": "COP Device Bridge Request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "protocolVersion", "id", "sessionId", "method", "sentAt", "params"],
+  "properties": {
+    "kind": { "const": "request" },
+    "protocolVersion": { "$ref": "common.schema.json#/$defs/protocolVersion" },
+    "id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "sessionId": { "$ref": "common.schema.json#/$defs/uuid" },
+    "method": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9]*\\.[a-z][a-zA-Z0-9]*$", "maxLength": 96 },
+    "sentAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "params": { "type": "object" }
+  }
+}

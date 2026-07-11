@@ -2,37 +2,54 @@
 
 ## Současný stav
 
-Repozitář je ve fázi 0: dokumentace, ADR a prázdné platformní hranice. Není zde
-Xcode/Gradle target, spustitelná aplikace ani produkční deployment. Jediný
-aktuální provozní check je:
+Repozitář je ve fázi 2 a má generovaný SwiftUI/Xcode target. Omezený fyzický
+launch/map test prošel, ale není zde produkční deployment, signing material,
+Android target ani úplná fyzická akceptace. Lokální kontrola je:
 
 ```bash
-bash scripts/validate-skeleton.sh
+bash scripts/check.sh
 ```
 
-Build, test, archive ani upload příkaz se nesmí doplnit dříve, než existuje
-odpovídající target a reprodukovatelný CI job.
+`scripts/check.sh` validuje skeleton, připnutý kontrakt, iOS konfiguraci,
+vygeneruje projekt a spustí testy na dostupném iOS 26 simulátoru. Podepsaný
+generic-device Debug i Release build s potvrzeným Teamem a bundle ID prošel;
+archive ani upload zatím definován není.
 
 ## Prostředí a předpoklady
 
 Aktuálně ověřeno na workstation:
 
 - Node.js 24 a pnpm 10 jsou dostupné pro související COP práci;
-- lokální Xcode je beta Xcode 27, a proto není schváleným production release
-  baseline;
+- schválený toolchain je Xcode 27.0 beta build `27A5218g` s iOS SDK 27.0;
 - Java/Android SDK/adb/Gradle nejsou nainstalované;
 - XcodeGen 2.44.1 je dostupný;
 - produkční COP origin je `https://cop.zeleznalady.cz`;
 - minimum nového app targetu je iOS/iPadOS 26.0.
 
-Budoucí release CI musí použít schválený stabilní Xcode/SDK, připnutou XcodeGen
-verzi, Swift 6 a explicitně ověřit `IPHONEOS_DEPLOYMENT_TARGET=26.0`.
+GitHub-hosted macOS obrazy v době rozhodnutí Xcode 27 beta neobsahují. iOS CI
+proto používá důvěryhodný ARM64 macOS self-hosted runner s labelem
+`xcode-27-beta` a přesně ověřuje Xcode build i iOS SDK. Job je vypnutý pro
+`pull_request` eventy, aby veřejný fork nemohl spustit kód na interním runneru.
+Deployment target zůstává `IPHONEOS_DEPLOYMENT_TARGET=26.0`.
 
-## Inicializace dokumentačního repozitáře
+Repozitářový runner `voldzi-mac-cop-mobile-xcode27` verze `2.335.1` je
+instalován v `~/actions-runner-cop-mobile` jako uživatelský LaunchAgent. Má
+labely `self-hosted`, `macOS`, `ARM64`, `xcode-27-beta`. Lokální runner `.env`
+zakazuje HTTP/2/3 kvůli kompatibilitě této sítě; neobsahuje secret. GitHub
+credentials a pracovní adresář zůstávají mimo repozitář. GitHub run-service
+endpoint musí být dostupný přes odchozí HTTPS, jinak při převzetí jobu nastane
+timeout bez ohledu na stav projektu.
+
+Self-hosted job načítá přesný trusted push commit přímo přes SSH a nestahuje
+`actions/checkout`; pull request event jej vůbec nespustí. XcodeGen se instaluje
+jen pokud na runneru chybí. Tím se omezuje síťová závislost jobu po jeho
+přidělení, ale neodstraňuje se nutnost dostupnosti GitHub Actions control plane.
+
+## Inicializace a lokální build
 
 ```bash
 git status --short --branch
-bash scripts/validate-skeleton.sh
+bash scripts/check.sh
 "/Users/voldzi/Documents/Development/18 2026/chromadb/tools/chroma-dev.sh" reindex --root .
 ```
 
@@ -48,7 +65,8 @@ generovány do typed build configuration; secrets zůstávají v Keychain/CI/ser
 | Název | Povinný | Bezpečný default | Účel |
 | --- | --- | --- | --- |
 | `COP_MOBILE_ENVIRONMENT` | ano | `development` | Výběr debug/staging/release veřejné konfigurace |
-| `COP_IOS_BUNDLE_ID` | ano | `cz.zeleznalady.csm.messenger` | Kompatibilní App ID, APNs topic a deep-link identita; podléhá signing auditu |
+| `COP_IOS_BUNDLE_ID` | ano | `cz.zeleznalady.csm.messenger` | Potvrzená kompatibilní App ID, APNs topic a deep-link identita |
+| `COP_IOS_DEVELOPMENT_TEAM` | ano | `LM6W548X36` | Potvrzený veřejný Apple Team identifikátor; nejde o signing secret |
 | `COP_IOS_MINIMUM_VERSION` | ano | `26.0` | Závazný deployment target |
 | `COP_WEB_ORIGIN` | ano | `https://cop.zeleznalady.cz` | Přesný hlavní release origin; ne wildcard |
 | `COP_OIDC_ISSUER` | ano | `https://login.zeleznalady.cz/realms/cop` | Navigační OIDC origin, nikdy bridge origin |
@@ -86,8 +104,9 @@ S prvními targety se doplní a v `AGENTS.md` přesně zopakují tyto kroky:
 6. podepsaný archive a export pro interní TestFlight;
 7. oddělený real-device test report před promotion stejného buildu.
 
-Produkční app se nebuildí z `04 CSM messenger`. Tento projekt má vlastní signing
-a release historii; legacy repo zůstává referencí.
+Produkční app se nebuildí z `04 CSM messenger`. Tento projekt používá potvrzený
+Team `LM6W548X36` a legacy bundle ID, ale má vlastní build a release historii;
+legacy repo zůstává referencí.
 
 ## Rollout
 

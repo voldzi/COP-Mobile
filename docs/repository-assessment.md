@@ -231,7 +231,7 @@ rovněž musí být navržena znovu pro thin host.
 
 ### 2. iOS host — 06 COP Mobile
 
-- stabilní Swift 6/Xcode toolchain, minimum iOS/iPadOS 26.0;
+- Swift 6, schválený Xcode 27 beta toolchain, minimum iOS/iPadOS 26.0;
 - SwiftUI shell, `WKWebView`, persistentní website store, exact-origin
   navigation policy a secure bridge;
 - lokální fallback a diagnostika;
@@ -277,7 +277,7 @@ rovněž musí být navržena znovu pro thin host.
 
 - nový repozitář zůstává sibling projektu `01 COP`;
 - produktové jméno je COP Mobile/CSM host; kompatibilní bundle ID a deep-link
-  rozhodnutí se zachová, pokud signing audit neodhalí konflikt;
+  rozhodnutí bylo potvrzeno s Teamem `LM6W548X36`;
 - minimum je iOS/iPadOS 26.0, nikoli 18 ani 27;
 - production web je `https://cop.zeleznalady.cz`;
 - první distribuce je TestFlight/interní pilot;

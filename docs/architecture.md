@@ -3,8 +3,9 @@
 ## Stav dokumentu
 
 Tento dokument popisuje schválenou cílovou architekturu. Repozitář je ve fázi
-0: obsahuje pouze projektový skeleton a dokumentaci, nikoli Swift, Kotlin ani
-produkční bridge kód.
+2: obsahuje iOS feasibility host s bezpečným WebView baseline, bridge handshake
+a read-only capability snapshotem. Senzory, tracking, push, Share Extension,
+relay a Android zatím implementované nejsou.
 
 První podporovanou platformou bude iOS/iPadOS 26.0. Android bude následovat nad
 stejným kontraktem; nesmí kvůli němu vzniknout druhá webová nebo doménová
@@ -168,9 +169,9 @@ ADR 0003 stanoví, proč první verze nebalí kopii celého web buildu.
 CSM Messaging posílá minimální APNs payload. Host zpracuje kategorii a opaque
 identifikátor, aktivuje aplikaci a předá bezpečně validovanou COP web route.
 Citlivý obsah není součástí systémové notifikace bez explicitní serverové
-politiky. Critical Alerts a CallKit nejsou součástí základního kontraktu:
-Critical Alerts vyžadují Apple entitlement a CallKit smí reprezentovat pouze
-skutečný VoIP hovor.
+politiky. Critical Alerts vyžadují Apple entitlement. CallKit je podle ADR 0008
+součástí skutečné VoIP cesty: PushKit probudí host, CallKit převezme systémový
+call lifecycle a Matrix ve WebView nadále vlastní signalizaci a média.
 
 ## Úložiště a vlastnictví dat
 
@@ -214,6 +215,12 @@ kontraktů je v `docs/api.md`.
   navigační originy nikdy nezískají Device API.
 - Externí odkazy se otevírají mimo interní WebView. Wildcard origin a bridge v
   iframe jsou zakázané.
+- WebKit media capture je oddělený od Device API bridge: audio-only požadavek
+  smí přijít také ze same-origin COP Chat iframe, ale pouze pokud frame i hlavní
+  dokument odpovídají přesnému release COP originu. Cross-origin iframe, video
+  a kombinované camera+microphone požadavky zůstávají zamítnuté.
+  Výchozí port, který `WKSecurityOrigin` hlásí jako `0`, se před porovnáním
+  normalizuje na `443` pro HTTPS nebo `80` pro HTTP.
 
 ## Distribuce a prostředí
 

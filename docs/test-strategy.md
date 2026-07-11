@@ -2,11 +2,11 @@
 
 ## Stav a účel
 
-Repozitář je nyní v dokumentační a analytické fázi; neobsahuje produkční app
-kód. Tento dokument definuje budoucí ověřování iOS hostu a jeho integračních
-kontraktů. Dokud kód nevznikne, lze ověřit pouze konzistenci dokumentace a
-skeletonu. Každý pozdější implementační report musí pravdivě oddělit testy
-provedené na simulátoru, fyzickém zařízení a backendovém prostředí.
+Repozitář obsahuje buildovatelný iOS host a první Location + Heading slice.
+Aktuální unit a contract testy pokrývají origin policy, handshake, capability
+baseline, jednorázovou polohu a lifecycle foreground subscription;
+`implementation-report-phase-2.md` pravdivě odděluje simulátor, beta toolchain,
+schválený Xcode 27 beta CI a dosud neprovedené fyzické/backendové scénáře.
 
 Minimální platforma je **iOS 26**. Úspěšný build nebo simulátor sám o sobě není
 důkaz funkčního kompasu, motion, APNs, background location, Share Extension ani
@@ -29,6 +29,19 @@ budoucího rádiového transportu.
   důvodem a termínem opravy. Release gate zůstává explicitní.
 
 ## Vrstvy testů
+
+Aktuální automatizované pokrytí ověřuje, že handshake pravdivě hlásí foreground
+location/heading bez background supportu, `location.getCurrent` nevyvolá
+permission request, location event nese monotónní sequence a invalidace session
+zastaví senzorové updates. Konfigurační validátor vyžaduje When In Use purpose
+string a současně zakazuje Always/background deklarace.
+
+WebView smoke test na fyzickém zařízení navíc ověřuje, že selection haptika
+nastane po tapnutí, ale nevzniká při scrollu a neblokuje aktivaci webového
+ovládacího prvku.
+
+Fyzický smoke test musí navíc potvrdit systémový dialog až po explicitní akci,
+Full/Reduced Accuracy stav, GPS accuracy a reakci headingu při rotaci zařízení.
 
 | Vrstva | Účel | Prostředí | Gate |
 | --- | --- | --- | --- |
@@ -85,6 +98,8 @@ V COP repozitáři se ověří:
 - route z push/share vstupu projde stejnou autentizací a autorizací jako běžná
   navigace;
 - žádný webový kód nedostane APNs token ani filesystem cestu.
+- hlasový hovor v hlavním rámci přesného COP originu vyžádá systémové oprávnění
+  mikrofonu a lze jej přijmout; iframe, jiný origin a kamera jsou odmítnuty.
 
 ### Bezpečnost bridge
 
@@ -197,8 +212,9 @@ prostor. Export důkazů obsahuje pouze agregované metriky nebo redigovanou tra
 - token rotation/reinstall a backend unregister při logout/revokaci;
 - Critical Alert pouze po doloženém entitlementu; bez něj musí být capability a
   produktové copy vypnuté;
-- PushKit/CallKit se v MVP nesmí objevit v podepsaných entitlements/background
-  modes ani v testovaném chování.
+- PushKit/CallKit podle ADR 0008: příchozí a ended VoIP push, CallKit answer,
+  reject a end, cold start, suspended/terminated stav, zámek obrazovky, expirovaný
+  call a potvrzení, že safety ani běžné notifikace nepoužijí VoIP topic.
 
 ## Offline, lifecycle a chaos scénáře
 
@@ -256,7 +272,8 @@ soubory:
 
 - deployment target je iOS 26 a release používá schválený stabilní Xcode/SDK;
 - entitlements obsahují jen Push, App Groups, Associated Domains, schválený
-  background mode a případně Time Sensitive; žádný nevyužitý relay/VoIP gate;
+  background modes `remote-notification` a skutečný `voip`; žádný nevyužitý
+  relay, location nebo audio keepalive gate;
 - Info.plist obsahuje pouze používané a lokalizované purpose strings;
 - App Transport Security, App-Bound/allowlist politika a production originy jsou
   přesné; debug originy a Web Inspector chybějí;

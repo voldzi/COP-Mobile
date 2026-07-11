@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cop.local/device/v1/device-capabilities.schema.json",
+  "title": "COP Device Capability Snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["adapter", "capabilities", "limits", "protocolVersion", "observedAt"],
+  "properties": {
+    "adapter": { "enum": ["browser", "native", "mock"] },
+    "protocolVersion": { "$ref": "common.schema.json#/$defs/protocolVersion" },
+    "observedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "limits": { "$ref": "common.schema.json#/$defs/limits" },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "system",
+        "permissions",
+        "location",
+        "heading",
+        "attitude",
+        "tracking",
+        "connectivity",
+        "media",
+        "shares",
+        "notifications",
+        "relay"
+      ],
+      "properties": {
+        "system": { "$ref": "common.schema.json#/$defs/capability" },
+        "permissions": { "$ref": "common.schema.json#/$defs/capability" },
+        "location": { "$ref": "common.schema.json#/$defs/capability" },
+        "heading": { "$ref": "common.schema.json#/$defs/capability" },
+        "attitude": { "$ref": "common.schema.json#/$defs/capability" },
+        "tracking": { "$ref": "common.schema.json#/$defs/capability" },
+        "connectivity": { "$ref": "common.schema.json#/$defs/capability" },
+        "media": { "$ref": "common.schema.json#/$defs/capability" },
+        "shares": { "$ref": "common.schema.json#/$defs/capability" },
+        "notifications": { "$ref": "common.schema.json#/$defs/capability" },
+        "relay": { "$ref": "common.schema.json#/$defs/capability" }
+      }
+    }
+  }
+}

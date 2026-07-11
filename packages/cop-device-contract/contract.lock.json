@@ -1,0 +1,6 @@
+{
+  "contractVersion": "1.0.0",
+  "sourceRepository": "https://github.com/voldzi/delta_acr_cop.git",
+  "sourceCommit": "38db4442fc6aa4d5df0cf788e9e0e9d9aa61e576",
+  "sourcePackagePath": "packages/cop-device-contract"
+}

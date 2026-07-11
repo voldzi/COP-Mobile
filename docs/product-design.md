@@ -133,6 +133,9 @@ měnit význam stavů MVP.
 
 - WebView používá beze změny design systém COP. CSM nesmí styl webu překrývat
   injektovaným CSS ani duplikovat jeho komponenty.
+- Potvrzený tap v hlavním WebView doprovází jemná systémová selection haptika.
+  Gesture recognizer neruší webový touch/click, scroll ani zoom a nevyžaduje
+  chráněné oprávnění. Haptika je doplněk; nikdy není jediným nositelem stavu.
 - Lokální nativní povrchy používají standardní komponenty iOS 26, Dynamic Type,
   systémové barvy, Safe Area a SF Symbols. Vizuální identita CSM se promítne do
   ikony, názvu a schválených brand tokenů, ne do vlastního paralelního systému.

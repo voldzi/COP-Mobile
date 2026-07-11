@@ -2,9 +2,11 @@
 
 ## Stav a hranice
 
-Repozitář je ve fázi 0 a neposkytuje backend. Dokument definuje povinné kontroly
-budoucího iOS 26 hostu. Web COP je vzdálený, aktualizovatelný kód na privilegované
-hranici; trusted origin proto není trusted payload.
+Repozitář je ve fázi 2 a neposkytuje backend. Feasibility host implementuje
+exact-origin/main-frame bridge baseline, session, payload limit a pouze
+read-only capabilities; ostatní kontroly v tomto dokumentu zůstávají povinné
+pro pozdější namespace. Web COP je vzdálený, aktualizovatelný kód na
+privilegované hranici; trusted origin proto není trusted payload.
 
 Chráníme zejména:
 
@@ -104,8 +106,10 @@ XSS ochrany.
   žádný plaintext E2EE obsah, chráněná URL, token ani přesná poloha.
 - Ordinary, Time Sensitive a Critical jsou samostatné capability. Critical
   vyžaduje skutečný Apple entitlement a user authorization.
-- PushKit/CallKit se nesmí použít pro safety alarm; je přípustný pouze pro
-  skutečný VoIP hovor po samostatném ADR.
+- PushKit/CallKit se podle ADR 0008 používá pouze pro skutečný Matrix VoIP hovor
+  a nesmí se použít pro safety alarm, běžnou notifikaci ani background keepalive.
+- Běžný APNs token a PushKit token jsou oddělené šifrované serverové secrets;
+  web ani COP API nesmí dostat žádný z nich.
 - APNs acceptance není user acknowledgement. Delivery stavy se nesmějí sloučit.
 
 ## Relay production gate

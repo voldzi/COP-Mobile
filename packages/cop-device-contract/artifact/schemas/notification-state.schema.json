@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cop.local/device/v1/notification-state.schema.json",
+  "title": "COP Device Notification State",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "authorization",
+    "alertsEnabled",
+    "soundsEnabled",
+    "badgesEnabled",
+    "timeSensitiveEnabled",
+    "criticalAlertsEnabled",
+    "remoteRegistration",
+    "observedAt"
+  ],
+  "properties": {
+    "authorization": { "$ref": "common.schema.json#/$defs/permission" },
+    "alertsEnabled": { "type": "boolean" },
+    "soundsEnabled": { "type": "boolean" },
+    "badgesEnabled": { "type": "boolean" },
+    "timeSensitiveEnabled": { "type": "boolean" },
+    "criticalAlertsEnabled": { "type": "boolean" },
+    "remoteRegistration": { "enum": ["unavailable", "notRegistered", "registered", "failed"] },
+    "observedAt": { "$ref": "common.schema.json#/$defs/timestamp" }
+  }
+}

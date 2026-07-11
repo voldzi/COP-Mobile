@@ -12,16 +12,42 @@ repozitáři nevzniká `openapi/openapi.json`. Aplikace:
 3. jako nativní klient volá pouze úzce vymezené technické endpointy, například
    registraci APNs zařízení u CSM Messaging.
 
-Ve fázi 0 nejsou zde popsané bridge metody implementovány.
+Implementován je handshake protokolu `1.0.0`, read-only
+`system.getCapabilities` a první foreground slice pro `permissions`, `location`
+a `heading`. Ostatní namespace host vrací jako `unsupported`; jejich popis níže
+je cílový kontrakt, nikoli tvrzení o hotové funkci.
+
+### Implementovaný iOS Location + Heading slice
+
+Host aktuálně obsluhuje:
+
+- `permissions.getStatus`, `permissions.request` a `permissions.openSettings`
+  s parametrem `{ "permission": "location" }`;
+- `location.getCurrent`, `location.startUpdates`, `location.stopUpdates`;
+- `heading.startUpdates`, `heading.stopUpdates`;
+- eventy `permission.changed`, `location.updated`, `heading.updated` a
+  `heading.calibrationRequired`.
+
+`location.getCurrent` a `location.startUpdates` přijímají prázdné parametry nebo
+`desiredAccuracy` s hodnotou `best` či `balanced`. Současný provider pro obě
+hodnoty používá `kCLLocationAccuracyBest`; volba zůstává v kontraktu pro budoucí
+energetickou politiku. Start metody vyžadují aktivní aplikaci. Subscription končí
+při navigaci, reloadu, zániku bridge session nebo změně oprávnění. Slice nic
+neukládá, neodesílá na server a nezapíná background location.
+
+Native nikdy nevyvolá systémový dialog z handshake, capability dotazu ani
+`location.getCurrent`. Dialog může vyvolat pouze explicitní
+`permissions.request`. Výsledek rozlišuje systémový status a přesnost
+`full`/`reduced`; MVP automaticky nežádá temporary full accuracy.
 
 ## Autorita kontraktů
 
 | Kontrakt | Autoritativní umístění | Spotřebitel |
 | --- | --- | --- |
 | COP REST API | `01 COP/openapi/openapi.json` | COP web; výjimečně nativní technická služba |
-| COP Device JSON Schema | plánované `01 COP/packages/cop-device-contract` | web, iOS, později Android |
-| TypeScript `CopDevice` SDK | plánované `01 COP/packages/cop-device-sdk` | COP web a browser/mock adapter |
-| Bridge contract fixtures | plánovaný contract package v `01 COP` | TypeScript, Swift a Kotlin CI |
+| COP Device JSON Schema | `01 COP/packages/cop-device-contract` | web, iOS, později Android |
+| TypeScript `CopDevice` SDK | `01 COP/packages/cop-device-sdk` | COP web a browser/mock adapter |
+| Bridge contract fixtures | contract package v `01 COP`; zde připnutý artifact `1.0.0` | TypeScript, Swift a Kotlin CI |
 | CSM Messaging REST | autoritativní OpenAPI služby CSM Messaging | native push registrace |
 
 Mobilní repozitář nesmí ručně založit konkurenční „master“ kopii TypeScript
@@ -231,23 +257,27 @@ První kontrakt počítá minimálně s těmito skupinami:
 Notifikační/deep-link event nese pouze validovanou interní route nebo opaque ID.
 Nesmí nařídit navigaci na libovolnou URL.
 
-## Push registrační ticket — nutná změna serverových kontraktů
+## Push registrační ticket
 
-Současný stav:
+Implementovaný kontrakt zachovává tyto hranice:
+
+- iOS registrace předá CSM Messaging běžný `deviceToken` a oddělený
+  `voipDeviceToken`; veřejná odpověď ani následné čtení zařízení nevrací žádný;
+- `voipDeviceToken` se smí použít pouze pro `chat.voice_call.incoming` a
+  `chat.voice_call.ended` podle ADR 0008;
 
 - COP `POST /api/v1/mobile/devices` neukládá APNs token;
 - CSM Messaging `POST /api/v1/devices` dnes očekává uživatelský access token;
 - web vlastní OIDC relaci a nativní host ji nemá kopírovat.
 
-Před remote-push implementací se proto v `01 COP/openapi/openapi.json` zavede
-autentizovaný endpoint:
+`01 COP/openapi/openapi.json` obsahuje autentizovaný endpoint:
 
 ```http
 POST /api/v1/mobile/device-registration-tickets
 Authorization: Bearer <COP web access token>
 ```
 
-Vrátí krátkodobý jednorázový bearer ticket omezený na:
+Vrací 120 sekund platný jednorázový bearer ticket omezený na:
 
 - subject aktuálně přihlášeného uživatele;
 - audience CSM Messaging device registration;
@@ -255,12 +285,14 @@ Vrátí krátkodobý jednorázový bearer ticket omezený na:
 - platformu iOS, bundle ID a app-instance ID;
 - krátkou expiraci a unikátní `jti`.
 
-Web předá ticket metodě `notifications.registerRemote`. Native připojí APNs
+Web po explicitním zapnutí oznámení předá ticket metodě
+`notifications.registerRemote`. Native připojí APNs
 token až do přímého požadavku na CSM Messaging. Ticket nesmí autorizovat běžné
 COP/Matrix API a CSM Messaging musí zabránit opakovanému použití `jti`.
-Konkrétní response schema, maximální TTL a ověření podpisu vzniknou ve společné
-COP/CSM změně; do té doby je remote push capability
-`temporarilyUnavailable`.
+CSM Messaging ověřuje HMAC podpis, audience, účel, subject, platformu, bundle,
+app-instance binding, expiraci a jednorázové `jti`. Sdílený signing secret je
+pouze serverová konfigurace a musí mít nejméně 32 bytes; není součástí aplikace,
+ticketu ani logů.
 
 ## Offline report a synchronizace
 

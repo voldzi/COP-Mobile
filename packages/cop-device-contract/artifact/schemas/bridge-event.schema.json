@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cop.local/device/v1/bridge-event.schema.json",
+  "title": "COP Device Bridge Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "protocolVersion", "eventId", "sessionId", "sequence", "type", "occurredAt", "payload"],
+  "properties": {
+    "kind": { "const": "event" },
+    "protocolVersion": { "$ref": "common.schema.json#/$defs/protocolVersion" },
+    "eventId": { "$ref": "common.schema.json#/$defs/uuid" },
+    "sessionId": { "$ref": "common.schema.json#/$defs/uuid" },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "type": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9]*\\.[a-z][a-zA-Z0-9]*$", "maxLength": 96 },
+    "occurredAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "payload": true
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cop.local/device/v1/common.schema.json",
+  "title": "COP Device Common Definitions",
+  "$defs": {
+    "protocolVersion": { "const": "1.0.0" },
+    "uuid": { "type": "string", "format": "uuid" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "permission": {
+      "enum": ["notDetermined", "denied", "restricted", "granted", "limited", "unavailable"]
+    },
+    "availability": {
+      "enum": ["supported", "unsupported", "experimental", "restricted", "temporarilyUnavailable"]
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["availability", "permission", "supportsBackground"],
+      "properties": {
+        "availability": { "$ref": "#/$defs/availability" },
+        "permission": { "$ref": "#/$defs/permission" },
+        "supportsBackground": { "type": "boolean" },
+        "requiresForeground": { "type": "boolean" },
+        "limitations": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "maxItems": 16,
+          "uniqueItems": true
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxAssetBytes", "maxJsonBytes", "requestTimeoutMs"],
+      "properties": {
+        "maxAssetBytes": { "type": "integer", "minimum": 0 },
+        "maxJsonBytes": { "type": "integer", "minimum": 1024, "maximum": 1048576 },
+        "requestTimeoutMs": { "type": "integer", "minimum": 100, "maximum": 120000 }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": {
+          "enum": [
+            "UNSUPPORTED",
+            "PERMISSION_NOT_DETERMINED",
+            "PERMISSION_DENIED",
+            "PERMISSION_RESTRICTED",
+            "INVALID_REQUEST",
+            "INVALID_STATE",
+            "ORIGIN_NOT_ALLOWED",
+            "MAIN_FRAME_REQUIRED",
+            "PROTOCOL_VERSION_UNSUPPORTED",
+            "SESSION_EXPIRED",
+            "TIMEOUT",
+            "CANCELLED",
+            "NOT_FOREGROUND",
+            "NOT_READY",
+            "TRANSPORT_UNAVAILABLE",
+            "PAYLOAD_TOO_LARGE",
+            "QUEUE_FULL",
+            "ASSET_NOT_FOUND",
+            "ASSET_EXPIRED",
+            "RATE_LIMITED",
+            "INTERNAL"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "retryable": { "type": "boolean" },
+        "details": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "number", "boolean", "null"] },
+          "maxProperties": 16
+        }
+      }
+    },
+    "sampleBase": {
+      "type": "object",
+      "required": ["sampleId", "measuredAt", "receivedAt", "source", "valid"],
+      "properties": {
+        "sampleId": { "$ref": "#/$defs/uuid" },
+        "measuredAt": { "$ref": "#/$defs/timestamp" },
+        "receivedAt": { "$ref": "#/$defs/timestamp" },
+        "source": { "enum": ["live", "cached"] },
+        "valid": { "type": "boolean" }
+      }
+    }
+  }
+}
