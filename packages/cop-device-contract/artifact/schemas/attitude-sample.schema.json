@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cop.local/device/v1/attitude-sample.schema.json",
+  "title": "COP Device Attitude Sample",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sampleId",
+    "measuredAt",
+    "receivedAt",
+    "source",
+    "referenceFrame",
+    "quaternion",
+    "rollRad",
+    "pitchRad",
+    "yawRad",
+    "valid"
+  ],
+  "properties": {
+    "sampleId": { "$ref": "common.schema.json#/$defs/uuid" },
+    "measuredAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "receivedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "source": { "enum": ["live", "cached"] },
+    "referenceFrame": {
+      "enum": ["xArbitraryZVertical", "xArbitraryCorrectedZVertical", "xMagneticNorthZVertical", "xTrueNorthZVertical"]
+    },
+    "quaternion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "z", "w"],
+      "properties": {
+        "x": { "type": "number", "minimum": -1, "maximum": 1 },
+        "y": { "type": "number", "minimum": -1, "maximum": 1 },
+        "z": { "type": "number", "minimum": -1, "maximum": 1 },
+        "w": { "type": "number", "minimum": -1, "maximum": 1 }
+      }
+    },
+    "rollRad": { "type": "number" },
+    "pitchRad": { "type": "number" },
+    "yawRad": { "type": "number" },
+    "valid": { "type": "boolean" }
+  }
+}

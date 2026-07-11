@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cop.local/device/v1/heading-sample.schema.json",
+  "title": "COP Device Heading Sample",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sampleId",
+    "measuredAt",
+    "receivedAt",
+    "source",
+    "magneticHeadingDeg",
+    "accuracyDeg",
+    "reference",
+    "calibration",
+    "valid"
+  ],
+  "properties": {
+    "sampleId": { "$ref": "common.schema.json#/$defs/uuid" },
+    "measuredAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "receivedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "source": { "enum": ["live", "cached"] },
+    "magneticHeadingDeg": { "type": "number", "minimum": 0, "exclusiveMaximum": 360 },
+    "trueHeadingDeg": { "type": ["number", "null"], "minimum": 0, "exclusiveMaximum": 360 },
+    "accuracyDeg": { "type": "number", "minimum": 0 },
+    "reference": { "enum": ["magneticNorth", "trueNorth"] },
+    "calibration": { "enum": ["calibrated", "uncalibrated", "unavailable"] },
+    "valid": { "type": "boolean" }
+  }
+}

@@ -1,0 +1,5 @@
+#include "Base.xcconfig"
+
+INFOPLIST_FILE = Config/Info-Debug.plist
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) DEBUG COP_DEVELOPMENT
+ENABLE_TESTABILITY = YES

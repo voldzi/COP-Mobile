@@ -1,14 +1,14 @@
 # Otevřené otázky a externí brány
 
-Fáze 0 nemá otevřený blocker. Následující položky musí být uzavřeny před
-uvedeným milníkem; do té doby platí bezpečný fallback.
+Fáze 2 má níže uvedené externí akceptační brány. Host zůstává fail-closed tam,
+kde chybí rozhodnutí nebo fyzický důkaz.
 
 ## OQ-001: Staging a debug originy
 
-- Stav: otevřeno
+- Stav: částečně uzavřeno — release a debug jsou explicitní, staging chybí
 - Vlastník: COP provoz
 - Dopad: release/debug allowlist, App-Bound Domains, integrační testy
-- Rozhodnutí potřebné do: zahájení iOS feasibility hostu
+- Rozhodnutí potřebné do: funkční staging build ve fázi 2
 - Bezpečný fallback: release povolí pouze `https://cop.zeleznalady.cz`; lokální
   origin existuje jen v explicitním debug buildu.
 
@@ -33,12 +33,12 @@ uvedeným milníkem; do té doby platí bezpečný fallback.
 
 ## OQ-004: Bundle ID, signing a nástupnictví staré aplikace
 
-- Stav: doporučený default `cz.zeleznalady.csm.messenger`, čeká signing audit
+- Stav: uzavřeno — potvrzen Team `LM6W548X36` a kompatibilní bundle ID
+  `cz.zeleznalady.csm.messenger`; XcodeGen target obě hodnoty používá
 - Vlastník: Apple Developer/App Store správce
 - Dopad: APNs topic, AASA, `csm://` deep links, instalace vedle legacy aplikace
-- Rozhodnutí potřebné do: vytvoření podepsaného app targetu
-- Bezpečný fallback: nevytvářet nový App ID ani provisioning profil; dokumenty
-  předpokládají kompatibilní náhradu, nikoli paralelní produkční aplikaci.
+- Rozhodnutí: nový host pokračuje jako náhrada legacy aplikace, nikoli jako
+  paralelní produkční App ID. Provisioning profil není součástí repozitáře.
 
 ## OQ-005: Critical Alerts entitlement
 
@@ -78,12 +78,15 @@ uvedeným milníkem; do té doby platí bezpečný fallback.
 
 ## OQ-009: Testovací zařízení a účty
 
-- Stav: inventář nepotvrzen
+- Stav: iOS 26.5 simulátor ověřen; podepsaný host byl nainstalován a spouští
+  produkční COP mapu na iPhonu 16 Pro Max s iOS 27.0; fyzický iPad, druhý
+  release-gate iPhone a testovací účty nejsou potvrzené
 - Vlastník: QA/provoz
 - Dopad: real-device release gate
 - Rozhodnutí potřebné do: první podepsaný TestFlight build
-- Bezpečný fallback: simulátorové výsledky se označí pouze jako dílčí; release
-  bez dvou iPhonů a relevantního iPadu nevznikne.
+- Bezpečný fallback: úspěšné spuštění a mapa se neoznačí za důkaz auth, offline,
+  background nebo senzorů; release bez dvou iPhonů a relevantního iPadu
+  nevznikne.
 
 ## OQ-010: Veřejný App Store, Custom App nebo MDM
 
@@ -111,7 +114,8 @@ uvedeným milníkem; do té doby platí bezpečný fallback.
 
 ## OQ-013: WebKit cached-start důkaz
 
-- Stav: unit testy PWA prošly, fyzický WKWebView test neproběhl
+- Stav: lokální fallback a simulátorový WebView build existují; fyzický cached
+  start neproběhl
 - Vlastník: iOS implementace + QA
 - Dopad: tvrzení o offline startu po prvním online spuštění
 - Rozhodnutí potřebné do: ukončení fáze 2

@@ -2,10 +2,27 @@
 
 ## Použití
 
-V současné fázi lze řešit pouze chyby skeletonu a dokumentace. Runtime kroky
-níže jsou závazný návrh pro budoucí iOS 26 host a musí být doplněny skutečnými
-názvy buildů/panelů současně s implementací. Nikdy nemažte WebKit/Matrix nebo
-native data jako první diagnostický krok.
+Fáze 2 má spustitelný feasibility host a níže uvedené WebView/bridge kroky jsou
+aktuální. Senzory, tracking, Share Extension a push části zůstávají budoucím
+runbookem. Nikdy nemažte WebKit/Matrix nebo native data jako první diagnostický
+krok.
+
+## iOS build nebo test selže
+
+1. Spusťte `python3 scripts/validate-device-contract.py` a
+   `python3 scripts/validate-ios-project.py`.
+2. Vygenerujte projekt znovu přes `cd apps/ios && xcodegen generate`; ruční
+   změny `.xcodeproj` nejsou zdroj pravdy.
+3. Spusťte `bash scripts/test-ios.sh`. Skript vybere dostupný iOS 26 iPhone
+   simulátor nebo respektuje `COP_IOS_SIMULATOR_ID`.
+4. Pro release/CI spusťte `bash scripts/verify-apple-toolchain.sh`. Musí projít
+   pouze schválený Xcode 27.0 beta build a iOS SDK 27.0; změna pinu vyžaduje
+   vědomou aktualizaci ADR 0007 a ověřovacích důkazů.
+5. Zkontrolujte `docs/implementation-report-phase-2.md` a nerozšiřujte
+   simulátorový výsledek na fyzický, OIDC nebo offline důkaz.
+6. Pro instalaci na fyzické zařízení musí být zařízení odemčené, spárované,
+   dostupné v `xcrun devicectl list devices` a musí mít zapnutý Developer Mode.
+   Tento režim vyžaduje potvrzení a restart přímo na zařízení; neobcházejte jej.
 
 ## Skeleton validation selže
 
@@ -15,6 +32,23 @@ native data jako první diagnostický krok.
 3. Ověřte `git diff --check` a že nebyl přidán `openapi/openapi.json`; aplikace
    neposkytuje REST API.
 4. Po dokumentační změně reindexujte Chroma.
+
+## Self-hosted iOS CI zůstane ve frontě
+
+1. V `~/actions-runner-cop-mobile` spusťte `./svc.sh status`; služba má být
+   `Started` a GitHub runner `online` s labelem `xcode-27-beta`.
+2. Zkontrolujte nejnovější `~/actions-runner-cop-mobile/_diag/Runner_*.log` bez
+   kopírování credential nebo request payloadů do issue.
+3. Ověřte odchozí HTTPS pro `pipelines*.actions.githubusercontent.com`,
+   `broker.actions.githubusercontent.com` a přidělený
+   `run-actions-*.actions.githubusercontent.com` endpoint.
+4. Self-hosted job checkoutuje přesný `$GITHUB_SHA` přes SSH; ověřte proto také
+   `ssh -T git@github.com`. Nepřepisujte checkout na pull request head z
+   nedůvěryhodného forku.
+5. Lokální runner `.env` používá HTTP/1.1 kompatibilní režim. Neměňte VPN,
+   firewall ani segmentaci jako automatický workaround; síťovou změnu musí
+   schválit vlastník infrastruktury.
+6. Pull request z veřejného forku se na self-hosted runneru nesmí spustit.
 
 ## Aplikace se nespustí nebo zůstane prázdná
 

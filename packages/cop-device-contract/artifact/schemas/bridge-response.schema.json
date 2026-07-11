@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cop.local/device/v1/bridge-response.schema.json",
+  "title": "COP Device Bridge Response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "protocolVersion", "id", "sessionId", "sentAt", "ok"],
+  "properties": {
+    "kind": { "const": "response" },
+    "protocolVersion": { "$ref": "common.schema.json#/$defs/protocolVersion" },
+    "id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "sessionId": { "$ref": "common.schema.json#/$defs/uuid" },
+    "sentAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "ok": { "type": "boolean" },
+    "result": true,
+    "error": { "$ref": "common.schema.json#/$defs/error" }
+  },
+  "oneOf": [
+    { "properties": { "ok": { "const": true }, "result": true, "error": false }, "required": ["result"] },
+    {
+      "properties": {
+        "ok": { "const": false },
+        "result": false,
+        "error": { "$ref": "common.schema.json#/$defs/error" }
+      },
+      "required": ["error"]
+    }
+  ]
+}

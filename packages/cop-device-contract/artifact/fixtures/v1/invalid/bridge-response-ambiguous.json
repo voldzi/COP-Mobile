@@ -1,0 +1,10 @@
+{
+  "kind": "response",
+  "protocolVersion": "1.0.0",
+  "id": "10000000-0000-4000-8000-000000000002",
+  "sessionId": "20000000-0000-4000-8000-000000000001",
+  "sentAt": "2026-07-11T10:00:01.120Z",
+  "ok": true,
+  "result": {},
+  "error": { "code": "INTERNAL", "message": "ambiguous", "retryable": false }
+}

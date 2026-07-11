@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cop.local/device/v1/location-sample.schema.json",
+  "title": "COP Device Location Sample",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sampleId",
+    "measuredAt",
+    "receivedAt",
+    "source",
+    "latitude",
+    "longitude",
+    "horizontalAccuracyM",
+    "reducedAccuracy",
+    "valid"
+  ],
+  "properties": {
+    "sampleId": { "$ref": "common.schema.json#/$defs/uuid" },
+    "measuredAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "receivedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "source": { "enum": ["live", "cached"] },
+    "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
+    "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
+    "horizontalAccuracyM": { "type": "number", "minimum": 0 },
+    "altitudeM": { "type": ["number", "null"] },
+    "verticalAccuracyM": { "type": ["number", "null"], "minimum": 0 },
+    "speedMps": { "type": ["number", "null"], "minimum": 0 },
+    "courseDeg": { "type": ["number", "null"], "minimum": 0, "exclusiveMaximum": 360 },
+    "reducedAccuracy": { "type": "boolean" },
+    "valid": { "type": "boolean" }
+  }
+}

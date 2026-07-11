@@ -2,9 +2,11 @@
 
 ## Stav a hranice
 
-Repozitář je ve fázi 0 a neposkytuje backend. Dokument definuje povinné kontroly
-budoucího iOS 26 hostu. Web COP je vzdálený, aktualizovatelný kód na privilegované
-hranici; trusted origin proto není trusted payload.
+Repozitář je ve fázi 2 a neposkytuje backend. Feasibility host implementuje
+exact-origin/main-frame bridge baseline, session, payload limit a pouze
+read-only capabilities; ostatní kontroly v tomto dokumentu zůstávají povinné
+pro pozdější namespace. Web COP je vzdálený, aktualizovatelný kód na
+privilegované hranici; trusted origin proto není trusted payload.
 
 Chráníme zejména:
 

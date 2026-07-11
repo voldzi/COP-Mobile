@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cop.local/device/v1/tracking-session.schema.json",
+  "title": "COP Device Tracking Session",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sessionId", "state", "startedAt", "updatedAt", "supportsBackground", "sampleCount"],
+  "properties": {
+    "sessionId": { "$ref": "common.schema.json#/$defs/uuid" },
+    "state": { "enum": ["starting", "active", "paused", "stopping", "stopped", "degraded", "failed"] },
+    "startedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "updatedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "stoppedAt": { "anyOf": [{ "$ref": "common.schema.json#/$defs/timestamp" }, { "type": "null" }] },
+    "supportsBackground": { "type": "boolean" },
+    "sampleCount": { "type": "integer", "minimum": 0 },
+    "lastSampleAt": { "anyOf": [{ "$ref": "common.schema.json#/$defs/timestamp" }, { "type": "null" }] },
+    "degradedReason": { "type": ["string", "null"], "maxLength": 240 }
+  }
+}

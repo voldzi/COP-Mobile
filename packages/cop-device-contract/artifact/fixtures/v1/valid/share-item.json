@@ -1,0 +1,16 @@
+{
+  "shareId": "70000000-0000-4000-8000-000000000001",
+  "receivedAt": "2026-07-11T10:01:00.000Z",
+  "state": "available",
+  "sourceApplication": "com.apple.mobilesafari",
+  "asset": {
+    "assetId": "60000000-0000-4000-8000-000000000001",
+    "mimeType": "application/pdf",
+    "fileName": "field-report.pdf",
+    "sizeBytes": 45678,
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "createdAt": "2026-07-11T10:01:00.000Z",
+    "expiresAt": "2026-07-12T10:01:00.000Z",
+    "source": "shareExtension"
+  }
+}
