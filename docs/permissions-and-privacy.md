@@ -101,6 +101,8 @@ review. Význam nesmí být širší než implementace. Doporučený český bas
 nepřidávají bez funkce, která je skutečně potřebuje. Mikrofon je povolen pouze
 pro uživatelem zahájený nebo přijatý webový hlasový hovor. CSM nepoužívá App
 Tracking Transparency pro analytické nebo reklamní sledování.
+Integrovaný COP Chat může mikrofon požádat ze same-origin iframe; nativní host
+ověřuje shodu přesného originu iframe, hlavního COP dokumentu a žádosti WebKitu.
 
 ### Background modes a zakázané zkratky
 

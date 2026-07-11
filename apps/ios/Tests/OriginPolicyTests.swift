@@ -41,7 +41,7 @@ final class OriginPolicyTests: XCTestCase {
     )
   }
 
-  func testMicrophoneCaptureRequiresExactAllowedMainFrameAndRejectsVideo() throws {
+  func testMicrophoneCaptureAllowsSameOriginChatFrameAndRejectsVideo() throws {
     let allowed = try WebOrigin(configurationValue: "https://cop.zeleznalady.cz")
     let policy = OriginPolicy(bridgeOrigins: [allowed], navigationOrigins: [allowed])
     let frameURL = URL(string: "https://cop.zeleznalady.cz/chat")!
@@ -56,10 +56,20 @@ final class OriginPolicyTests: XCTestCase {
         isMainFrame: true,
         microphoneOnly: true
       ))
+    XCTAssertTrue(
+      policy.allowsMicrophoneCapture(
+        frameURL: frameURL,
+        mainFrameURL: try url("https://cop.zeleznalady.cz/map"),
+        requestingScheme: "https",
+        requestingHost: "cop.zeleznalady.cz",
+        requestingPort: 443,
+        isMainFrame: false,
+        microphoneOnly: true
+      ))
     XCTAssertFalse(
       policy.allowsMicrophoneCapture(
         frameURL: frameURL,
-        mainFrameURL: frameURL,
+        mainFrameURL: try url("https://login.zeleznalady.cz/realms/cop"),
         requestingScheme: "https",
         requestingHost: "cop.zeleznalady.cz",
         requestingPort: 443,

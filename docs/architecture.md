@@ -215,6 +215,10 @@ kontraktů je v `docs/api.md`.
   navigační originy nikdy nezískají Device API.
 - Externí odkazy se otevírají mimo interní WebView. Wildcard origin a bridge v
   iframe jsou zakázané.
+- WebKit media capture je oddělený od Device API bridge: audio-only požadavek
+  smí přijít také ze same-origin COP Chat iframe, ale pouze pokud frame i hlavní
+  dokument odpovídají přesnému release COP originu. Cross-origin iframe, video
+  a kombinované camera+microphone požadavky zůstávají zamítnuté.
 
 ## Distribuce a prostředí
 

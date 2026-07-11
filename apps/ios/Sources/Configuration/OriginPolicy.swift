@@ -74,8 +74,7 @@ struct OriginPolicy: Sendable {
     isMainFrame: Bool,
     microphoneOnly: Bool
   ) -> Bool {
-    guard isMainFrame,
-      microphoneOnly,
+    guard microphoneOnly,
       let frameURL,
       allowsBridge(frameURL: frameURL, mainFrameURL: mainFrameURL),
       let frameOrigin = WebOrigin(url: frameURL)
