@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  documentation-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate repository skeleton
+        run: bash scripts/validate-skeleton.sh
+
+      - name: Verify no REST API is claimed
+        run: test ! -e openapi/openapi.json
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Add a macOS build/test job together with the first generated iOS target.
+  # It must use an approved stable Xcode and enforce IPHONEOS_DEPLOYMENT_TARGET=26.0.
+  # Add Android Gradle jobs only when the Android phase starts.

@@ -1,0 +1,35 @@
+.DS_Store
+.codex-fs-probe
+.env
+.env.*
+!.env.example
+.venv/
+.chroma-state/
+node_modules/
+dist/
+build/
+coverage/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Apple toolchain
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.ipa
+*.dSYM
+*.dSYM.zip
+Pods/
+
+# Android toolchain (future)
+.gradle/
+local.properties
+*.jks
+*.keystore
+captures/
