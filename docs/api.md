@@ -12,9 +12,33 @@ repozitáři nevzniká `openapi/openapi.json`. Aplikace:
 3. jako nativní klient volá pouze úzce vymezené technické endpointy, například
    registraci APNs zařízení u CSM Messaging.
 
-Ve fázi 2 je implementován handshake protokolu `1.0.0` a read-only
-`system.getCapabilities`. Ostatní namespace host vrací jako `unsupported`;
-jejich popis níže je cílový kontrakt, nikoli tvrzení o hotové funkci.
+Implementován je handshake protokolu `1.0.0`, read-only
+`system.getCapabilities` a první foreground slice pro `permissions`, `location`
+a `heading`. Ostatní namespace host vrací jako `unsupported`; jejich popis níže
+je cílový kontrakt, nikoli tvrzení o hotové funkci.
+
+### Implementovaný iOS Location + Heading slice
+
+Host aktuálně obsluhuje:
+
+- `permissions.getStatus`, `permissions.request` a `permissions.openSettings`
+  s parametrem `{ "permission": "location" }`;
+- `location.getCurrent`, `location.startUpdates`, `location.stopUpdates`;
+- `heading.startUpdates`, `heading.stopUpdates`;
+- eventy `permission.changed`, `location.updated`, `heading.updated` a
+  `heading.calibrationRequired`.
+
+`location.getCurrent` a `location.startUpdates` přijímají prázdné parametry nebo
+`desiredAccuracy` s hodnotou `best` či `balanced`. Současný provider pro obě
+hodnoty používá `kCLLocationAccuracyBest`; volba zůstává v kontraktu pro budoucí
+energetickou politiku. Start metody vyžadují aktivní aplikaci. Subscription končí
+při navigaci, reloadu, zániku bridge session nebo změně oprávnění. Slice nic
+neukládá, neodesílá na server a nezapíná background location.
+
+Native nikdy nevyvolá systémový dialog z handshake, capability dotazu ani
+`location.getCurrent`. Dialog může vyvolat pouze explicitní
+`permissions.request`. Výsledek rozlišuje systémový status a přesnost
+`full`/`reduced`; MVP automaticky nežádá temporary full accuracy.
 
 ## Autorita kontraktů
 

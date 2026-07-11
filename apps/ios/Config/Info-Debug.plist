@@ -33,6 +33,8 @@
     <key>NSAllowsLocalNetworking</key>
     <true/>
   </dict>
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>CSM používá polohu při práci s COP k zobrazení vaší pozice, směru a k připojení polohy pouze k akci, kterou spustíte.</string>
   <key>WKAppBoundDomains</key>
   <array>
     <string>cop.zeleznalady.cz</string>

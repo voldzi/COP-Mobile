@@ -53,6 +53,12 @@ volba „později“, po které se systémový dialog otevře bez další akce.
 
 ## iOS 26 permission matrix pro MVP
 
+Aktuální implementace zahrnuje pouze foreground When In Use slice pro polohu a
+heading. Všechny tři konfigurace obsahují schválený
+`NSLocationWhenInUseUsageDescription`; neobsahují Always klíč, location
+background mode ani entitlement. Přesné souřadnice a heading jsou pouze v paměti
+a předávají se platné bridge session, nikoli do nativních logů nebo telemetry.
+
 | Funkce | Deklarace / capability | Kdy se žádá | Chování při odmítnutí | Povinná pro core app |
 | --- | --- | --- | --- | --- |
 | Jednorázová poloha a heading | `NSLocationWhenInUseUsageDescription` | Po akci vyžadující polohu nebo kompas | Web pokračuje bez polohy; zobrazí stav a volitelný odkaz do Nastavení | Ne |

@@ -13,7 +13,7 @@ enum DeviceCapabilities {
     ]
   }
 
-  static func snapshot() -> [String: Any] {
+  @MainActor static func snapshot(location: DeviceLocationProviding? = nil) -> [String: Any] {
     let unsupported: [String: Any] = [
       "availability": "unsupported",
       "permission": "unavailable",
@@ -25,11 +25,28 @@ enum DeviceCapabilities {
       "permission": "granted",
       "supportsBackground": false,
     ]
+    let permission = location?.permission ?? "unavailable"
+    let permissions: [String: Any] = [
+      "availability": "supported", "permission": "granted", "supportsBackground": false,
+    ]
+    let locationCapability: [String: Any] = [
+      "availability": location?.locationAvailable == false ? "temporarilyUnavailable" : "supported",
+      "permission": permission,
+      "supportsBackground": false,
+      "requiresForeground": true,
+      "limitations": ["Foreground only; reduced accuracy is reported without automatic escalation."],
+    ]
+    let headingCapability: [String: Any] = [
+      "availability": location?.headingAvailable == false ? "temporarilyUnavailable" : "supported",
+      "permission": permission,
+      "supportsBackground": false,
+      "requiresForeground": true,
+    ]
     return [
       "system": system,
-      "permissions": unsupported,
-      "location": unsupported,
-      "heading": unsupported,
+      "permissions": permissions,
+      "location": locationCapability,
+      "heading": headingCapability,
       "attitude": unsupported,
       "tracking": unsupported,
       "connectivity": unsupported,
@@ -40,10 +57,12 @@ enum DeviceCapabilities {
     ]
   }
 
-  static func fullSnapshot(observedAt: String) -> [String: Any] {
+  @MainActor static func fullSnapshot(observedAt: String, location: DeviceLocationProviding? = nil)
+    -> [String: Any]
+  {
     [
       "adapter": "native",
-      "capabilities": snapshot(),
+      "capabilities": snapshot(location: location),
       "limits": limits(),
       "protocolVersion": protocolVersion,
       "observedAt": observedAt,

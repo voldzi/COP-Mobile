@@ -3,6 +3,7 @@ import Foundation
 enum BridgeScripts {
   static let contentWorldName = "COPDeviceBridge"
   static let handlerName = "copDevice"
+  static let nativeReceiverName = "__copDeviceReceiveNativeMessageV1"
   private static let requestEvent = "__copDeviceRequestV1"
   private static let responseEvent = "__copDeviceResponseV1"
 
@@ -10,6 +11,12 @@ enum BridgeScripts {
     """
     (() => {
       if (window.top !== window) return;
+      Object.defineProperty(window, '\(nativeReceiverName)', {
+        value: message => window.dispatchEvent(new CustomEvent('\(responseEvent)', { detail: JSON.stringify(message) })),
+        configurable: false,
+        enumerable: false,
+        writable: false
+      });
       window.addEventListener('\(requestEvent)', event => {
         if (typeof event.detail !== 'string') return;
         let message;
