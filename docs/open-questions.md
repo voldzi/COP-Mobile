@@ -78,13 +78,15 @@ kde chybí rozhodnutí nebo fyzický důkaz.
 
 ## OQ-009: Testovací zařízení a účty
 
-- Stav: iOS 26.5 simulátor ověřen; spárovaný iPhone 15 má iOS 26.5.2, ale
-  vypnutý Developer Mode; fyzický iPad a testovací účty nejsou potvrzené
+- Stav: iOS 26.5 simulátor ověřen; podepsaný host byl nainstalován a spouští
+  produkční COP mapu na iPhonu 16 Pro Max s iOS 27.0; fyzický iPad, druhý
+  release-gate iPhone a testovací účty nejsou potvrzené
 - Vlastník: QA/provoz
 - Dopad: real-device release gate
 - Rozhodnutí potřebné do: první podepsaný TestFlight build
-- Bezpečný fallback: podepsaný generic-device build ani simulátor se neoznačí
-  za fyzický test; release bez dvou iPhonů a relevantního iPadu nevznikne.
+- Bezpečný fallback: úspěšné spuštění a mapa se neoznačí za důkaz auth, offline,
+  background nebo senzorů; release bez dvou iPhonů a relevantního iPadu
+  nevznikne.
 
 ## OQ-010: Veřejný App Store, Custom App nebo MDM
 

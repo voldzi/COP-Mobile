@@ -33,6 +33,20 @@ krok.
    neposkytuje REST API.
 4. Po dokumentační změně reindexujte Chroma.
 
+## Self-hosted iOS CI zůstane ve frontě
+
+1. V `~/actions-runner-cop-mobile` spusťte `./svc.sh status`; služba má být
+   `Started` a GitHub runner `online` s labelem `xcode-27-beta`.
+2. Zkontrolujte nejnovější `~/actions-runner-cop-mobile/_diag/Runner_*.log` bez
+   kopírování credential nebo request payloadů do issue.
+3. Ověřte odchozí HTTPS pro `pipelines*.actions.githubusercontent.com`,
+   `broker.actions.githubusercontent.com` a přidělený
+   `run-actions-*.actions.githubusercontent.com` endpoint.
+4. Lokální runner `.env` používá HTTP/1.1 kompatibilní režim. Neměňte VPN,
+   firewall ani segmentaci jako automatický workaround; síťovou změnu musí
+   schválit vlastník infrastruktury.
+5. Pull request z veřejného forku se na self-hosted runneru nesmí spustit.
+
 ## Aplikace se nespustí nebo zůstane prázdná
 
 1. Zaznamenejte app build, iOS build, web build, environment a correlation ID.

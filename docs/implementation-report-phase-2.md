@@ -41,15 +41,16 @@ or release-distribution claim.
 | XcodeGen generation | Pass | XcodeGen 2.44.1 |
 | Swift build and tests | Pass, 8 tests | iOS 26.5 simulator |
 | Approved Apple toolchain gate | Pass | Xcode 27.0 beta `27A5218g` / SDK 27.0 |
-| GitHub iOS job | Configured, not run | protected self-hosted `xcode-27-beta` runner required |
+| GitHub iOS job | Runner online, job assigned | outbound run-service endpoint currently times out |
 | Signed generic iOS device builds | Pass | Debug + Release, confirmed Team/bundle/profile |
 | Signed-app entitlement audit | Pass | only app ID, Team ID and debug `get-task-allow` |
-| Physical iPhone | Blocked before install | iPhone 15 / iOS 26.5.2, Developer Mode disabled |
+| Physical iPhone launch | Pass | iPhone 16 Pro Max / iOS 27.0, production COP map rendered |
 | Physical iPad | Not run | required before Phase 2 acceptance |
 | Real Keycloak login/refresh/logout | Not run | physical-device OQ-002 |
 | Warm-cache process-kill airplane start | Not run | physical-device OQ-013 |
 | Signing configuration | Confirmed | Team `LM6W548X36`, bundle `cz.zeleznalady.csm.messenger` |
-| Signed device install/TestFlight | Not run | physical-device and distribution gate |
+| Signed device install | Pass | `CSM Dev 0.1.0 (1)` replaced approved legacy test install |
+| TestFlight | Not run | distribution gate |
 
 The simulator tests cover exact-origin policy, lookalike origins and ports,
 main-frame enforcement, compatible/incompatible handshake, session invalidation,
@@ -57,14 +58,13 @@ truthful capabilities, duplicate request IDs and selected pinned fixtures.
 
 ## Remaining Phase 2 gates
 
-1. Register a trusted ARM64 macOS self-hosted runner with label
-   `xcode-27-beta`, Xcode 27.0 build `27A5218g`, iOS SDK 27.0 and XcodeGen.
-   The iOS job never runs for `pull_request` events from this public repository.
+1. The trusted runner `voldzi-mac-cop-mobile-xcode27` is registered, online and
+   protected from `pull_request` jobs. Complete the assigned iOS job when
+   outbound HTTPS to the GitHub Actions run-service endpoint is reachable.
 2. Confirm the real staging COP and OIDC origins; until then the Staging build
    cannot leave its configuration fallback.
-3. Enable Developer Mode on the paired iPhone 15, reconnect/unlock it and install
-   the already buildable signed app. Add a physical iPad with iPadOS 26.
-4. On a physical iPhone and iPad with iOS/iPadOS 26, test COP map/chat, actual
+3. Add a physical iPad with iPadOS 26 or newer.
+4. On the physical iPhone and iPad, test COP chat, actual
    Keycloak lifecycle, bridge absence in iframe/OIDC/external origins, process
    kill and fresh/warm offline start.
 5. Record device/OS builds and results here without tokens, exact location,

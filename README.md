@@ -11,7 +11,7 @@ experimentální device-to-device relay. Vlastníkem produktu je tým COP.
 Repozitář je ve fázi 2 — iOS feasibility host. Obsahuje XcodeGen/Swift 6 target
 pro iOS/iPadOS 26, bezpečný `WKWebView` baseline, handshake Device API `1.0.0`,
 lokální fallback a unit/contract testy. Fáze ještě není přijata: chybí Xcode 27
-beta CI důkaz, instalace na fyzický iPhone a fyzické iPad ověření.
+beta CI důkaz, fyzické iPad ověření a úplné iPhone auth/offline scénáře.
 
 Závazný baseline:
 

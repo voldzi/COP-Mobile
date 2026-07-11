@@ -2,9 +2,9 @@
 
 ## Současný stav
 
-Repozitář je ve fázi 2 a má generovaný SwiftUI/Xcode target. Není zde produkční
-deployment, signing material, Android target ani přijatý fyzický test. Lokální
-kontrola je:
+Repozitář je ve fázi 2 a má generovaný SwiftUI/Xcode target. Omezený fyzický
+launch/map test prošel, ale není zde produkční deployment, signing material,
+Android target ani úplná fyzická akceptace. Lokální kontrola je:
 
 ```bash
 bash scripts/check.sh
@@ -12,8 +12,8 @@ bash scripts/check.sh
 
 `scripts/check.sh` validuje skeleton, připnutý kontrakt, iOS konfiguraci,
 vygeneruje projekt a spustí testy na dostupném iOS 26 simulátoru. Podepsaný
-generic-device Debug build s potvrzeným Teamem a bundle ID prošel; archive ani
-upload zatím definován není.
+generic-device Debug i Release build s potvrzeným Teamem a bundle ID prošel;
+archive ani upload zatím definován není.
 
 ## Prostředí a předpoklady
 
@@ -31,6 +31,14 @@ proto používá důvěryhodný ARM64 macOS self-hosted runner s labelem
 `xcode-27-beta` a přesně ověřuje Xcode build i iOS SDK. Job je vypnutý pro
 `pull_request` eventy, aby veřejný fork nemohl spustit kód na interním runneru.
 Deployment target zůstává `IPHONEOS_DEPLOYMENT_TARGET=26.0`.
+
+Repozitářový runner `voldzi-mac-cop-mobile-xcode27` verze `2.335.1` je
+instalován v `~/actions-runner-cop-mobile` jako uživatelský LaunchAgent. Má
+labely `self-hosted`, `macOS`, `ARM64`, `xcode-27-beta`. Lokální runner `.env`
+zakazuje HTTP/2/3 kvůli kompatibilitě této sítě; neobsahuje secret. GitHub
+credentials a pracovní adresář zůstávají mimo repozitář. GitHub run-service
+endpoint musí být dostupný přes odchozí HTTPS, jinak při převzetí jobu nastane
+timeout bez ohledu na stav projektu.
 
 ## Inicializace a lokální build
 
