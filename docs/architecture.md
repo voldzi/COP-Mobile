@@ -219,6 +219,8 @@ kontraktů je v `docs/api.md`.
   smí přijít také ze same-origin COP Chat iframe, ale pouze pokud frame i hlavní
   dokument odpovídají přesnému release COP originu. Cross-origin iframe, video
   a kombinované camera+microphone požadavky zůstávají zamítnuté.
+  Výchozí port, který `WKSecurityOrigin` hlásí jako `0`, se před porovnáním
+  normalizuje na `443` pro HTTPS nebo `80` pro HTTP.
 
 ## Distribuce a prostředí
 

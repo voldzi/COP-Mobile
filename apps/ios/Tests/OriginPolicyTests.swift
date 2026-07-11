@@ -52,7 +52,7 @@ final class OriginPolicyTests: XCTestCase {
         mainFrameURL: frameURL,
         requestingScheme: "https",
         requestingHost: "cop.zeleznalady.cz",
-        requestingPort: 443,
+        requestingPort: 0,
         isMainFrame: true,
         microphoneOnly: true
       ))

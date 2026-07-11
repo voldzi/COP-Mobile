@@ -79,9 +79,11 @@ struct OriginPolicy: Sendable {
       allowsBridge(frameURL: frameURL, mainFrameURL: mainFrameURL),
       let frameOrigin = WebOrigin(url: frameURL)
     else { return false }
+    let normalizedRequestingPort =
+      requestingPort == 0 ? (requestingScheme.lowercased() == "https" ? 443 : 80) : requestingPort
     return frameOrigin.scheme == requestingScheme.lowercased()
       && frameOrigin.host == requestingHost.lowercased()
-      && frameOrigin.port == requestingPort
+      && frameOrigin.port == normalizedRequestingPort
   }
 
   func isBridgeOrigin(_ url: URL?) -> Bool {
