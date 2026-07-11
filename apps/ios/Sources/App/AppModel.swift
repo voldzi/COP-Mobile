@@ -4,6 +4,11 @@ import Observation
 @MainActor
 @Observable
 final class AppModel {
+  enum Surface: Equatable {
+    case cop
+    case chat
+  }
+
   enum Phase: Equatable {
     case loading
     case webContent
@@ -14,6 +19,7 @@ final class AppModel {
   let configuration: Result<AppConfiguration, AppConfigurationError>
   private(set) var phase: Phase = .loading
   private(set) var reloadToken = 0
+  var surface: Surface = .cop
 
   init(bundle: Bundle = .main) {
     do {
@@ -46,6 +52,19 @@ final class AppModel {
   func retry() {
     reloadToken += 1
     phase = .loading
+  }
+
+  func invalidateWebMedia() {
+    reloadToken += 1
+    phase = .loading
+  }
+
+  func openNativeChat() {
+    surface = .chat
+  }
+
+  func closeNativeChat() {
+    surface = .cop
   }
 
   private static func makeDiagnosticCode(prefix: String) -> String {

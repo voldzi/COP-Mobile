@@ -25,6 +25,11 @@ settings:
     CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED: YES
     ENABLE_USER_SCRIPT_SANDBOXING: YES
 
+packages:
+  CSMCommunicationKit:
+    url: https://github.com/voldzi/CSM-messenger.git
+    revision: 9246d533ca42f9609bbfe698de49f986d8a478ff
+
 targets:
   COPMobile:
     type: application
@@ -38,7 +43,8 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Config/COPMobile.entitlements
         PRODUCT_NAME: COPMobile
         TARGETED_DEVICE_FAMILY: "1,2"
-    dependencies: []
+    dependencies:
+      - package: CSMCommunicationKit
     scheme:
       gatherCoverageData: true
       testTargets:

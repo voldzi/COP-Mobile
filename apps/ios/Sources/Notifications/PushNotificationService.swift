@@ -1,6 +1,23 @@
+import CSMCommunicationKit
 import Foundation
 import UIKit
 @preconcurrency import UserNotifications
+
+extension Notification.Name {
+  static let copNativeChatRequested = Notification.Name("cz.zeleznalady.csm.nativeChatRequested")
+}
+
+private final class NotificationCompletionBox<Value>: @unchecked Sendable {
+  private let completion: (Value) -> Void
+
+  init(_ completion: @escaping (Value) -> Void) {
+    self.completion = completion
+  }
+
+  func callAsFunction(_ value: Value) {
+    completion(value)
+  }
+}
 
 @MainActor
 protocol PushNotificationProviding: AnyObject {
@@ -16,27 +33,43 @@ protocol PushNotificationProviding: AnyObject {
 }
 
 @MainActor
-final class PushNotificationService: NSObject, PushNotificationProviding, UNUserNotificationCenterDelegate {
+final class PushNotificationService: NSObject, PushNotificationProviding,
+  UNUserNotificationCenterDelegate
+{
   static let shared = PushNotificationService()
+  static let registrationCategories = [
+    "community.report",
+    "message.direct",
+    "message.group",
+    "message.voice_call",
+    "safety.alert",
+    "safety.area_update",
+    "system.account",
+    "system.delivery",
+  ]
 
   private let center = UNUserNotificationCenter.current()
   private(set) var deviceToken: String?
   private var registrationFailure: String?
   private var tokenContinuation: CheckedContinuation<String, any Error>?
-  var eventReceiver: ((String, [String: Any]) -> Void)?
+  private var pendingBridgeEvents: [(String, [String: Any])] = []
+  var eventReceiver: ((String, [String: Any]) -> Void)? {
+    didSet { flushPendingBridgeEvents() }
+  }
 
   private override init() {
     super.init()
+    CSMCommunicationNotifications.prepareHostApplication()
     center.delegate = self
     VoiceCallService.shared.eventReceiver = { [weak self] type, payload in
-      self?.eventReceiver?(type, payload)
+      self?.emitBridgeEvent(type: type, payload: payload)
     }
-    registerCategories()
   }
 
   func status() async -> [String: Any] {
     let settings = await center.notificationSettings()
-    return Self.statusPayload(settings, registered: deviceToken != nil, failed: registrationFailure != nil)
+    return Self.statusPayload(
+      settings, registered: deviceToken != nil, failed: registrationFailure != nil)
   }
 
   func requestAuthorization() async -> [String: Any] {
@@ -70,12 +103,14 @@ final class PushNotificationService: NSObject, PushNotificationProviding, UNUser
     request.httpBody = try JSONSerialization.data(withJSONObject: [
       "appBundleId": "cz.zeleznalady.csm.messenger",
       "appInstanceId": appInstanceID,
-      "capabilities": ["e2ee": true, "criticalAlerts": false, "liveActivities": false, "voip": true],
+      "capabilities": [
+        "e2ee": true, "criticalAlerts": false, "liveActivities": false, "voip": true,
+      ],
       "deviceToken": token,
       "voipDeviceToken": voipToken,
       "locale": Locale.current.identifier.replacingOccurrences(of: "_", with: "-"),
       "platform": "ios",
-      "preferences": ["categories": ["message.direct", "message.voice_call", "safety.alert", "system"]],
+      "preferences": ["categories": Self.registrationCategories],
       "subscriptions": ["groupIds": [], "areaIds": []],
       "timezone": TimeZone.current.identifier,
     ])
@@ -90,6 +125,7 @@ final class PushNotificationService: NSObject, PushNotificationProviding, UNUser
   func recordDeviceToken(_ data: Data) {
     deviceToken = data.map { String(format: "%02x", $0) }.joined()
     registrationFailure = nil
+    CSMCommunicationNotifications.recordDeviceToken(data)
     tokenContinuation?.resume(returning: deviceToken!)
     tokenContinuation = nil
   }
@@ -97,13 +133,42 @@ final class PushNotificationService: NSObject, PushNotificationProviding, UNUser
   func recordRegistrationFailure(_ error: any Error) {
     deviceToken = nil
     registrationFailure = "registration"
+    CSMCommunicationNotifications.recordRegistrationFailure(error)
     tokenContinuation?.resume(throwing: PushRegistrationError.registrationFailed)
     tokenContinuation = nil
   }
 
   func receiveRemoteNotification(_ userInfo: [AnyHashable: Any], interaction: Bool) {
     guard let payload = Self.sanitizedPayload(userInfo) else { return }
-    eventReceiver?("notifications.opened", payload.merging(["interaction": interaction]) { current, _ in current })
+    emitBridgeEvent(
+      type: "notifications.opened",
+      payload: payload.merging(["interaction": interaction]) { current, _ in current }
+    )
+    if interaction, payload["roomId"] is String {
+      NotificationCenter.default.post(name: .copNativeChatRequested, object: nil, userInfo: payload)
+    }
+  }
+
+  func detachEventReceiver() {
+    eventReceiver = nil
+  }
+
+  private func emitBridgeEvent(type: String, payload: [String: Any]) {
+    guard let eventReceiver else {
+      if pendingBridgeEvents.count >= 16 { pendingBridgeEvents.removeFirst() }
+      pendingBridgeEvents.append((type, payload))
+      return
+    }
+    eventReceiver(type, payload)
+  }
+
+  private func flushPendingBridgeEvents() {
+    guard let eventReceiver else { return }
+    let events = pendingBridgeEvents
+    pendingBridgeEvents.removeAll(keepingCapacity: true)
+    for (type, payload) in events {
+      eventReceiver(type, payload)
+    }
   }
 
   nonisolated func userNotificationCenter(
@@ -112,8 +177,13 @@ final class PushNotificationService: NSObject, PushNotificationProviding, UNUser
     withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
   ) {
     let payload = notification.request.content.userInfo
-    Task { @MainActor in self.receiveRemoteNotification(payload, interaction: false) }
-    completionHandler([.banner, .sound, .badge])
+    let completion = NotificationCompletionBox(completionHandler)
+    Task { @MainActor in
+      CSMCommunicationNotifications.receiveForegroundNotification(payload)
+      await CSMCommunicationNotifications.processPendingNotifications()
+      self.receiveRemoteNotification(payload, interaction: false)
+      completion([.banner, .sound, .badge])
+    }
   }
 
   nonisolated func userNotificationCenter(
@@ -122,22 +192,38 @@ final class PushNotificationService: NSObject, PushNotificationProviding, UNUser
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
     let payload = response.notification.request.content.userInfo
-    Task { @MainActor in self.receiveRemoteNotification(payload, interaction: true) }
-    completionHandler()
+    let actionIdentifier = response.actionIdentifier
+    let responseText = (response as? UNTextInputNotificationResponse)?.userText
+    let completion = NotificationCompletionBox<Void> { _ in completionHandler() }
+    Task { @MainActor in
+      CSMCommunicationNotifications.receiveNotificationResponse(
+        payload,
+        actionIdentifier: actionIdentifier,
+        responseText: responseText
+      )
+      await CSMCommunicationNotifications.processPendingNotifications()
+      self.receiveRemoteNotification(
+        payload,
+        interaction: Self.shouldOpenNativeChat(for: actionIdentifier)
+      )
+      completion(())
+    }
   }
 
-  private func registerCategories() {
-    let open = UNNotificationAction(identifier: "OPEN", title: "Otevřít", options: [.foreground])
-    center.setNotificationCategories([
-      UNNotificationCategory(identifier: "CSM_SYSTEM", actions: [open], intentIdentifiers: []),
-      UNNotificationCategory(identifier: "CSM_SAFETY_ALERT", actions: [open], intentIdentifiers: []),
-      UNNotificationCategory(identifier: "CSM_CHAT", actions: [open], intentIdentifiers: []),
-    ])
+  static func shouldOpenNativeChat(for actionIdentifier: String) -> Bool {
+    switch actionIdentifier {
+    case UNNotificationDefaultActionIdentifier, "CSM_OPEN", "CSM_REPLY":
+      true
+    default:
+      false
+    }
   }
 
   private var appInstanceID: String {
     let key = "cz.zeleznalady.csm.app-instance-id"
-    if let value = UserDefaults.standard.string(forKey: key), UUID(uuidString: value) != nil { return value }
+    if let value = UserDefaults.standard.string(forKey: key), UUID(uuidString: value) != nil {
+      return value
+    }
     let value = UUID().uuidString.lowercased()
     UserDefaults.standard.set(value, forKey: key)
     return value
@@ -147,7 +233,9 @@ final class PushNotificationService: NSObject, PushNotificationProviding, UNUser
     if let deviceToken { return deviceToken }
     guard tokenContinuation == nil else { throw PushRegistrationError.registrationPending }
     UIApplication.shared.registerForRemoteNotifications()
-    return try await withCheckedThrowingContinuation { continuation in tokenContinuation = continuation }
+    return try await withCheckedThrowingContinuation { continuation in
+      tokenContinuation = continuation
+    }
   }
 
   private static func statusPayload(
@@ -189,7 +277,9 @@ final class PushNotificationService: NSObject, PushNotificationProviding, UNUser
     let allowed = ["notificationId", "eventId", "category", "route", "roomId", "callId"]
     var result: [String: Any] = [:]
     for key in allowed {
-      guard let value = userInfo[key] as? String, !value.isEmpty, value.count <= 512 else { continue }
+      guard let value = userInfo[key] as? String, !value.isEmpty, value.count <= 512 else {
+        continue
+      }
       if key == "route" && !value.hasPrefix("/") { continue }
       result[key] = value
     }
@@ -232,9 +322,12 @@ final class COPMobileAppDelegate: NSObject, UIApplicationDelegate {
     didReceiveRemoteNotification userInfo: [AnyHashable: Any],
     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
   ) {
+    let completion = NotificationCompletionBox(completionHandler)
     Task { @MainActor in
+      CSMCommunicationNotifications.receiveBackgroundNotification(userInfo)
+      await CSMCommunicationNotifications.processPendingNotifications()
       PushNotificationService.shared.receiveRemoteNotification(userInfo, interaction: false)
-      completionHandler(.newData)
+      completion(.newData)
     }
   }
 }

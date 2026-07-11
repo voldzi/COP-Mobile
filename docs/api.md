@@ -9,13 +9,20 @@ repozitáři nevzniká `openapi/openapi.json`. Aplikace:
 
 1. hostuje COP web, který volá stávající COP API;
 2. poskytuje webu lokální, verzovaný `COP Device API` přes bezpečný bridge;
-3. jako nativní klient volá pouze úzce vymezené technické endpointy, například
+3. přes `CSMCommunicationKit` používá schválené OIDC, COP/CSM Messaging a
+   Matrix klientské kontrakty pro nativní E2EE chat;
+4. jako nativní host volá úzce vymezené technické endpointy, například
    registraci APNs zařízení u CSM Messaging.
 
 Implementován je handshake protokolu `1.0.0`, read-only
 `system.getCapabilities` a první foreground slice pro `permissions`, `location`
 a `heading`. Ostatní namespace host vrací jako `unsupported`; jejich popis níže
 je cílový kontrakt, nikoli tvrzení o hotové funkci.
+
+ADR 0009 navíc zavádí úzké implementované metody
+`communications.openChat` a `calls.updatePresentation`. Samotný nativní chat
+není transportován přes Device bridge; je SwiftUI povrchem
+`CSMCommunicationKit` a používá serverové kontrakty přímo.
 
 ### Implementovaný iOS Location + Heading slice
 
@@ -48,7 +55,9 @@ Native nikdy nevyvolá systémový dialog z handshake, capability dotazu ani
 | COP Device JSON Schema | `01 COP/packages/cop-device-contract` | web, iOS, později Android |
 | TypeScript `CopDevice` SDK | `01 COP/packages/cop-device-sdk` | COP web a browser/mock adapter |
 | Bridge contract fixtures | contract package v `01 COP`; zde připnutý artifact `1.0.0` | TypeScript, Swift a Kotlin CI |
-| CSM Messaging REST | autoritativní OpenAPI služby CSM Messaging | native push registrace |
+| CSM Messaging REST | autoritativní OpenAPI služby CSM Messaging | native push registrace a `CSMCommunicationKit` |
+| Matrix Client-Server/E2EE | Matrix/Synapse a připnutý Matrix Rust SDK | `CSMCommunicationKit` |
+| Native communications module API | Swift Package produkt `CSMCommunicationKit` | COP Mobile SwiftUI host |
 
 Mobilní repozitář nesmí ručně založit konkurenční „master“ kopii TypeScript
 typů nebo JSON Schema. Může obsahovat generované Swift/Kotlin modely, zamčenou
@@ -62,7 +71,7 @@ aktuálním `01 COP/openapi/openapi.json`.
 
 | Metoda a cesta | Účel pro thin host | Poznámka |
 | --- | --- | --- |
-| `GET /api/v1/mobile/bootstrap` | bezpečná konfigurace, profil, capabilities a read-only snapshot | původně pro plně nativního klienta; thin host jej přímo nepotřebuje pro web UI |
+| `GET /api/v1/mobile/bootstrap` | bezpečná konfigurace, profil, capabilities a read-only snapshot | webový povrch jej přímo nepotřebuje; nativní komunikace smí spotřebovat jen explicitně podporovanou část |
 | `GET /api/v1/mobile/offline-snapshot` | policy-filtered read-only data | není offline write/outbox kontrakt |
 | `POST /api/v1/mobile/devices` | audit mobilní session/capabilities | výslovně není APNs registry |
 | `GET /api/v1/mobile/devices` | seznam spárovaných zařízení | přístup uživatele dle COP autorizace |
@@ -80,6 +89,29 @@ aktuálním `01 COP/openapi/openapi.json`.
 COP API používá OIDC bearer token a současný COP error envelope s
 `correlationId`; thin host nesmí jeho chyby přemapovat na nový serverový
 formát. Bridge má vlastní lokální error contract popsaný níže.
+
+## Nativní komunikační kontrakty
+
+`CSMCommunicationKit` je klient, nikoli nový backend. Používá:
+
+- OIDC discovery/authorize/token/logout flow pro veřejný klient `csm-mobile`,
+  Authorization Code + PKCE a redirect scheme `csm`;
+- COP messaging bootstrap a conversation metadata podle autoritativního COP
+  OpenAPI;
+- CSM Messaging device/notification preference kontrakty podle autoritativní
+  dokumentace služby;
+- Matrix Client-Server API přes připnutý Matrix Rust SDK pro session restore,
+  sync, E2EE timeline, send queue, media a recovery.
+
+Konkrétní JSON response se nesmí ručně opisovat do tohoto repozitáře. Autoritou
+zůstávají OpenAPI služby a verzované Swift modely `CSMCommunicationKit`.
+Komunikační modul hostu zveřejňuje pouze SwiftUI surface; nevystavuje access či
+refresh token, Matrix device secret, recovery material, decrypted timeline ani
+interní service objekty.
+
+Webová a nativní OIDC/Matrix session jsou dvě různá klientská zařízení. Musí mít
+odlišné stabilní device ID a samostatný revoke/logout lifecycle. Bridge není
+token exchange ani náhrada OIDC.
 
 ## Plánované COP Device API
 
@@ -102,6 +134,8 @@ použít deterministický mock. Web se nesmí větvit podle `isIOS` nebo
 | `media` | `capturePhoto`, `pickPhoto`, `pickDocument`, `getAssetMetadata`, `releaseAsset` | vrací pouze opaque asset reference |
 | `shares` | `list`, `claim`, `discard` | inbox naplněný Share Extension |
 | `notifications` | `getStatus`, `requestAuthorization`, `scheduleLocal`, `cancelLocal`, `registerRemote` | APNs token zůstává native-only |
+| `communications` | `openChat` | prázdný request pouze otevře nativní SwiftUI chat; nevrací obsah ani auth stav |
+| `calls` | `updatePresentation`, `acknowledgeAction` | přechodné zrcadlení bounded webového call state do SwiftUI/CallKit a potvrzení uživatelského CallKit povelu; žádná signalizace nebo média |
 | `relay` | `getStatus`, `start`, `stop`, `enqueue`, `listQueue` | budoucí, opt-in, feature flag, iOS foreground-oriented |
 
 `location.startUpdates` není background tracking. Reload WebView ukončí
@@ -204,6 +238,8 @@ Pravidla:
 - starý session ID po reloadu nebo navigaci vrací `SESSION_EXPIRED`;
 - bridge JSON má baseline limit 64 KiB; per-method limit může být přísnější;
 - binary payload ani webový/APNs token není součástí bridge logu;
+- native OIDC/Matrix token, chat event, recovery key, SDP ani ICE candidate není
+  součástí bridge requestu, response nebo eventu;
 - eventy se do JavaScriptu předávají argumenty/structured data, ne interpolací
   neověřeného textu do zdrojového kódu.
 
@@ -252,10 +288,54 @@ První kontrakt počítá minimálně s těmito skupinami:
 - `connectivity.changed`;
 - `media.assetExpired`, `shares.received`;
 - `notifications.opened`;
+- `calls.answerRequested`, `calls.rejectRequested`, `calls.endRequested` jako
+  úzké user-action eventy pro přechodný webový media engine. Každý nese stabilní
+  UUID `actionId`, bounded `callId` a `roomId`; opakované doručení stejného
+  `actionId` je retry, nikoli nový uživatelský povel;
 - budoucí `relay.*` stavové a transportní události.
 
 Notifikační/deep-link event nese pouze validovanou interní route nebo opaque ID.
 Nesmí nařídit navigaci na libovolnou URL.
+
+### Native communications a call presentation
+
+`communications.openChat` přijímá pouze `{}` a vrací `{ "opened": true }`.
+Nevytváří session, nepřijímá room ID a neposílá do webu chatový stav.
+
+`calls.updatePresentation` přijímá jen:
+
+- bounded opaque `callId` a `roomId`;
+- volitelný bounded display `title`;
+- `direction`: `incoming` nebo `outgoing`;
+- `phase`: `ringing`, `connecting`, `connected`, `ended` nebo `failed`.
+
+Neterminální update je povolen jen aktivní aplikaci, pro nejvýše jednu call
+identity a po validním stavovém přechodu. `ended`/`failed` může pouze uklidit
+již známý hovor. Při zániku bridge session se známý web-owned hovor označí jako
+failed a CallKit presentation se odstraní. Procesní kvóta je 40 update requestů
+za 60 sekund a nejvýše čtyři nové call identity v klouzavém pětiminutovém
+okně; překročení vrací `RATE_LIMITED`.
+
+`calls.acknowledgeAction` přijímá přesně `actionId`, `callId`, `roomId` a
+`outcome` (`succeeded` nebo `failed`). Identita musí odpovídat čekajícímu
+nativnímu povelu. CallKit `answer`, `reject`, `end` ani `mute` se neoznačí jako
+splněný před kladným potvrzením, které COP Chat odešle až po dokončení příslušné
+operace Matrix call enginu. Native opakuje event se stejným `actionId`; bez ACK
+do 12 sekund akci failne. COP Chat drží před provedením nejvýše 9 sekund bounded
+pending command, takže cold-start command nezmizí jen proto, že Matrix call
+snapshot ještě není připravený. Neznámé nebo pozdní ACK vrací
+`{ "acknowledged": false }` a nemění CallKit stav.
+Záporný ACK, nativní timeout i CallKit `timedOutPerforming` vynutí process-wide
+invalidaci a reload webového media enginu, ukončení presentation a deaktivaci
+audio session. `answer`/`mute` v této větvi failnou; `end`/`reject` lze fulfillnout
+až po tomto nuceném lokálním uzavření. Remote `ended` zruší všechny čekající
+akce stejného call UUID, aby pozdější retry nemohl hovor obnovit.
+
+Metoda řídí pouze nativní presentation state. SDP, ICE candidates, TURN
+credentials, media tracks, Matrix access token ani celý Matrix event jsou
+zakázané. Native nesmí vytvořit stav `connected` odhadem; přebírá jej až po
+potvrzení současného webového Matrix/WebRTC enginu. Plně nativní media contract
+neexistuje a vyžaduje samostatný ADR/gate.
 
 ## Push registrační ticket
 
@@ -267,8 +347,11 @@ Implementovaný kontrakt zachovává tyto hranice:
   `chat.voice_call.ended` podle ADR 0008;
 
 - COP `POST /api/v1/mobile/devices` neukládá APNs token;
-- CSM Messaging `POST /api/v1/devices` dnes očekává uživatelský access token;
-- web vlastní OIDC relaci a nativní host ji nemá kopírovat.
+- CSM Messaging `POST /api/v1/devices` dnes očekává uživatelský access token
+  nebo schválený jednorázový registration ticket;
+- webový push registration flow nekopíruje webový OIDC token do nativní vrstvy.
+  Samostatná nativní OIDC session `CSMCommunicationKit` není bridge credential a
+  nemění tuto hranici.
 
 `01 COP/openapi/openapi.json` obsahuje autentizovaný endpoint:
 
@@ -316,6 +399,10 @@ Nesmějí se sloučit ani potvrdit bez explicitního correlation ID.
 - Každá nová metoda obsahuje success, permission denied, unsupported, timeout,
   malformed input, duplicate ID a stale session fixture.
 - Web musí projít testy s native, browser i mock adaptérem.
+- `CSMCommunicationKit` musí projít své OIDC/Matrix/E2EE contract a migration
+  testy proti připnutému SDK a staging backendům.
+- `communications.openChat` a `calls.updatePresentation` mají validní,
+  malformed, origin/frame, duplicate ID, stale session a payload-limit fixtures.
 - Release gate ověří nekompatibilní web/host verzi jako řízený `BLOCKED` stav.
 - Změna COP REST API vždy začíná úpravou JSON-first OpenAPI; tento dokument
   nenahrazuje binding wire contract.

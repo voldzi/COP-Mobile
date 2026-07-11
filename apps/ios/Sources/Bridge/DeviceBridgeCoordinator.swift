@@ -4,6 +4,7 @@ import UIKit
 
 private enum BridgeExecutionError: Error {
   case notForeground
+  case rateLimited
   case unsupported
 }
 
@@ -19,11 +20,17 @@ final class DeviceBridgeCoordinator {
   private let location: DeviceLocationProviding
   private let notifications: PushNotificationProviding
   private let isForeground: () -> Bool
+  private let openNativeChat: () -> Void
+  private let updateCallPresentation: (String, String, String?, String, String) -> Bool
+  private let acknowledgeCallAction: (String, String, String, String) -> Bool
+  private let invalidateCallPresentation: () -> Void
   var eventSink: (([String: Any]) -> Void)?
   private var navigationIsEligible = false
   private var sessionID: String?
   private var eventSequence = 0
   private var pendingEvents: [(String, Any)] = []
+  private var callPresentationUpdateTimes: [Date] = []
+  private var callPresentationIdentities: [String: Date] = [:]
   private struct CachedResponse {
     let requestDigest: String
     let response: [String: Any]
@@ -36,13 +43,42 @@ final class DeviceBridgeCoordinator {
     originPolicy: OriginPolicy,
     location: DeviceLocationProviding = CoreLocationService(),
     notifications: PushNotificationProviding = PushNotificationService.shared,
-    isForeground: @escaping () -> Bool = { UIApplication.shared.applicationState == .active }
+    isForeground: @escaping () -> Bool = { UIApplication.shared.applicationState == .active },
+    openNativeChat: @escaping () -> Void = {},
+    updateCallPresentation: @escaping (String, String, String?, String, String) -> Bool = {
+      callID, roomID, title, direction, phase in
+      VoiceCallService.shared.updateFromWeb(
+        callID: callID,
+        roomID: roomID,
+        title: title,
+        direction: direction,
+        phase: phase
+      )
+    },
+    acknowledgeCallAction: @escaping (String, String, String, String) -> Bool = {
+      actionID, callID, roomID, outcome in
+      VoiceCallService.shared.acknowledgeAction(
+        actionID: actionID,
+        callID: callID,
+        roomID: roomID,
+        outcome: outcome
+      )
+    },
+    invalidateCallPresentation: @escaping () -> Void = {
+      VoiceCallService.shared.webMediaEngineDidBecomeUnavailable()
+    }
   ) {
     self.originPolicy = originPolicy
     self.location = location
     self.notifications = notifications
     self.isForeground = isForeground
-    notifications.eventReceiver = { [weak self] type, payload in self?.emit(type: type, payload: payload) }
+    self.openNativeChat = openNativeChat
+    self.updateCallPresentation = updateCallPresentation
+    self.acknowledgeCallAction = acknowledgeCallAction
+    self.invalidateCallPresentation = invalidateCallPresentation
+    notifications.eventReceiver = { [weak self] type, payload in
+      self?.emit(type: type, payload: payload)
+    }
   }
 
   func navigationDidCommit(url: URL?) {
@@ -51,12 +87,27 @@ final class DeviceBridgeCoordinator {
   }
 
   func invalidateSession() {
+    let hadActiveBridgeSession = sessionID != nil
     location.stopAllUpdates()
     navigationIsEligible = false
     sessionID = nil
     eventSequence = 0
     responseCache.removeAll(keepingCapacity: true)
     responseOrder.removeAll(keepingCapacity: true)
+    if hadActiveBridgeSession {
+      invalidateCallPresentation()
+    }
+  }
+
+  func detachEventReceiver() {
+    notifications.eventReceiver = nil
+  }
+
+  func eventDeliveryDidFail(_ event: [String: Any]) {
+    if let type = event["type"] as? String, let payload = event["payload"] {
+      enqueuePendingEvent(type: type, payload: payload)
+    }
+    invalidateSession()
   }
 
   func handle(message body: Any, context: RequestContext) async -> [String: Any] {
@@ -139,7 +190,8 @@ final class DeviceBridgeCoordinator {
     ]
   }
 
-  private func handleRequest(_ message: [String: Any], requestDigest: String) async -> [String: Any] {
+  private func handleRequest(_ message: [String: Any], requestDigest: String) async -> [String: Any]
+  {
     let requiredKeys: Set<String> = [
       "kind", "protocolVersion", "id", "sessionId", "method", "sentAt", "params",
     ]
@@ -222,7 +274,8 @@ final class DeviceBridgeCoordinator {
     case "location.getCurrent":
       try validateAccuracyParams(params)
       guard isForeground() else { throw BridgeExecutionError.notForeground }
-      return try await location.currentLocation(timeout: .milliseconds(DeviceCapabilities.requestTimeoutMilliseconds))
+      return try await location.currentLocation(
+        timeout: .milliseconds(DeviceCapabilities.requestTimeoutMilliseconds))
     case "location.startUpdates":
       try validateAccuracyParams(params)
       guard isForeground() else { throw BridgeExecutionError.notForeground }
@@ -264,7 +317,42 @@ final class DeviceBridgeCoordinator {
         let messagingBaseURL = params["messagingBaseUrl"] as? String
       else { throw DeviceLocationError.invalidSample }
       guard isForeground() else { throw BridgeExecutionError.notForeground }
-      return try await notifications.registerRemote(ticket: ticket, messagingBaseURL: messagingBaseURL)
+      return try await notifications.registerRemote(
+        ticket: ticket, messagingBaseURL: messagingBaseURL)
+    case "communications.openChat":
+      guard params.isEmpty else { throw DeviceLocationError.invalidSample }
+      guard isForeground() else { throw BridgeExecutionError.notForeground }
+      openNativeChat()
+      return ["opened": true]
+    case "calls.updatePresentation":
+      guard Set(params.keys).isSubset(of: ["callId", "direction", "phase", "roomId", "title"]),
+        let callID = boundedBridgeString(params["callId"], maximum: 512),
+        let roomID = boundedBridgeString(params["roomId"], maximum: 512),
+        let direction = params["direction"] as? String,
+        ["incoming", "outgoing"].contains(direction),
+        let phase = params["phase"] as? String,
+        ["ringing", "connecting", "connected", "ended", "failed"].contains(phase)
+      else { throw DeviceLocationError.invalidSample }
+      if phase != "ended" && phase != "failed" {
+        guard isForeground() else { throw BridgeExecutionError.notForeground }
+      }
+      try consumeCallPresentationQuota(callID: callID, roomID: roomID)
+      let title = boundedBridgeString(params["title"], maximum: 180)
+      guard updateCallPresentation(callID, roomID, title, direction, phase) else {
+        throw DeviceLocationError.invalidSample
+      }
+      return ["updated": true]
+    case "calls.acknowledgeAction":
+      guard Set(params.keys) == ["actionId", "callId", "outcome", "roomId"],
+        let actionID = validUUID(params["actionId"]),
+        let callID = boundedBridgeString(params["callId"], maximum: 512),
+        let roomID = boundedBridgeString(params["roomId"], maximum: 512),
+        let outcome = params["outcome"] as? String,
+        ["failed", "succeeded"].contains(outcome)
+      else { throw DeviceLocationError.invalidSample }
+      return [
+        "acknowledged": acknowledgeCallAction(actionID, callID, roomID, outcome)
+      ]
     default:
       throw BridgeExecutionError.unsupported
     }
@@ -274,6 +362,32 @@ final class DeviceBridgeCoordinator {
     guard Set(params.keys) == ["permission"], params["permission"] as? String == "location" else {
       throw DeviceLocationError.invalidSample
     }
+  }
+
+  private func boundedBridgeString(_ value: Any?, maximum: Int) -> String? {
+    guard let value = value as? String else { return nil }
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty || trimmed.count > maximum ? nil : trimmed
+  }
+
+  private func consumeCallPresentationQuota(callID: String, roomID: String) throws {
+    let now = Date()
+    callPresentationUpdateTimes.removeAll { now.timeIntervalSince($0) > 60 }
+    guard callPresentationUpdateTimes.count < 40 else {
+      throw BridgeExecutionError.rateLimited
+    }
+
+    callPresentationIdentities = callPresentationIdentities.filter {
+      now.timeIntervalSince($0.value) <= 300
+    }
+    let identity = "\(roomID)\u{0}\(callID)"
+    if callPresentationIdentities[identity] == nil {
+      guard callPresentationIdentities.count < 4 else {
+        throw BridgeExecutionError.rateLimited
+      }
+    }
+    callPresentationIdentities[identity] = now
+    callPresentationUpdateTimes.append(now)
   }
 
   private func validateAccuracyParams(_ params: [String: Any]) throws {
@@ -290,14 +404,14 @@ final class DeviceBridgeCoordinator {
   private func permissionResult() -> [String: Any] {
     [
       "permission": "location", "status": location.permission,
-      "accuracy": location.permission == "granted" ? (location.reducedAccuracy ? "reduced" : "full") : "unavailable",
+      "accuracy": location.permission == "granted"
+        ? (location.reducedAccuracy ? "reduced" : "full") : "unavailable",
     ]
   }
 
   private func emit(type: String, payload: Any) {
     guard let sessionID else {
-      if pendingEvents.count >= 8 { pendingEvents.removeFirst() }
-      pendingEvents.append((type, payload))
+      enqueuePendingEvent(type: type, payload: payload)
       return
     }
     eventSequence += 1
@@ -306,6 +420,17 @@ final class DeviceBridgeCoordinator {
       "eventId": UUID().uuidString.lowercased(), "sessionId": sessionID,
       "sequence": eventSequence, "type": type, "occurredAt": timestamp(), "payload": payload,
     ])
+  }
+
+  private func enqueuePendingEvent(type: String, payload: Any) {
+    if let payload = payload as? [String: Any], let actionID = payload["actionId"] as? String {
+      pendingEvents.removeAll {
+        guard let existing = $0.1 as? [String: Any] else { return false }
+        return existing["actionId"] as? String == actionID
+      }
+    }
+    if pendingEvents.count >= 8 { pendingEvents.removeFirst() }
+    pendingEvents.append((type, payload))
   }
 
   private func flushPendingEvents() {
@@ -331,6 +456,8 @@ final class DeviceBridgeCoordinator {
       ("CANCELLED", "The operation was cancelled.")
     case BridgeExecutionError.notForeground:
       ("NOT_FOREGROUND", "This operation requires the app to be active.")
+    case BridgeExecutionError.rateLimited:
+      ("RATE_LIMITED", "Too many call presentation updates were requested.")
     case BridgeExecutionError.unsupported:
       ("UNSUPPORTED", "Method is not implemented by this host.")
     case DeviceLocationError.invalidSample:

@@ -2,20 +2,22 @@
 
 ## Stav a účel
 
-Repozitář obsahuje buildovatelný iOS host a první Location + Heading slice.
-Aktuální unit a contract testy pokrývají origin policy, handshake, capability
-baseline, jednorázovou polohu a lifecycle foreground subscription;
-`implementation-report-phase-2.md` pravdivě odděluje simulátor, beta toolchain,
-schválený Xcode 27 beta CI a dosud neprovedené fyzické/backendové scénáře.
+Repozitář obsahuje buildovatelný hybridní iOS host, Location + Heading slice,
+nativní chat přes `CSMCommunicationKit` a nativní call presentation podle
+ADR 0009. Dokument pravdivě odděluje existující SwiftUI/CallKit povrch od
+přechodného webového Matrix/WebRTC media enginu a od budoucího plně nativního
+WebRTC gate.
 
 Minimální platforma je **iOS 26**. Úspěšný build nebo simulátor sám o sobě není
-důkaz funkčního kompasu, motion, APNs, background location, Share Extension ani
-budoucího rádiového transportu.
+důkaz funkčního kompasu, motion, APNs, E2EE interoperability, CallKit audio,
+proximity, background location, Share Extension ani budoucího rádiového
+transportu.
 
 ## Principy kvality
 
-- Testuje se hranice „COP web = UI/business“ a „native = capability/transport“,
-  nikoli jen jednotlivé metody.
+- Testuje se hranice „COP web = mapa/report/business“,
+  „CSMCommunicationKit = native E2EE chat“ a „host = capability/call
+  presentation“, nikoli jen jednotlivé metody.
 - Jediným veřejným kontraktem webu je verzovaný `CopDevice`; Swift a TypeScript
   používají stejné JSON Schema a fixtures.
 - Každá citlivá capability má happy path, denied/restricted/revoked variantu a
@@ -23,6 +25,9 @@ budoucího rádiového transportu.
 - Bezpečnost bridge se testuje jako nepřátelská hranice i při trusted originu.
 - Offline, background a notifikační chování se testuje změnou skutečného stavu
   zařízení, ne pouze mockem.
+- Nativní call UI se nesmí použít jako důkaz nativního media enginu. Každý call
+  test zaznamená zvlášť PushKit, CallKit presentation, web signaling, ICE/TURN a
+  media-connected outcome.
 - Test nesmí do příloh, screenshotů ani logů vložit produkční token, reálnou
   polohu osoby, obsah občanského hlášení nebo soukromé fotografie.
 - Flaky real-device test se neignoruje; přesune se do karantény s vlastníkem,
@@ -47,12 +52,12 @@ Full/Reduced Accuracy stav, GPS accuracy a reakci headingu při rotaci zařízen
 | --- | --- | --- | --- |
 | Dokumentace a konfigurace | Povinné soubory, žádná tajemství, sladěné targety/entitlements | CI / shell | Každý commit |
 | Contract fixtures | Stejná interpretace bridge requestů, response, eventů a dat | TypeScript + Swift | Každá změna schématu |
-| Swift unit | Routing, validace, state machines, filtry, retence, privacy redaction | macOS CI bez WebView/radia | Pull request |
+| Swift unit | Routing, bridge a call state machines, OIDC/Matrix store boundaries, filtry, retence, privacy redaction | macOS CI bez WebView/radia | Pull request |
 | Web unit/component | Native/browser adapter, capability UI, timeouts, denied UX | COP CI | Pull request v COP |
-| Integration | `WKWebView` ↔ bridge ↔ fake native services, origin a lifecycle | iOS 26 simulator + lokální test origin | Pull request / nightly |
-| UI automation | Start, fallback, permission copy, deep link, tracking state, accessibility | iOS 26 simulator; vybrané testy device | Release candidate |
-| Backend contract | OIDC, device ticket, APNs registration, upload/outbox a deep links | Staging | Release candidate |
-| Real device | Senzory, background, APNs, Share Extension, offline, výkon a baterie | Podepsaný build na iOS 26 | Povinný release gate |
+| Integration | `WKWebView` ↔ bridge ↔ native chat/call presentation, origin a lifecycle; Matrix adapter proti test double | iOS 26 simulator + lokální test origin | Pull request / nightly |
+| UI automation | Start, native login/chat, call view, fallback, permission copy, deep link, tracking state, accessibility | iOS 26 simulator; vybrané testy device | Release candidate |
+| Backend contract | Web/native OIDC, Matrix bootstrap/E2EE, device ticket, APNs registration, upload/outbox a deep links | Staging | Release candidate |
+| Real device | Native OIDC/E2EE chat, VoIP/CallKit/proximity/audio, senzory, background, APNs, Share Extension, offline, výkon a baterie | Podepsaný build na iOS 26 | Povinný release gate |
 | Security/privacy | Nepovolený origin, fuzz, log/entitlement/privacy audit | CI + manual artifact review | Release candidate |
 
 ## Sdílené kontraktní testy
@@ -72,6 +77,10 @@ Minimální společná sada:
 - start/read/stop background tracking session a obnovení po reloadu WebView;
 - validní `NativeAssetRef`, expirovaný/missing asset a nepovolený media type;
 - validní push deep link a route s nepovoleným originem;
+- `communications.openChat` pouze s prázdným payloadem;
+- `calls.updatePresentation` pro všechny direction/phase hodnoty, bounded ID a
+  title, foreground a povolené state transitions, plus odmítnutí SDP/ICE,
+  tokenu, druhé aktivní identity, překročení procesní kvóty a neznámého pole;
 - malformed JSON, neznámá metoda, neznámé pole, příliš velký request a timeout;
 - event sequence v pořadí, mezera v sequence, duplicita a event staré session;
 - až v relay laboratoři: TTL, hop limit, deduplikace, quota a poškozený hash.
@@ -100,6 +109,27 @@ V COP repozitáři se ověří:
 - žádný webový kód nedostane APNs token ani filesystem cestu.
 - hlasový hovor v hlavním rámci přesného COP originu vyžádá systémové oprávnění
   mikrofonu a lze jej přijmout; iframe, jiný origin a kamera jsou odmítnuty.
+- otevření nativního chatu nepřenáší room content, user token ani auth stav;
+- webový call engine posílá nativní prezentaci `connected` až po skutečném media
+  spojení a po `ended`/`failed` call overlay i proximity stav zaniknou;
+- APNs callbacky mají jediného host delegate, Matrix facade obdrží token i
+  foreground/background/action události a cold-start call action přežije do
+  prvního platného bridge handshake; push před mountem se claimne právě jednou
+  a otevře vybranou konverzaci;
+- malformed/stale call update nemůže vytvořit CallKit transakci nebo aktivovat
+  audio session.
+- CallKit answer/reject/end/mute zůstane pending do ACK Matrix commandu,
+  opakuje stejné `actionId`, deduplikuje command i ACK a při 12s timeoutu nebo
+  záporném ACK failuje. Cold-start command doručený před Matrix call snapshotem
+  se provede po jeho vzniku, nejpozději v 9s webovém pending okně;
+- JavaScript delivery error invaliduje bridge, zachová jediný pending event se
+  stejným `actionId` a po novém handshake jej doručí znovu. `CXProvider` reset
+  vyvolá webový hangup a opožděný `CXStartCallAction` nesníží `connected` na
+  `connecting`.
+- záporný ACK, 12s nativní timeout a CallKit `timedOutPerforming` vyvolají reload
+  web media enginu, report/remove call a deaktivaci audia; `end`/`reject` se po
+  forced close fulfillne, `answer`/`mute` failne a remote ended odstraní pending
+  akce stejného call UUID;
 
 ### Bezpečnost bridge
 
@@ -135,6 +165,12 @@ Automatizované integrační testy a ruční penetrační scénáře musí ově�
 - tracking session state machine, durable cursor, stop a recovery metadat;
 - asset allowlist, skutečná velikost, SHA-256, quota, TTL a cleanup;
 - APNs/deep-link parsing bez vystavení tokenu nebo nepovolené route;
+- nativní OIDC state/issuer/redirect/PKCE validace, cancel, refresh, logout a
+  změna subjectu;
+- Matrix bootstrap/session restore, oddělené web/native device ID, encrypted
+  timeline/outbox reducer, idempotentní retry a cross-user store isolation;
+- call presentation state machine, incoming/outgoing CallKit action mapping,
+  audio activate/deactivate, mute/speaker route a proximity enable/cleanup;
 - OSLog privacy redaction a diagnostický export bez zakázaných hodnot.
 
 Nativní služby musí být testovatelné přes protokoly/fakes bez spuštění WebView.
@@ -151,6 +187,14 @@ být injektovatelné, aby byly expiry a lifecycle scénáře deterministické.
 - příjem pending Share Extension položky a otevření správného webového importu;
 - tap na lokální/push notifikaci za foreground, background a terminated stavu;
 - nepřihlášený deep link projde loginem a až poté otevře autorizovanou route;
+- otevření/zavření `CSMCommunicationHost` nezruší WebView route ani aktivní
+  webový call engine;
+- fresh nativní OIDC login, návrat přes `csm` redirect, obnovení Keychain session,
+  nativní logout a nezávislá webová session;
+- E2EE send/receive mezi webem a nativním Matrix zařízením, offline outbox a
+  reconnect bez duplicitního eventu;
+- call overlay nad COP i chatem, ringing/connecting/connected/failed/ended,
+  mute, speaker a accessibility controls;
 - VoiceOver label/order, Dynamic Type, dark mode, Reduce Motion a rotace zařízení.
 
 Systémový permission stav se mezi UI testy nesmí nepozorovaně dědit. Test setup
@@ -168,6 +212,32 @@ ručně připravený fyzický telefon.
 Pro pilot nestačí jedno zařízení použité vývojářem. Minimálně dva iPhony musí
 mít odlišnou hardwarovou generaci a testovací Apple IDs / push registrace.
 Modely, OS buildy a fyzická dostupnost se evidují v implementačním reportu.
+
+### Nativní komunikace a hovory na fyzickém zařízení
+
+- OIDC/PKCE fresh login, cancel, přerušení callbacku, refresh po restartu,
+  logout, revoked refresh token a přihlášení jiného subjectu;
+- potvrzení, že WebKit a native mají oddělené session/device ID a že bridge ani
+  log neobsahuje žádný access/refresh token nebo recovery material;
+- web → native a native → web E2EE zpráva, reakce/reply/příloha podle
+  podporovaného povrchu, history pagination a recovery warning;
+- airplane mode s cached timeline a encrypted outboxem, reconnect, retry,
+  idempotence a serverové potvrzení bez dvojité zprávy;
+- incoming i outgoing hovor přes Wi-Fi a mobilní síť, TURN relay, změna sítě,
+  Bluetooth připojení/odpojení, audio interruption a zamčená obrazovka;
+- PushKit → CallKit při foreground, background a system-terminated procesu;
+- pokračování obousměrného zvuku po lock/background pouze během aktivní
+  CallKit session a jeho zastavení po end/failure;
+  force-quit se vykazuje jako omezení platformy, ne Pass;
+- ringing, connecting, connected, failed, remote ended a lokální end; duration
+  začíná až po potvrzeném `connected`;
+- přiložení connected handset hovoru k uchu zčerná obrazovku a blokuje dotyk,
+  oddálení ji obnoví, speaker/Bluetooth se chovají podle route policy a cleanup
+  po skončení vždy vypne proximity monitoring;
+- oddělené důkazy pro CallKit presentation, web Matrix signaling, ICE/TURN a
+  obousměrný audio stream. Nativní call UI samo o sobě není Pass pro média;
+- plně nativní WebRTC není součástí tohoto gate a nesmí být označen jako
+  implementovaný bez nového ADR, dependency auditu a interoperability sady.
 
 ### Senzory a tracking na fyzickém zařízení
 
@@ -210,11 +280,15 @@ prostor. Export důkazů obsahuje pouze agregované metriky nebo redigovanou tra
 - validní, expirovaný, duplicitní a neautorizovaný deep link;
 - payload inspection potvrzující absenci citlivého textu a tokenu;
 - token rotation/reinstall a backend unregister při logout/revokaci;
+- shoda podepsaného `aps-environment` se serverovým endpointem: Debug proti
+  sandboxu, Staging/Release proti production; před TestFlight ověřit řízený
+  cutover a vyloučit smíšení tokenů obou prostředí;
 - Critical Alert pouze po doloženém entitlementu; bez něj musí být capability a
   produktové copy vypnuté;
-- PushKit/CallKit podle ADR 0008: příchozí a ended VoIP push, CallKit answer,
-  reject a end, cold start, suspended/terminated stav, zámek obrazovky, expirovaný
-  call a potvrzení, že safety ani běžné notifikace nepoužijí VoIP topic.
+- PushKit/CallKit podle ADR 0008 a 0009: příchozí a ended VoIP push, CallKit
+  answer/reject/end, native call overlay, audio route a proximity cleanup, cold
+  start, suspended/system-terminated stav, zámek obrazovky, expirovaný call a
+  potvrzení, že safety ani běžné notifikace nepoužijí VoIP topic.
 
 ## Offline, lifecycle a chaos scénáře
 
@@ -230,6 +304,9 @@ prostor. Export důkazů obsahuje pouze agregované metriky nebo redigovanou tra
    obsah, přejde na fallback a po návratu sítě bezpečně obnoví web artifact.
 4. **Síť během akce:** výpadek při uploadu/share importu zachová korelační ID a
    pravdivý stav. Native ACK, web outbox ACK a server ACK se nesmějí zaměnit.
+5. **Nativní chat offline:** po dřívější E2EE synchronizaci je dostupná pouze
+   subject-bound cached timeline; nový text zůstane v encrypted communication
+   outboxu a po reconnectu se odešle právě jednou.
 
 ### Negativní a chaos sada
 
@@ -243,6 +320,10 @@ prostor. Export důkazů obsahuje pouze agregované metriky nebo redigovanou tra
 - permission revoke, rodičovské/MDM restriction a vypnutá systémová služba;
 - dva tapy/start requesty, duplicate callback, out-of-order event a stale event;
 - logout/login jiného uživatele s pending assetem nebo tracking daty;
+- logout/login jiného uživatele s Matrix crypto storem, cached timeline a
+  pending message; data předchozího subjectu se nikdy nezobrazí;
+- WebView crash/reload během prezentovaného hovoru, stale call snapshot,
+  duplicitní PushKit invite, audio interruption a proximity notification po end;
 - starý web build proti novému hostu a nový web build proti staršímu
   podporovanému hostu v rámci deklarovaného compatibility okna.
 
@@ -256,6 +337,8 @@ nebo upraví v ADR; nesmějí být vykázány bez měření.
 | Cached shell interactive | p95 do 3 s | 20 cold startů v airplane mode po validním online seed |
 | Bridge request bez I/O | p95 do 100 ms | Signpost od validovaného requestu po response, min. 1 000 opakování |
 | Heading event → web UI | p95 do 250 ms | Signpost s aktivní foreground subscription |
+| Native cached chat interactive | Počáteční cíl p95 do 1 s po odemčení dostupného store | 20 cold startů s dříve synchronizovanou testovací identitou |
+| Call invite → CallKit report | Vždy uvnitř systémového PushKit deadline | Signpost bez obsahu payloadu na fyzickém zařízení |
 | Crash-free pilot sessions | Bez známého reprodukovatelného crash v kritické cestě | TestFlight/crash report + interní evidence |
 | Background tracking baterie | Změřená spotřeba za 30 min pro každý režim | Stejná trasa, jas, síť a battery baseline; výsledek bez marketingové interpretace |
 | Native spool/share quota | Limit je vždy vynucen bez pádu a bez překročení disku | Boundary a disk-full test |
@@ -271,13 +354,20 @@ Před release se kontroluje výsledný podepsaný `.app`, nikoli jen projektové
 soubory:
 
 - deployment target je iOS 26 a release používá schválený stabilní Xcode/SDK;
-- entitlements obsahují jen Push, App Groups, Associated Domains, schválený
-  background modes `remote-notification` a skutečný `voip`; žádný nevyužitý
-  relay, location nebo audio keepalive gate;
+- entitlements obsahují jen Push, App Groups, Associated Domains a schválené
+  background modes `remote-notification`, skutečný `voip` a `audio` výhradně
+  pro aktivní CallKit hovor; žádný nevyužitý relay, location nebo obecný audio
+  keepalive gate;
 - Info.plist obsahuje pouze používané a lokalizované purpose strings;
 - App Transport Security, App-Bound/allowlist politika a production originy jsou
   přesné; debug originy a Web Inspector chybějí;
 - privacy manifest a App Store privacy answers odpovídají binárce a všem SDK;
+- `CSMCommunicationKit` a Matrix Rust dependency jsou reprodukovatelně
+  připnuté, povolené pro iOS 26 a archive neobsahuje nepoužitý legacy target;
+- foreground, background a notification-action callback awaitují headless
+  zpracování `CSMCommunicationKit` před completion; reply/mark-read fungují i
+  bez připojeného chat view, zatímco signed-out/loading payload zůstává v
+  bounded claim-once queue;
 - strings/binary scan nenajde secret, privátní certifikát, produkční access token
   ani interní filesystem cestu;
 - kontrolovaný log capture z každé kritické cesty neobsahuje souřadnice,
@@ -288,8 +378,11 @@ soubory:
 
 | Oblast | Povinný důkaz | Release gate |
 | --- | --- | --- |
-| Architektura | Code review ukáže nulovou nativní mapu/chat/report business logiku a jediný `CopDevice` kontrakt | Ano |
-| iOS 26 host | Podepsaný build, online OIDC a stabilní WebView na fyzickém iPhonu | Ano |
+| Architektura | Code review ukáže nulovou nativní mapu/report business logiku, uzavřený `CSMCommunicationKit` a jediný `CopDevice` bridge kontrakt | Ano |
+| iOS 26 host | Podepsaný build, webová i nativní OIDC session a stabilní WebView na fyzickém iPhonu | Ano |
+| Nativní E2EE chat | Matrix Rust send/receive, offline timeline/outbox, recovery stav, logout a cross-user isolation | Ano |
+| Nativní call presentation | PushKit/CallKit, pravdivý state, audio routes, proximity a web-media interoperability | Ano |
+| Plně nativní WebRTC | Nové ADR, audit dependency, Matrix signaling a ICE/TURN/audio physical suite | Ne pro tuto etapu; nesmí se tvrdit jako hotové |
 | Bridge security | Negativní origin/frame/session/fuzz sada bez bypassu | Ano |
 | Poloha/heading/attitude | Přesnost, stáří, validity, reduced/denied a foreground omezení na zařízení | Ano |
 | Background tracking | Explicitní Start/Stop, reload continuity, screen-off test, revoke/force-quit pravdivý stav | Ano |
@@ -325,15 +418,16 @@ Release report nesmí použít „not tested“ jako Pass. `Blocked` musí mít 
 bezpečný fallback a rozhodnutí, zda blokuje release. Všechny položky označené
 „Ano“ v MVP akceptační matici musí mít fyzický důkaz nebo release nevznikne.
 
-## Ověření v aktuální dokumentační fázi
+## Ověření v aktuální implementační fázi
 
-Do založení Xcode projektu je jediný spustitelný baseline:
+Aktuální lokální baseline je:
 
 ```bash
-bash scripts/validate-skeleton.sh
+bash scripts/check.sh
+python3 scripts/validate-device-contract.py
+python3 scripts/validate-ios-project.py
 ```
 
-Po vzniku kódu se do `AGENTS.md`, `README.md` a CI doplní přesné, neinteraktivní
-příkazy pro build, unit testy, UI testy, lint/static analysis a contract
-fixtures. Neurčené názvy schémat nebo příkazy se nesmějí v dokumentaci vydávat
-za již existující implementaci.
+Tyto kontroly nenahrazují staging OIDC/Matrix/E2EE ani fyzické PushKit,
+CallKit, proximity, audio-route a WebRTC/TURN důkazy. Každý neprovedený gate se
+vykáže jako `Blocked` nebo `Not run`, nikdy jako Pass.

@@ -2,10 +2,12 @@
 
 ## Mission
 
-This repository contains COP Mobile, a thin native iOS/iPadOS host for the
-existing COP web application and a future Android host. Native code exposes
-device capabilities; it must not duplicate COP chat, map, reporting, domain
-workflow, authorization decisions, or AI orchestration.
+This repository contains COP Mobile, a hybrid iOS/iPadOS host for the existing
+COP web application, a native communications surface and a future Android host.
+The COP web remains authoritative for map, reporting and business workflows.
+Native code owns device capabilities plus the explicitly approved E2EE chat and
+call presentation boundary from ADR 0009; it must not duplicate COP map,
+reporting, domain workflow, authorization decisions or AI orchestration.
 
 The deployment target is iOS/iPadOS 26 or newer. Use the approved, exactly
 pinned Xcode 27 beta toolchain and capability-gate newer APIs.
@@ -32,6 +34,8 @@ pinned Xcode 27 beta toolchain and capability-gate newer APIs.
 - `docs/api.md` for consumed APIs and the COP Device API boundary.
 - `docs/security.md` for bridge, storage, permission, push, and relay controls.
 - `docs/test-strategy.md` for verification and real-device acceptance.
+- `docs/adr/0009-native-communications-surface.md` for the current chat, auth
+  and staged native-call boundary.
 - `docs/adr/` for architecture decisions.
 - `apps/ios/` and `apps/android/` once platform targets exist.
 - COP `openapi/openapi.json` remains authoritative for COP REST APIs.
@@ -42,9 +46,19 @@ pinned Xcode 27 beta toolchain and capability-gate newer APIs.
 
 ## Architecture Invariants
 
-- Web = UI, chat, map, business logic, domain outbox, and authorization.
-- Native = secure host, permissions, sensors, notifications, protected local
-  technical storage, Share Extension, background tracking, and transports.
+- Web = map, reporting, layers, business logic, domain outbox and authorization
+  for non-communication COP workflows.
+- `CSMCommunicationKit` = native SwiftUI chat, native OIDC/PKCE, Keychain,
+  Matrix Rust E2EE session/store, encrypted timeline and communication outbox.
+- Native host = secure shell, permissions, sensors, notifications, protected
+  technical storage, Share Extension, background tracking and transports.
+- Web and native OIDC/Matrix sessions are separate. Never copy tokens, recovery
+  material or decrypted chat content through the Device bridge.
+- The bridge may open native chat and mirror a bounded call presentation state;
+  it must not carry message content, credentials, SDP or ICE candidates.
+- CallKit, SwiftUI call UI, audio routing and proximity are native. Matrix call
+  signaling and WebRTC media remain in the web engine until the separate native
+  WebRTC ADR and interoperability gate pass.
 - The bridge is versioned, schema-validated, main-frame only, origin-restricted,
   capability-based, rate-limited, and reset on navigation or WebView reload.
 - Never expose a generic filesystem, arbitrary network request, reflection, or
@@ -56,7 +70,8 @@ pinned Xcode 27 beta toolchain and capability-gate newer APIs.
 - iOS relay is foreground/opportunistic. Production relay and sensitive relay
   payloads remain disabled until explicit security and interoperability gates
   pass.
-- Do not use CallKit/PushKit for anything other than a real VoIP call.
+- Do not use CallKit/PushKit for anything other than a real VoIP call, and do
+  not describe native call presentation as a native media engine.
 - Do not claim guaranteed ringing, exact sensor accuracy, continuous iOS mesh,
   or successful delivery without platform/server acknowledgement.
 
@@ -72,8 +87,10 @@ the owning repository.
 
 ## Environment
 
-- Current phase: iOS feasibility host; XcodeGen/Swift target exists, but Xcode
-  27 beta CI and physical-device acceptance are still open.
+- Current phase: hybrid iOS host with the COP WebView, native
+  `CSMCommunicationKit` chat and native call presentation. Native WebRTC,
+  Xcode 27 beta CI and the complete physical-device acceptance matrix remain
+  explicit gates.
 - Minimum target: iOS/iPadOS 26.
 - Planned iOS baseline: Swift 6, SwiftUI, Observation, Swift Concurrency,
   WebKit, Core Location, Core Motion, UserNotifications, Keychain, and XcodeGen.
@@ -107,9 +124,11 @@ If retrieval scope changes, run:
 ## Security and Privacy
 
 - Never commit secrets, APNs keys, provisioning profiles, signing identities,
-  access/refresh tokens, Matrix recovery material, or production managed config.
+  web or native access/refresh tokens, Matrix recovery material, store
+  passphrases, or production managed config.
 - Never log exact location, notification payload content, shared files, chat
-  content, auth tokens, raw peer identifiers, or cryptographic keys.
+  content, web/native auth tokens, raw peer identifiers, Matrix device material
+  or cryptographic keys.
 - Ask permissions only after an explicit user action and provide a usable
   denied/restricted fallback.
 - Critical Alerts require Apple entitlement and explicit user authorization;

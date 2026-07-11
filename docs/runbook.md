@@ -125,9 +125,13 @@ krok.
    Focus/mute/Scheduled Summary, token environment/topic a expiraci payloadu.
 3. Potvrďte, že CSM Messaging používá live konfiguraci a odpovídající
    sandbox/production APNs environment.
-4. Neoznačujte Time Sensitive jako guaranteed audible. Critical testujte pouze
+4. Debug/development token posílejte pouze přes sandbox; TestFlight/Release
+   production token pouze přes production endpoint. Aktuální server neumí obě
+   prostředí současně. Při cutoveru deaktivujte registrace z předchozího
+   prostředí a znovu ověřte počet iOS zařízení.
+5. Neoznačujte Time Sensitive jako guaranteed audible. Critical testujte pouze
    se skutečným entitlementem; CallKit/PushKit nepoužívejte pro výstrahu.
-5. Při kritické provozní potřebě aktivujte schválený redundantní serverový kanál.
+6. Při kritické provozní potřebě aktivujte schválený redundantní serverový kanál.
 
 ## Device registration ticket selže
 

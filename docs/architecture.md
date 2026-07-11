@@ -2,10 +2,11 @@
 
 ## Stav dokumentu
 
-Tento dokument popisuje schválenou cílovou architekturu. Repozitář je ve fázi
-2: obsahuje iOS feasibility host s bezpečným WebView baseline, bridge handshake
-a read-only capability snapshotem. Senzory, tracking, push, Share Extension,
-relay a Android zatím implementované nejsou.
+Tento dokument popisuje schválenou cílovou architekturu po ADR 0009. Repozitář
+obsahuje hybridní iOS host: bezpečný COP WebView a Device bridge, nativní E2EE
+chat přes `CSMCommunicationKit` a nativní prezentaci skutečných VoIP hovorů.
+Plně nativní WebRTC, další senzory, tracking, Share Extension, relay a Android
+mají vlastní implementační a akceptační gates.
 
 První podporovanou platformou bude iOS/iPadOS 26.0. Android bude následovat nad
 stejným kontraktem; nesmí kvůli němu vzniknout druhá webová nebo doménová
@@ -13,25 +14,30 @@ implementace.
 
 ## Účel a hranice produktu
 
-COP Mobile je tenký nativní host existující aplikace COP. Uživatelům v terénu
-zpřístupní stejné webové rozhraní mapy, chatu a hlášení jako browser/PWA a
-doplní pouze funkce, které webová platforma neposkytuje dostatečně spolehlivě:
+COP Mobile je hybridní host existující aplikace COP. Uživatelům v terénu
+zpřístupní stejné webové rozhraní mapy a hlášení jako browser/PWA, nativní E2EE
+komunikační povrch a funkce, které webová platforma neposkytuje dostatečně
+spolehlivě:
 
 - přesnou polohu, kompas a 3D natočení zařízení;
 - explicitně spuštěné sledování polohy na pozadí;
 - fotografování, výběr a příjem fotografií a dokumentů;
 - lokální a vzdálené notifikace a návrat na správnou webovou trasu;
+- nativní chat, offline timeline/outbox a Matrix E2EE lifecycle;
+- systémovou prezentaci hovoru, CallKit, audio routing a proximity blackout;
 - chráněné technické úložiště a diagnostiku;
 - v pozdější laboratorní fázi device-to-device relay.
 
-COP web zůstává jediným vlastníkem UI, mapy, chatu, doménových modelů,
-autorizace a business workflow. COP Mobile není vlastníkem ani kopií těchto
-částí.
+COP web zůstává jediným vlastníkem mapy, hlášení, vrstev, doménových modelů,
+autorizace a ostatních business workflow. Nativní komunikaci vlastní
+`CSMCommunicationKit`; host ani bridge neinterpretují Matrix credentials nebo
+decrypted chat payload.
 
 ### Mimo rozsah
 
-- nativní mapa, chat, report formuláře, Matrix klient nebo AI orchestrace;
+- nativní mapa, report formuláře nebo AI orchestrace;
 - nový mobilní backend či proxy COP API;
+- plně nativní WebRTC/media engine před samostatným ADR a interoperability gate;
 - garantované vyzvánění navzdory nastavení operačního systému;
 - trvale běžící background mesh na iOS;
 - produkční relay citlivých dat bez schváleného threat modelu, identity zařízení
@@ -59,6 +65,9 @@ flowchart LR
   contracts --> web
   contracts --> host
   web <--> oidc["Keycloak / OIDC"]
+  host <--> nativechat["CSMCommunicationKit<br/>SwiftUI + Matrix Rust E2EE"]
+  nativechat <--> oidc
+  nativechat <--> messaging
   host --> messaging["CSM Messaging<br/>registrace APNs zařízení"]
 
   android["Budoucí Android host"] -. stejný kontrakt .-> contracts
@@ -66,13 +75,15 @@ flowchart LR
 ```
 
 COP Mobile poskytuje nativní capability webu, ale neobchází COP API. Doménová
-data jdou z webu přímo do existujících serverových kontraktů. Nativní host smí
-zprostředkovat pouze technická data a operační služby zařízení.
+data mapy a hlášení jdou z webu přímo do existujících serverových kontraktů.
+Komunikační modul volá COP, CSM Messaging a Matrix pouze přes jejich existující
+autentizované kontrakty a vlastní svůj oddělený nativní OIDC/Matrix lifecycle.
 
 ## Architektonické principy
 
 1. **Web je business source of truth.** Nativní vrstva neinterpretuje hlášení,
-   incidenty, mapové vrstvy ani chatové zprávy.
+   incidenty ani mapové vrstvy. Komunikační zprávy interpretuje pouze uzavřený
+   `CSMCommunicationKit` podle Matrix/CSM kontraktů.
 2. **Contract authority je v 01 COP.** JSON Schema, TypeScript typy, webový
    `CopDevice` SDK a společné fixtures vzniknou v COP repozitáři. Mobilní
    repozitář spotřebuje připnutou verzi a validuje proti stejným fixtures.
@@ -89,17 +100,25 @@ zprostředkovat pouze technická data a operační služby zařízení.
 7. **Pravdivé degraded stavy.** Aplikace rozlišuje online, cached offline a
    fresh-install fallback. Neprohlašuje read-only snapshot za zapisovatelný
    offline režim.
+8. **Oddělené identity a secrets.** Webová a nativní OIDC/Matrix session jsou
+   samostatné; žádný token, recovery material, decrypted event, SDP ani ICE
+   candidate nepřechází Device bridgem.
+9. **Staged call ownership.** Native vlastní CallKit, SwiftUI prezentaci,
+   proximity a audio routing. Dokud neprojde native-WebRTC gate, web vlastní
+   Matrix call signalizaci a WebRTC média.
 
 ## Hlavní komponenty
 
 | Komponenta | Odpovědnost | Nevlastní |
 | --- | --- | --- |
-| App shell | SwiftUI lifecycle, startup stav, deep link routing, globální fallback a diagnostika | COP navigaci a business UI |
+| App shell | SwiftUI lifecycle, volbu COP/chat povrchu, deep link routing, call overlay, globální fallback a diagnostika | mapovou a report business logiku |
 | Web container | `WKWebView`, persistentní website data store, navigation policy a načtení COP HTTPS originu | doménová cache a autorizaci |
+| `CSMCommunicationKit` | nativní SwiftUI chat, OIDC/PKCE, Keychain, Matrix Rust E2EE, timeline a offline outbox | mapu, hlášení a COP business workflow |
+| Native call presentation | CallKit/PushKit, SwiftUI call view, `AVAudioSession`, mute/route a proximity | přechodnou Matrix signalizaci, SDP/ICE a WebRTC média |
 | Bridge coordinator | handshake, vyjednání verze, session, dispatch, timeout, cancel a event sequencing | schema authority |
 | Origin policy a validator | přesný allowlist, main-frame kontrola, JSON Schema a limity | důvěru v obsah povolené stránky |
-| Native services | `system`, `permissions`, `location`, `heading`, `attitude`, `tracking`, `connectivity`, `media`, `shares`, `notifications` | mapu, reporty, chat |
-| Protected technical store | tracking samples, opaque asset metadata, share inbox a technické fronty s kvótami | webové tokeny a kopii COP databáze |
+| Native services | `system`, `permissions`, `location`, `heading`, `attitude`, `tracking`, `connectivity`, `media`, `shares`, `notifications` | mapu a reporty |
+| Protected stores | nativní OIDC/Matrix credentials, Matrix crypto/timeline/outbox, tracking, asset a share data podle oddělených policies | webové cookies nebo kopii COP mapové databáze |
 | Share Extension | import `NSItemProvider` položek do chráněného App Group inboxu | upload a report workflow |
 | Relay adapter | pozdější foreground-oriented experiment s opaque obálkou | význam payloadu, vlastní kryptografický protokol |
 
@@ -140,17 +159,35 @@ událost a web položku převezme přes `shares.list`/`shares.claim`. Kamera a
 pickery používají stejný `NativeAssetRef`. Upload, oprávnění k reportu a
 doménový lifecycle zůstávají ve webu a COP API.
 
-### Autentizace a registrace push zařízení
+### Autentizace, nativní komunikace a registrace push zařízení
 
-OIDC relaci včetně refresh lifecycle vlastní COP web v odděleném WebKit origin
-storage. Bridge se na login originu neaktivuje a nativní host webové access ani
-refresh tokeny nečte.
+COP web vlastní svou OIDC relaci v odděleném WebKit origin storage.
+`CSMCommunicationKit` vlastní druhou, nativní Authorization Code + PKCE relaci
+pro veřejný klient `csm-mobile`, ukládá ji do Keychainu a používá ji k získání
+COP/CSM Matrix bootstrapu. Session se nesdílejí a native nikdy nečte WebKit
+storage. Logout/revokace a změna subjectu čistí příslušná nativní credentials a
+subject-bound stores bez zpřístupnění dat předchozího uživatele.
 
 APNs token neopouští nativní vrstvu směrem do JavaScriptu a COP jej neukládá.
+COP Mobile je jediným vlastníkem process-wide notification delegate; běžný
+token, foreground/background delivery a notification actions současně předává
+přes úzkou facade do `CSMCommunicationKit`, aby nativní Matrix pusher a deep
+link neztrácely lifecycle ani cílovou konverzaci.
+Před dokončením foreground, background nebo notification-action callbacku host
+awaituje headless zpracování facade. Sdílený runtime se tak spustí a zpracuje
+způsobilé metadata-only payloady i bez připojeného SwiftUI chat view.
+Metadata-only push přijatý před připravenou nativní session zůstane v omezené
+paměťové frontě komunikačního runtime; po dokončení přihlášení a bootstrapu se
+atomicky claimne. Stejný payload se proto nezpracuje dvakrát ani nezmizí při
+cold startu.
 Po doplnění kontraktu si autentizovaný web vyžádá v COP API krátkodobý,
 jednorázový device-registration ticket, předá jej metodě bridge a host s ticketem
 a APNs tokenem registruje zařízení přímo u CSM Messaging. Tato serverová změna
 je blokující podmínkou pro remote push, ne pro lokální notifikace.
+
+Web může otevřít nativní komunikační povrch metodou
+`communications.openChat`; payload je prázdný. Modul hostu nevrací token,
+timeline ani Matrix interní stav.
 
 ### Offline start
 
@@ -167,23 +204,53 @@ ADR 0003 stanoví, proč první verze nebalí kopii celého web buildu.
 ### Push a deep link
 
 CSM Messaging posílá minimální APNs payload. Host zpracuje kategorii a opaque
-identifikátor, aktivuje aplikaci a předá bezpečně validovanou COP web route.
+identifikátor a podle typu otevře autorizovaný nativní chat nebo validovanou COP
+web route.
 Citlivý obsah není součástí systémové notifikace bez explicitní serverové
-politiky. Critical Alerts vyžadují Apple entitlement. CallKit je podle ADR 0008
-součástí skutečné VoIP cesty: PushKit probudí host, CallKit převezme systémový
-call lifecycle a Matrix ve WebView nadále vlastní signalizaci a média.
+politiky. Critical Alerts vyžadují Apple entitlement. Podle ADR 0009 PushKit
+probudí host, CallKit a SwiftUI převezmou systémovou prezentaci a proximity;
+Matrix `matrix-js-sdk` ve WebView přechodně vlastní signalizaci a WebRTC média.
+Bridge zrcadlí pouze bounded presentation state, nikdy SDP/ICE nebo credentials.
+Call action vzniklá před bridge handshake se drží v omezené paměťové frontě;
+každý povel má stabilní `actionId`, native jej do bounded timeoutu opakuje a
+CallKit action splní až po Matrix ACK vedeném zpět přes chat, host a Device
+bridge. Chat drží povel do vzniku odpovídajícího Matrix call snapshotu; retry se
+stejným `actionId` znovu nespustí Matrix operaci, pouze zopakuje uložené ACK.
+Chyba při předání eventu do JavaScriptu invaliduje bridge session a vrátí event
+do bounded fronty. Zánik webového procesu nebo aktivní bridge session ukončí
+webem vlastněnou call presentation jako failed, aby nezůstal ghost CallKit
+hovor. PushKit call, který ještě čeká na připojení webového media enginu, zůstává
+od této invalidace oddělený. Reset `CXProvider` navíc vyšle spolehlivý hangup pro
+každý webem vlastněný media call; callback `CXStartCallAction` nesmí vrátit již
+connected hovor zpět do connecting.
+Záporný ACK nebo timeout vyvolá process-wide invalidaci webových médií přes
+`AppModel`, reload WebView, report/remove CallKit call a deaktivaci audio session.
+Tím může `end`/`reject` skončit jako splněný až po prokazatelném forced close;
+`answer`/`mute` zůstává fail-closed. Stejná větev se spouští z CallKit
+`timedOutPerforming`, protože běžný retry `Task` nemusí při suspendovaném procesu
+běžet.
 
 ## Úložiště a vlastnictví dat
 
 | Data | Úložiště | Vlastník a pravidla |
 | --- | --- | --- |
-| COP web cache, OIDC relace, offline snapshot, Matrix E2EE stav | persistentní WebKit origin storage | COP web; native obsah nečte ani nekopíruje |
+| COP web cache, webová OIDC relace a offline snapshot | persistentní WebKit origin storage | COP web; native obsah nečte ani nekopíruje |
+| Nativní OIDC/Matrix credentials a store passphrase | Keychain s device-only accessibility | `CSMCommunicationKit`; nikdy bridge, log ani diagnostický export |
+| Nativní Matrix crypto, timeline a communication outbox | chráněný Matrix/application store | `CSMCommunicationKit`; subject/device scope, E2EE a bezpečný cleanup |
 | Capability/session stav bridge | paměť procesu | host; zneplatní se při reloadu/navigaci |
 | Background tracking samples | chráněný native store | host; subject/session scope, omezená kvóta a retence |
 | Share a media soubory | App Group / Application Support s Data Protection | host + extension; opaque ID, hash, kvóta, expirace |
 | APNs device token | native technický store a CSM Messaging registry | nikdy COP API, webový JavaScript ani log |
 | Relay queue | budoucí šifrovaný native store | pouze experiment; oddělená od webového business outboxu |
-| Hlášení, chat, mapová data | COP/CSM/Matrix podle stávajících kontraktů | neukládají se jako paralelní nativní doménový model |
+| Hlášení a mapová data | COP podle stávajících kontraktů | nevzniká paralelní nativní business model |
+
+Podepisovaný APNs entitlement používá `$(APS_ENVIRONMENT)`: Debug žádá
+`development`, Staging a Release `production`. Každý artifact musí být spárován
+se stejným APNs prostředím v CSM Messaging: Debug se sandboxem, Staging/Release
+s production endpointem. Současný registrační kontrakt prostředí neukládá na
+úrovni zařízení a server obsluhuje vždy jen jedno globální prostředí; Debug a
+TestFlight tokeny proto nelze bezpečně míchat. Před TestFlight je povinný řízený
+cutover na production, nebo samostatně navržený per-device environment kontrakt.
 
 Konkrétní retenční a kvótové hodnoty musí být schváleny v security/privacy
 milníku před implementací příslušné služby.
@@ -192,10 +259,11 @@ milníku před implementací příslušné služby.
 
 | Systém | Úloha | Autorita kontraktu |
 | --- | --- | --- |
-| COP web/PWA | veškeré produktové UI a business workflow | repozitář `01 COP` |
+| COP web/PWA | mapa, hlášení, vrstvy a business workflow; přechodný Matrix/WebRTC call engine | repozitář `01 COP` |
 | COP API | doménová data, pairing, device audit, snapshot, attachments, mesh gateway | `01 COP/openapi/openapi.json` |
-| Keycloak | OIDC pro webovou relaci | konfigurace a runbooky `01 COP` |
-| CSM Messaging | APNs registry, doručení push, Matrix bootstrap | kontrakt služby CSM Messaging |
+| `CSMCommunicationKit` | nativní chat UI, OIDC/Keychain, Matrix Rust E2EE a offline communication state | GitHub Swift Package `voldzi/CSM-messenger`, exact revision `9246d533ca42f9609bbfe698de49f986d8a478ff` + ADR 0009 |
+| Keycloak | oddělené OIDC relace pro web a veřejný nativní PKCE klient | konfigurace a runbooky `01 COP` |
+| CSM Messaging / Matrix | APNs registry, push, conversation metadata, Matrix bootstrap a E2EE transport | kontrakt služby CSM Messaging/Matrix |
 | APNs | systémové doručení notifikací | Apple capability/provisioning |
 | iOS Share Sheet | příjem fotek a dokumentů | App Extension kontrakt |
 | Budoucí Android host | parita Device API | stejná JSON Schema z `01 COP` |
@@ -206,8 +274,9 @@ kontraktů je v `docs/api.md`.
 ## Autentizace a autorizace
 
 - Web používá stávající OIDC/Keycloak flow a bearer tokeny vůči COP API.
-- Nativní host neimplementuje druhý login, nevlastní webový refresh token a
-  nevkládá vlastní authorization rozhodnutí do doménových workflow.
+- `CSMCommunicationKit` používá samostatný veřejný OIDC/PKCE klient a vlastní
+  nativní access/refresh lifecycle v Keychainu. Nikdy nepřebírá webový token a
+  nevkládá vlastní authorization rozhodnutí do mapových/report workflow.
 - Každá bridge metoda kontroluje session, capability, aktuální permission,
   foreground/background stav a případný serverový kill switch.
 - Release bridge je dostupný pouze přes přesnou kombinaci scheme, host a port;
@@ -215,6 +284,10 @@ kontraktů je v `docs/api.md`.
   navigační originy nikdy nezískají Device API.
 - Externí odkazy se otevírají mimo interní WebView. Wildcard origin a bridge v
   iframe jsou zakázané.
+- `communications.openChat` pouze prezentuje nativní povrch;
+  `calls.updatePresentation` přijme omezený enum stavu a bounded opaque ID.
+  Žádná metoda nevystavuje nativní OIDC/Matrix credentials, zprávy, SDP nebo
+  ICE kandidáty.
 - WebKit media capture je oddělený od Device API bridge: audio-only požadavek
   smí přijít také ze same-origin COP Chat iframe, ale pouze pokud frame i hlavní
   dokument odpovídají přesnému release COP originu. Cross-origin iframe, video

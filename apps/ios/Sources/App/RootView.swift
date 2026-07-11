@@ -1,3 +1,4 @@
+import CSMCommunicationKit
 import SwiftUI
 
 struct RootView: View {
@@ -31,6 +32,30 @@ struct RootView: View {
             retry: model.retry
           )
         }
+
+        if model.phase == .webContent, model.surface == .cop {
+          NativeChatLauncher(action: model.openNativeChat)
+        }
+
+        if model.surface == .chat {
+          CSMCommunicationHost(onClose: model.closeNativeChat)
+            .background(Color(.systemBackground))
+            .transition(.move(edge: .trailing).combined(with: .opacity))
+            .zIndex(50)
+        }
+
+        if VoiceCallService.shared.presentation.activeCall != nil {
+          ActiveCallView(service: VoiceCallService.shared)
+            .transition(.opacity)
+            .zIndex(100)
+        }
+      }
+      .animation(.easeInOut(duration: 0.22), value: model.surface)
+      .onReceive(NotificationCenter.default.publisher(for: .copNativeChatRequested)) { _ in
+        model.openNativeChat()
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .copWebMediaInvalidationRequired)) { _ in
+        model.invalidateWebMedia()
       }
     case .failure(let error):
       TechnicalFallbackView(
@@ -40,6 +65,31 @@ struct RootView: View {
         retry: nil
       )
     }
+  }
+}
+
+private struct NativeChatLauncher: View {
+  let action: () -> Void
+
+  var body: some View {
+    VStack {
+      Spacer()
+      HStack {
+        Button(action: action) {
+          Label("Nativní chat", systemImage: "bubble.left.and.bubble.right.fill")
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 14)
+            .frame(height: 48)
+        }
+        .buttonStyle(.glassProminent)
+        .tint(Color(red: 0.08, green: 0.46, blue: 0.38))
+        .accessibilityIdentifier("nativeChat.open")
+        Spacer()
+      }
+      .padding(.horizontal, 18)
+      .padding(.bottom, 88)
+    }
+    .allowsHitTesting(true)
   }
 }
 

@@ -2,16 +2,19 @@
 
 ## Stav a závazná rozhodnutí
 
-Tento dokument popisuje cílovou zkušenost produktu **CSM** v plánovací fázi.
-Produkční kód zatím není součástí repozitáře.
+Tento dokument popisuje cílovou zkušenost produktu **CSM** po rozhodnutí
+ADR 0009. Repozitář obsahuje iOS host, nativní komunikační povrch a nativní
+prezentaci hovoru; plně nativní WebRTC zůstává dalším gate.
 
 - Minimální podporovaná verze je **iOS 26**. Starší verze iOS nejsou podporované.
-- CSM je tenký nativní host existujícího webu COP, nikoli druhá aplikace COP.
-- Web COP zůstává jediným vlastníkem mapy, chatu, business logiky, doménových
+- CSM je hybridní host existujícího webu COP, nikoli druhá implementace mapy a
+  report workflow.
+- Web COP zůstává jediným vlastníkem mapy, vrstev, business logiky, doménových
   modelů, autorizace a workflow hlášení.
-- Nativní vrstva vlastní pouze bezpečné hostování webu, bridge, senzory,
-  explicitní background tracking, Share Extension, APNs, chráněné technické
-  úložiště a systémové integrace.
+- `CSMCommunicationKit` vlastní nativní SwiftUI chat, vlastní OIDC/PKCE session,
+  Keychain, Matrix Rust E2EE a chráněný offline communication state.
+- Nativní host vlastní také bridge, senzory, tracking, Share Extension, APNs,
+  CallKit, audio routing a proximity presentation.
 - První distribuční kanál je interní TestFlight. Android následuje až po
   stabilizaci sdíleného Device API a iOS hostu.
 - Relay/mesh není součástí MVP. Zůstává vypnutý a později vznikne jako oddělený
@@ -20,21 +23,24 @@ Produkční kód zatím není součástí repozitáře.
 ## Produktový záměr
 
 CSM zpřístupní uživateli stejný COP, který používá v prohlížeči, a doplní ho o
-funkce telefonu, na které webová aplikace nemůže spolehlivě dosáhnout. Uživatel
-se nemá učit druhé rozhraní ani rozhodovat, zda má úkol provést „ve webu“ nebo
-„v aplikaci“. Do CSM vstoupí vždy do webu COP; nativní funkce se objeví pouze
-tehdy, když je daný webový krok potřebuje a zařízení je skutečně podporuje.
+telefonní komunikační zkušenost. Mapa a hlášení zůstávají známým webovým COP;
+chat se otevírá jako rychlý nativní E2EE povrch a hovor jako systémově přirozená
+CallKit/SwiftUI obrazovka. Přechod mezi povrchy nesmí měnit identitu konverzace
+ani vytvářet konkurenční mapové či report workflow.
 
 Úspěch produktu znamená, že:
 
-- mapa, chat a workflow mají stejný obsah a chování v browseru i v CSM;
+- mapa a business workflow mají stejný obsah a chování v browseru i v CSM;
+- webový a nativní chat interoperují přes stejné Matrix rooms a E2EE pravidla,
+  i když představují dvě oddělená klientská zařízení;
 - nativní capability jsou přístupné přes jeden verzovaný `CopDevice` kontrakt;
 - odmítnuté oprávnění nikdy nezablokuje funkce COP, které je nepotřebují;
 - uživatel vždy pozná, zda probíhá tracking, zda je obsah offline a zda bylo
   hlášení skutečně odesláno;
 - aplikace po prvním online načtení otevře cached web shell bez internetu a na
   čerstvé offline instalaci zobrazí použitelný lokální fallback;
-- push otevře správnou webovou route bez vložení citlivého obsahu do payloadu;
+- push otevře správný nativní chat nebo webovou route bez citlivého obsahu v
+  payloadu;
 - žádný release neslibuje nepřerušitelné vyzvánění, přesnost GPS nebo background
   běh, které operační systém negarantuje.
 
@@ -42,7 +48,8 @@ tehdy, když je daný webový krok potřebuje a zařízení je skutečně podpor
 
 | Uživatel / role | Primární potřeba | Signál úspěchu |
 | --- | --- | --- |
-| Uživatel COP v terénu | Otevřít mapu nebo chat, připojit polohu či soubor a přijmout výstrahu | Úkol dokončí ve známém webovém workflow bez přepínání aplikací |
+| Uživatel COP v terénu | Otevřít mapu nebo nativní chat, připojit polohu či soubor a přijmout výstrahu | Dokončí úkol v jednom hostu a bez záměny mapového a komunikačního povrchu |
+| Volající/příjemce hovoru | Přijmout, uskutečnit a ukončit skutečný VoIP hovor jako běžnou telefonní akci | CallKit a full-screen UI ukazují pravdivý stav, správně routují zvuk a reagují na přiložení k uchu |
 | Uživatel s aktivním sledováním | Výslovně spustit a ukončit přesnější sběr polohy i při zhasnuté obrazovce | Vždy vidí aktivní stav, dopad na baterii a poslední čas měření |
 | Příjemce výstrahy | Rozpoznat notifikaci a přejít na relevantní obsah v COP | Deep link otevře autorizovanou webovou route, nebo bezpečný fallback |
 | Správce pilotu / podpora | Ověřit verzi, capability a stav oprávnění bez přístupu k citlivému obsahu | Diagnostika vysvětlí chybu bez polohy, tokenů a payloadů v logu |
@@ -67,13 +74,18 @@ MVP obsahuje:
 7. Cached start po dřívějším online načtení a lokální informativní fallback při
    čerstvé instalaci bez sítě.
 8. Minimalizovanou, redigovanou diagnostiku pro interní pilot.
+9. Nativní SwiftUI chat přes `CSMCommunicationKit`, nativní OIDC/PKCE,
+   Keychain, Matrix Rust E2EE, chráněnou timeline a offline message outbox.
+10. Nativní full-screen call presentation, CallKit/PushKit, mute/speaker route,
+    duration a proximity blackout nad dočasným webovým Matrix/WebRTC enginem.
 
 MVP neobsahuje:
 
-- nativní mapu, chat, report formulář, vyhodnocování výstrah ani vlastní Matrix
-  klient;
+- nativní mapu, report formulář, vyhodnocování výstrah ani kopii COP business
+  modelů;
 - background attitude nebo garantovaný sběr po force-quit aplikace;
-- CallKit/PushKit, pokud nevznikne skutečná VoIP funkce;
+- plně nativní WebRTC media engine, dokud neprojde samostatný signaling/ICE/TURN
+  a real-device gate;
 - garantované přehrání zvuku při mute/Focus bez Critical Alerts entitlementu;
 - produkční relay, mesh, Wi-Fi Aware, Nearby Connections ani citlivý
   store-and-forward;
@@ -87,6 +99,10 @@ MVP neobsahuje:
 | Cesta | Vstup | Požadovaný výsledek | Chyba / fallback |
 | --- | --- | --- | --- |
 | První online start | Ikona CSM | Načte se důvěryhodný COP origin, proběhne login a bridge handshake | Nepovolený origin bridge nedostane; síťová chyba zobrazí lokální fallback s Retry |
+| První otevření nativního chatu | Tlačítko Chat nebo `communications.openChat` | Otevře se SwiftUI chat; bez nativní session proběhne OIDC/PKCE login a Matrix bootstrap | Cancel/denied/network chyba ponechá web COP funkční a nevystaví token diagnostice |
+| Nativní E2EE zpráva | Composer v konverzaci | Zpráva vstoupí do encrypted outboxu, Matrix ji odešle a UI rozliší pending/sent/failed | Offline položka zůstane lokálně, retry nevytvoří duplicitní serverový event |
+| Příchozí hovor | VoIP push nebo aktivní Matrix invite | CallKit okamžitě oznámí skutečný hovor a SwiftUI zobrazí ringing/connecting/connected | Expirovaný/ukončený hovor se zavře; presentation nikdy nepředstírá media connection |
+| Hovor u ucha | Connected hovor se sluchátkovou routou | Proximity senzor zčerná povrch a blokuje náhodné tapy; po oddálení obnoví ovládání | Po ukončení se monitoring vždy vypne; Bluetooth/speaker nepoužívají falešný blackout |
 | Opakovaný offline start | Ikona CSM, bez sítě | Do 3 s se zobrazí cached web shell a pravdivý stav `OFFLINE_CACHED` | Poškozená/nekompatibilní cache přejde na lokální fallback, nikoli na prázdný WebView |
 | Čerstvá instalace offline | Ikona CSM, bez předchozího startu | Lokální obrazovka vysvětlí, že COP ještě nebyl stažen, ukáže konektivitu a Retry | Není dostupný nativní report formulář; nevzniká falešné „odesláno“ |
 | Jednorázová poloha | Akce ve webovém workflow | Web zobrazí polohu, přesnost, stáří a stav precise/reduced | Odmítnutí nabídne pokračování bez polohy a odkaz do Nastavení |
@@ -100,7 +116,10 @@ MVP neobsahuje:
 
 | Povrch | Účel | Vlastník | Pravidlo |
 | --- | --- | --- | --- |
-| COP WebView | Mapa, chat, login a všechna business workflow | COP web | Jediné hlavní UI; nativní host neupravuje význam webových stavů |
+| COP WebView | Mapa, hlášení, vrstvy, webový login a business workflow; přechodně call media engine | COP web | Nativní host neupravuje význam business stavů ani WebRTC connection state |
+| Nativní chat | Seznam, konverzace, composer, E2EE/offline stav a komunikační nastavení | `CSMCommunicationKit` | Vlastní OIDC/Matrix session; žádný token nebo decrypted payload přes bridge |
+| Aktivní hovor | Příchozí/odchozí full-screen UI, status, duration, mute, route a end | CSM native + CallKit | Web zrcadlí pouze bounded state; do dalšího gate vlastní média webový engine |
+| Proximity blackout | Ochrana obrazovky a dotyků při connected handset hovoru | iOS sensor + CSM native | Jen po dobu relevantního hovoru; není to auth/presence signál |
 | Launch/loading shell | Bezpečný start a rozlišení loading/offline/error | CSM native | Jen technický stav, žádná doménová data ani navigace COP |
 | Offline fallback | Čerstvý offline start nebo nepoužitelná cache | CSM native | Konektivita, Retry, verze a bezpečná nápověda; bez nativního reportu v MVP |
 | Permission pre-prompt | Vysvětlení konkrétního účelu před systémovým dialogem | Web text + native systémová akce | Zobrazí se až po uživatelské akci; odmítnutí se respektuje |
@@ -111,9 +130,11 @@ MVP neobsahuje:
 
 ## Informační architektura a stavový model
 
-CSM nemá vlastní tab bar, menu mapy ani paralelní navigační strom. Po startu je
-uživatel na route řízené COP. Nativní povrchy překrývají web jen tehdy, když
-WebView ještě nelze bezpečně zobrazit nebo když iOS vyžaduje systémové UI.
+CSM má dva vědomě oddělené produktové povrchy: COP a Komunikace. COP route řídí
+web; chat má vlastní nativní `NavigationStack`/`NavigationSplitView` uvnitř
+`CSMCommunicationKit`. Nativní chat se může prezentovat přes celý displej nad
+stále živým WebView, aby návrat neztratil COP route ani webový call engine.
+Aktivní call overlay má nejvyšší prioritu bez ohledu na zvolený povrch.
 
 Minimální provozní stavy jsou:
 
@@ -125,6 +146,9 @@ Minimální provozní stavy jsou:
 | `OFFLINE_FALLBACK` | Není bezpečně použitelný web shell | Lokální technická nápověda, konektivita a Retry |
 | `SYNCING` | Webový outbox synchronizuje | Zobrazit průběh; položku neoznačit jako doručenou před serverovým ACK |
 | `BLOCKED` | Origin, verze protokolu nebo bezpečnostní kontrola selhala | Bridge vypnout, zobrazit bezpečnou chybu a diagnostický kód |
+| `CHAT_AUTH_REQUIRED` | Nativní communication session není dostupná | Zobrazit nativní OIDC login; webovou session nekopírovat ani automaticky neodhlašovat |
+| `CHAT_OFFLINE` | Matrix není dostupný, ale lokální E2EE store je odemčený | Zobrazit cached timeline a encrypted pending outbox s pravdivým stavem |
+| `CALL_RINGING/CONNECTING/CONNECTED` | Nativní prezentace stavu potvrzeného call enginem | CallKit/SwiftUI ovládání; `CONNECTED` pouze po potvrzení media enginu |
 
 `RELAY_ONLY` a relay fronta patří až do pozdější experimentální fáze a nesmějí
 měnit význam stavů MVP.
@@ -133,6 +157,11 @@ měnit význam stavů MVP.
 
 - WebView používá beze změny design systém COP. CSM nesmí styl webu překrývat
   injektovaným CSS ani duplikovat jeho komponenty.
+- Nativní chat používá vlastní konzistentní CSM design založený na SwiftUI,
+  systémových materiálech a SF Symbols. Může být stejně přirozený jako moderní
+  messengery, ale nekopíruje chráněný vizuální vzhled iMessage nebo WhatsApp.
+- Call view používá velké, jednoznačné telefonní akce, stav spojení, duration a
+  route label. Černý proximity overlay nesmí mít skrytě aktivní ovládací prvky.
 - Potvrzený tap v hlavním WebView doprovází jemná systémová selection haptika.
   Gesture recognizer neruší webový touch/click, scroll ani zoom a nevyžaduje
   chráněné oprávnění. Haptika je doplněk; nikdy není jediným nositelem stavu.
@@ -160,9 +189,10 @@ Apple accessibility guidance pro iOS 26:
 - iPadOS 26 je před vydáním samostatně ověřen, pokud bude target označen jako
   univerzální aplikace.
 
-Přístupnost samotné mapy, chatu a formulářů zůstává odpovědností COP webu, ale
-CSM release nesmí zhoršit focus, klávesnici, zoom ani čtečku obrazovky ve
-`WKWebView`.
+Přístupnost mapy a formulářů zůstává odpovědností COP webu. Nativní chat a call
+view jsou odpovědností `CSMCommunicationKit`/hostu a musí mít správné pořadí
+VoiceOver, Dynamic Type, klávesnici, Reduce Motion a call-control labels. CSM
+release zároveň nesmí zhoršit focus, zoom ani čtečku obrazovky ve `WKWebView`.
 
 ## Důvěra a pravdivé systémové sliby
 
@@ -173,6 +203,10 @@ CSM release nesmí zhoršit focus, klávesnici, zoom ani čtečku obrazovky ve
   Alerts se nezobrazují jako dostupné, dokud není entitlement a autorizace.
 - CallKit/PushKit nebude použit k imitaci krizového vyzvánění bez skutečného
   VoIP hovoru.
+- Nativní call obrazovka neznamená nativní média. Do dalšího gate se stav
+  spojení odvozuje pouze z potvrzeného webového Matrix/WebRTC enginu.
+- „E2EE“ znamená aktivní Matrix encryption path; existence Keychain položky ani
+  lokální cached preview sama o sobě není důkazem obnovitelnosti staré historie.
 - „Odesláno“ smí web zobrazit až po autoritativním serverovém potvrzení.
 - Experimentální relay nikdy není prezentován jako garantovaná nebo always-on
   mesh síť.
@@ -191,5 +225,10 @@ Před každým pilotním releasem musí být vizuálně ověřeno:
 - tracking ve foregroundu, backgroundu, po reloadu WebView a po přerušení;
 - share flow pro podporovaný, nepodporovaný a příliš velký soubor;
 - notifikace a deep link při odemčeném i zamčeném zařízení;
+- nativní OIDC login/cancel/refresh/logout, chat inbox, E2EE timeline, offline
+  outbox, delivery/error stav a přepnutí web/native Matrix zařízení;
+- ringing, connecting, connected, failed a ended call view, mute, speaker,
+  Bluetooth, proximity blackout a návrat po ukončení;
 - VoiceOver, Dynamic Type, Reduce Motion, dark mode a landscape;
-- že nativní povrchy nevytvářejí druhou mapu, chat ani report workflow.
+- že nativní povrchy nevytvářejí druhou mapu ani report workflow a call UI
+  netvrdí plně nativní WebRTC před splněním gate.

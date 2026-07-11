@@ -18,6 +18,33 @@
   <string>$(MARKETING_VERSION)</string>
   <key>CFBundleVersion</key>
   <string>$(CURRENT_PROJECT_VERSION)</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>cz.zeleznalady.csm.messenger</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>csm</string>
+      </array>
+    </dict>
+  </array>
+  <key>CSMCopBaseURL</key>
+  <string>https://cop.zeleznalady.cz</string>
+  <key>CSMessagingBaseURL</key>
+  <string>https://msg.zeleznalady.cz</string>
+  <key>CSMBuildConfiguration</key>
+  <string>$(CONFIGURATION)</string>
+  <key>CSMUsePreviewServices</key>
+  <false/>
+  <key>CSMOIDCIssuer</key>
+  <string>https://login.zeleznalady.cz/realms/cop</string>
+  <key>CSMOIDCClientId</key>
+  <string>csm-mobile</string>
+  <key>CSMOIDCRedirectScheme</key>
+  <string>csm</string>
+  <key>CSMOIDCScope</key>
+  <string>openid profile offline_access</string>
   <key>COPEnvironment</key>
   <string>development</string>
   <key>COPWebOrigin</key>
@@ -35,8 +62,10 @@
   </dict>
   <key>NSLocationWhenInUseUsageDescription</key>
   <string>CSM používá polohu při práci s COP k zobrazení vaší pozice, směru a k připojení polohy pouze k akci, kterou spustíte.</string>
+  <key>NSFaceIDUsageDescription</key>
+  <string>CSM používá Face ID pouze tehdy, když bezpečnostní politika COP vyžaduje místní biometrické odemknutí před zobrazením krizových dat.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>CSM používá mikrofon pouze během hlasového hovoru, který zahájíte nebo přijmete v COP Chatu.</string>
+  <string>CSM používá mikrofon pouze během hovoru nebo při nahrávání hlasové zprávy, které sami spustíte v COP Chatu.</string>
   <key>WKAppBoundDomains</key>
   <array>
     <string>cop.zeleznalady.cz</string>
@@ -47,6 +76,7 @@
   <true/>
   <key>UIBackgroundModes</key>
   <array>
+    <string>audio</string>
     <string>remote-notification</string>
     <string>voip</string>
   </array>

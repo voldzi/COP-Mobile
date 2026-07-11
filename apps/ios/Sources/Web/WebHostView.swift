@@ -23,7 +23,8 @@ struct WebHostView: UIViewRepresentable {
       originPolicy: OriginPolicy(
         bridgeOrigins: configuration.bridgeOrigins,
         navigationOrigins: configuration.navigationOrigins
-      )
+      ),
+      openNativeChat: model.openNativeChat
     )
     let handler = BridgeMessageHandler(bridge: bridge)
     contentController.addScriptMessageHandler(
@@ -65,15 +66,25 @@ struct WebHostView: UIViewRepresentable {
     tapHaptics.cancelsTouchesInView = false
     tapHaptics.delegate = context.coordinator
     webView.addGestureRecognizer(tapHaptics)
-    bridge.eventSink = { [weak webView] event in
-      guard let webView else { return }
+    let coordinator = context.coordinator
+    bridge.eventSink = { [weak webView, weak bridge, weak coordinator] event in
+      guard let webView else {
+        bridge?.eventDeliveryDidFail(event)
+        return
+      }
       Task { @MainActor in
-        _ = try? await webView.callAsyncJavaScript(
-          "window.\(BridgeScripts.nativeReceiverName)(message)",
-          arguments: ["message": event],
-          in: nil,
-          contentWorld: contentWorld
-        )
+        do {
+          _ = try await webView.callAsyncJavaScript(
+            "window.\(BridgeScripts.nativeReceiverName)(message)",
+            arguments: ["message": event],
+            in: nil,
+            contentWorld: contentWorld
+          )
+          coordinator?.bridgeEventDeliveryDidSucceed()
+        } catch {
+          bridge?.eventDeliveryDidFail(event)
+          coordinator?.recoverFromBridgeEventDeliveryFailure()
+        }
       }
     }
     context.coordinator.attach(
@@ -99,7 +110,8 @@ struct WebHostView: UIViewRepresentable {
   }
 
   @MainActor
-  final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, UIGestureRecognizerDelegate {
+  final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, UIGestureRecognizerDelegate
+  {
     private let appConfiguration: AppConfiguration
     private let model: AppModel
     private let originPolicy: OriginPolicy
@@ -109,6 +121,7 @@ struct WebHostView: UIViewRepresentable {
     private weak var contentController: WKUserContentController?
     private var contentWorld: WKContentWorld?
     private var lastReloadToken = 0
+    private var bridgeEventRecoveryAttempted = false
     fileprivate weak var tapHaptics: UITapGestureRecognizer?
 
     init(configuration: AppConfiguration, model: AppModel) {
@@ -147,6 +160,16 @@ struct WebHostView: UIViewRepresentable {
       guard token != lastReloadToken else { return }
       lastReloadToken = token
       loadInitialPage()
+    }
+
+    func bridgeEventDeliveryDidSucceed() {
+      bridgeEventRecoveryAttempted = false
+    }
+
+    func recoverFromBridgeEventDeliveryFailure() {
+      guard !bridgeEventRecoveryAttempted else { return }
+      bridgeEventRecoveryAttempted = true
+      model.invalidateWebMedia()
     }
 
     func webView(
@@ -201,6 +224,11 @@ struct WebHostView: UIViewRepresentable {
       model.webDidFail()
     }
 
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+      bridge?.invalidateSession()
+      model.webDidFail()
+    }
+
     func webView(
       _ webView: WKWebView,
       requestMediaCapturePermissionFor origin: WKSecurityOrigin,
@@ -208,15 +236,17 @@ struct WebHostView: UIViewRepresentable {
       type: WKMediaCaptureType,
       decisionHandler: @escaping @MainActor (WKPermissionDecision) -> Void
     ) {
-      guard originPolicy.allowsMicrophoneCapture(
-        frameURL: frame.request.url,
-        mainFrameURL: webView.url,
-        requestingScheme: origin.protocol,
-        requestingHost: origin.host,
-        requestingPort: origin.port,
-        isMainFrame: frame.isMainFrame,
-        microphoneOnly: type == .microphone
-      ) else {
+      guard
+        originPolicy.allowsMicrophoneCapture(
+          frameURL: frame.request.url,
+          mainFrameURL: webView.url,
+          requestingScheme: origin.protocol,
+          requestingHost: origin.host,
+          requestingPort: origin.port,
+          isMainFrame: frame.isMainFrame,
+          microphoneOnly: type == .microphone
+        )
+      else {
         decisionHandler(.deny)
         return
       }
@@ -240,6 +270,7 @@ struct WebHostView: UIViewRepresentable {
 
     func teardown() {
       bridge?.invalidateSession()
+      bridge?.detachEventReceiver()
       if let tapHaptics {
         webView?.removeGestureRecognizer(tapHaptics)
       }

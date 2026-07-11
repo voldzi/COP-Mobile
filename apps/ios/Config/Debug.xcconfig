@@ -1,5 +1,6 @@
 #include "Base.xcconfig"
 
 INFOPLIST_FILE = Config/Info-Debug.plist
+APS_ENVIRONMENT = development
 SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) DEBUG COP_DEVELOPMENT
 ENABLE_TESTABILITY = YES

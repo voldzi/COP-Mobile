@@ -63,13 +63,15 @@ APNs implementace znovu používá schválený topic
 `cz.zeleznalady.csm.messenger`, vyžaduje explicitní zapnutí oznámení a registruje
 aktuální device token přímo u CSM Messaging jednorázovým ticketem. Raw APNs
 token ani samostatný PushKit VoIP token se nikdy neposílá do COP webu nebo COP
-API. Background modes jsou omezeny na `remote-notification` a `voip`; druhý je
-podle ADR 0008 vyhrazen výhradně skutečnému Matrix hlasovému hovoru.
+API. Background modes jsou omezeny na `audio`, `remote-notification` a `voip`;
+`audio` je aktivní pouze během skutečné CallKit `.playAndRecord` session a
+`voip` je podle ADR 0008 vyhrazen výhradně skutečnému Matrix hlasovému hovoru.
 
 | Funkce | Deklarace / capability | Kdy se žádá | Chování při odmítnutí | Povinná pro core app |
 | --- | --- | --- | --- | --- |
 | Jednorázová poloha a heading | `NSLocationWhenInUseUsageDescription` | Po akci vyžadující polohu nebo kompas | Web pokračuje bez polohy; zobrazí stav a volitelný odkaz do Nastavení | Ne |
 | Precise location | Stav `CLAccuracyAuthorization`; v MVP se nežádá dočasné zvýšení přes purpose key | Pouze se zjišťuje při location flow | Reduced Accuracy se pravdivě zobrazí; přesná funkce se označí jako omezená | Ne |
+| Face ID / biometrické odemknutí | `NSFaceIDUsageDescription` + LocalAuthentication | Jen když serverová bezpečnostní politika vyžaduje místní odemknutí chráněných krizových dat | Obsah zůstane uzamčený; žádný biometrický údaj neopouští Secure Enclave/iOS | Podle policy |
 | Aktivní background tracking | Background Modes: `location`; stále výchozí When In Use autorizace | Až po samostatném vysvětlení, explicitním Start a aktivaci background session ve foregroundu | Session se nespustí nebo se bezpečně ukončí; COP zůstane dostupný | Jen pro tracking |
 | Always location | `NSLocationAlwaysAndWhenInUseUsageDescription` | **V MVP se nežádá** | Po force-quit se kontinuita negarantuje | Ne; změna vyžaduje nové schválení |
 | 3D attitude ve foregroundu | `NSMotionUsageDescription` při použití Core Motion API | Při prvním zapnutí funkce natočení zařízení | Funkce vrátí denied/unsupported; heading a ostatní COP pokračují samostatně | Ne |
@@ -83,6 +85,7 @@ podle ADR 0008 vyhrazen výhradně skutečnému Matrix hlasovému hovoru.
 | Critical Alerts | Apple entitlement `com.apple.developer.usernotifications.critical-alerts` + samostatná autorizace | **Mimo MVP, dokud Apple entitlement neschválí** | Funkce a copy o kritickém vyzvánění nejsou dostupné | Ne |
 | Universal links | Associated Domains entitlement, minimálně schválený COP applink | Bez runtime permission | Neplatný link otevře bezpečnou home route po autentizaci | Ne |
 | APNs background content | Background Modes: `remote-notification` | V MVP jen pokud schválený push kontrakt skutečně používá silent push | Bez něj se nespoléhá na background refresh; viditelný push zůstává oddělený | Ne |
+| Zvuk skutečného hovoru po zamčení | Background Modes: `audio` + aktivní CallKit/AVAudioSession | Jen po dobu přijatého nebo odchozího hlasového hovoru | Ukončení/selhání vždy deaktivuje audio session; žádný keepalive | Ne |
 
 ### Závazné purpose stringy
 
@@ -93,6 +96,7 @@ review. Význam nesmí být širší než implementace. Doporučený český bas
 | --- | --- |
 | `NSLocationWhenInUseUsageDescription` | „CSM používá polohu při práci s COP k zobrazení vaší pozice, směru a k připojení polohy pouze k akci, kterou spustíte.“ |
 | `NSMotionUsageDescription` | „CSM používá údaje o natočení telefonu při aktivní práci s orientací v COP.“ |
+| `NSFaceIDUsageDescription` | „CSM používá Face ID pouze tehdy, když bezpečnostní politika COP vyžaduje místní biometrické odemknutí před zobrazením krizových dat.“ |
 | `NSCameraUsageDescription` | „CSM použije fotoaparát pouze tehdy, když pořídíte fotografii jako přílohu ve workflow COP.“ |
 | `NSMicrophoneUsageDescription` | „CSM používá mikrofon pouze během hlasového hovoru, který zahájíte nebo přijmete v COP Chatu.“ |
 

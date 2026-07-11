@@ -31,6 +31,12 @@ def main() -> int:
         failures.append("Base.xcconfig must use the approved legacy bundle ID")
     if "DEVELOPMENT_TEAM: LM6W548X36" not in project:
         failures.append("project.yml must use the approved Apple Development Team")
+    if "url: https://github.com/voldzi/CSM-messenger.git" not in project:
+        failures.append("project.yml must consume CSMCommunicationKit from the published GitHub repository")
+    if "revision: 9246d533ca42f9609bbfe698de49f986d8a478ff" not in project:
+        failures.append("project.yml must pin the reviewed CSMCommunicationKit Git revision")
+    if 'path: "../../../04 CSM messenger"' in project:
+        failures.append("release project must not depend on a local sibling CSM checkout")
 
     if release.get("COPWebOrigin") != "https://cop.zeleznalady.cz":
         failures.append("release COP origin must be exact production HTTPS origin")
@@ -54,8 +60,12 @@ def main() -> int:
         "k připojení polohy pouze k akci, kterou spustíte."
     )
     microphone_purpose = (
-        "CSM používá mikrofon pouze během hlasového hovoru, který zahájíte nebo "
-        "přijmete v COP Chatu."
+        "CSM používá mikrofon pouze během hovoru nebo při nahrávání hlasové "
+        "zprávy, které sami spustíte v COP Chatu."
+    )
+    face_id_purpose = (
+        "CSM používá Face ID pouze tehdy, když bezpečnostní politika COP vyžaduje "
+        "místní biometrické odemknutí před zobrazením krizových dat."
     )
     required_phone_orientations = {
         "UIInterfaceOrientationPortrait",
@@ -72,9 +82,28 @@ def main() -> int:
         if plist.get("NSLocationWhenInUseUsageDescription") != location_purpose:
             failures.append(f"{name} must contain the approved location purpose string")
         if plist.get("NSMicrophoneUsageDescription") != microphone_purpose:
-            failures.append(f"{name} must contain the approved voice-call microphone purpose string")
-        if set(plist.get("UIBackgroundModes", [])) != {"remote-notification", "voip"}:
-            failures.append(f"{name} must enable only remote-notification and real-call voip background modes")
+            failures.append(f"{name} must contain the approved call and voice-message microphone purpose string")
+        if plist.get("NSFaceIDUsageDescription") != face_id_purpose:
+            failures.append(f"{name} must contain the approved policy-gated Face ID purpose string")
+        if plist.get("CSMCopBaseURL") != "https://cop.zeleznalady.cz":
+            failures.append(f"{name} native communications COP endpoint must be exact production HTTPS URL")
+        if plist.get("CSMessagingBaseURL") != "https://msg.zeleznalady.cz":
+            failures.append(f"{name} native communications endpoint must be exact production HTTPS URL")
+        if plist.get("CSMOIDCIssuer") != "https://login.zeleznalady.cz/realms/cop":
+            failures.append(f"{name} native OIDC issuer must be the exact COP realm")
+        if plist.get("CSMOIDCClientId") != "csm-mobile" or plist.get("CSMOIDCRedirectScheme") != "csm":
+            failures.append(f"{name} native OIDC public client and redirect scheme are not approved")
+        url_schemes = {
+            scheme
+            for entry in plist.get("CFBundleURLTypes", [])
+            for scheme in entry.get("CFBundleURLSchemes", [])
+        }
+        if url_schemes != {"csm"}:
+            failures.append(f"{name} must register only the approved csm callback scheme")
+        if set(plist.get("UIBackgroundModes", [])) != {"audio", "remote-notification", "voip"}:
+            failures.append(
+                f"{name} must enable only active-call audio, remote-notification and real-call voip background modes"
+            )
         if set(plist.get("UISupportedInterfaceOrientations", [])) != required_phone_orientations:
             failures.append(f"{name} must support the approved iPhone orientations")
         if set(plist.get("UISupportedInterfaceOrientations~ipad", [])) != required_pad_orientations:
@@ -87,8 +116,16 @@ def main() -> int:
     else:
         with entitlements[0].open("rb") as handle:
             entitlement_values = plistlib.load(handle)
-        if entitlement_values != {"aps-environment": "development"}:
-            failures.append("COPMobile.entitlements must contain only development aps-environment")
+        if entitlement_values != {"aps-environment": "$(APS_ENVIRONMENT)"}:
+            failures.append("COPMobile.entitlements must contain only the configuration-bound aps-environment")
+    xcconfig_expectations = {
+        "Debug.xcconfig": "APS_ENVIRONMENT = development",
+        "Staging.xcconfig": "APS_ENVIRONMENT = production",
+        "Release.xcconfig": "APS_ENVIRONMENT = production",
+    }
+    for filename, expected in xcconfig_expectations.items():
+        if expected not in (IOS / "Config" / filename).read_text():
+            failures.append(f"{filename} must declare {expected}")
     if "CODE_SIGN_ENTITLEMENTS: Config/COPMobile.entitlements" not in project:
         failures.append("application target must sign with the approved APNs entitlements file")
 

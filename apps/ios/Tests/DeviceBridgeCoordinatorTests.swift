@@ -6,6 +6,35 @@ import XCTest
 final class DeviceBridgeCoordinatorTests: XCTestCase {
   private let productionURL = URL(string: "https://cop.zeleznalady.cz/app")!
 
+  func testOnlyOpeningNotificationActionsNavigateToNativeChat() {
+    XCTAssertTrue(
+      PushNotificationService.shouldOpenNativeChat(
+        for: "com.apple.UNNotificationDefaultActionIdentifier"))
+    XCTAssertTrue(PushNotificationService.shouldOpenNativeChat(for: "CSM_OPEN"))
+    XCTAssertTrue(PushNotificationService.shouldOpenNativeChat(for: "CSM_REPLY"))
+    XCTAssertFalse(PushNotificationService.shouldOpenNativeChat(for: "CSM_MARK_READ"))
+    XCTAssertFalse(PushNotificationService.shouldOpenNativeChat(for: "CSM_ACKNOWLEDGE"))
+    XCTAssertFalse(
+      PushNotificationService.shouldOpenNativeChat(
+        for: "com.apple.UNNotificationDismissActionIdentifier"))
+  }
+
+  func testRemoteRegistrationUsesCanonicalNotificationCategories() {
+    XCTAssertEqual(
+      Set(PushNotificationService.registrationCategories),
+      Set([
+        "community.report",
+        "message.direct",
+        "message.group",
+        "message.voice_call",
+        "safety.alert",
+        "safety.area_update",
+        "system.account",
+        "system.delivery",
+      ]))
+    XCTAssertFalse(PushNotificationService.registrationCategories.contains("system"))
+  }
+
   func testCompatibleHandshakeReturnsLocationAndHeadingCapabilities() async throws {
     let bridge = try makeBridge()
     bridge.navigationDidCommit(url: productionURL)
@@ -100,7 +129,8 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     let sessionID = try XCTUnwrap(ready["sessionId"] as? String)
 
     let response = await bridge.handle(
-      message: request(method: "location.getCurrent", sessionID: sessionID, params: ["desiredAccuracy": "best"]),
+      message: request(
+        method: "location.getCurrent", sessionID: sessionID, params: ["desiredAccuracy": "best"]),
       context: allowedContext())
 
     XCTAssertEqual(response["ok"] as? Bool, true)
@@ -137,7 +167,11 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     bridge.eventSink = { events.append($0) }
     notifications.emit(
       type: "calls.answerRequested",
-      payload: ["callId": "call-1", "roomId": "!ops:example.cz"])
+      payload: [
+        "actionId": "10000000-0000-4000-8000-000000000001",
+        "callId": "call-1",
+        "roomId": "!ops:example.cz",
+      ])
     bridge.navigationDidCommit(url: productionURL)
 
     _ = await bridge.handle(message: hello(), context: allowedContext())
@@ -148,20 +182,210 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     XCTAssertEqual((events.first?["payload"] as? [String: Any])?["callId"] as? String, "call-1")
   }
 
+  func testCallActionAcknowledgementIsIdentityBoundAndDeliveredToCallService() async throws {
+    var acknowledgements: [(String, String, String, String)] = []
+    let bridge = try makeBridge(acknowledgeCallAction: {
+      acknowledgements.append(($0, $1, $2, $3))
+      return true
+    })
+    bridge.navigationDidCommit(url: productionURL)
+    let ready = await bridge.handle(message: hello(), context: allowedContext())
+    let sessionID = try XCTUnwrap(ready["sessionId"] as? String)
+
+    let response = await bridge.handle(
+      message: request(
+        method: "calls.acknowledgeAction",
+        sessionID: sessionID,
+        params: [
+          "actionId": "10000000-0000-4000-8000-000000000001",
+          "callId": "call-1",
+          "outcome": "succeeded",
+          "roomId": "!ops:example.cz",
+        ]),
+      context: allowedContext())
+
+    XCTAssertEqual(response["ok"] as? Bool, true)
+    XCTAssertEqual((response["result"] as? [String: Any])?["acknowledged"] as? Bool, true)
+    XCTAssertEqual(acknowledgements.first?.0, "10000000-0000-4000-8000-000000000001")
+    XCTAssertEqual(acknowledgements.first?.3, "succeeded")
+  }
+
+  func testFailedJavaScriptEventDeliveryInvalidatesAndRequeuesStableAction() async throws {
+    let notifications = FakeNotificationProvider()
+    var invalidations = 0
+    let bridge = try makeBridge(
+      notifications: notifications,
+      invalidateCallPresentation: { invalidations += 1 }
+    )
+    var events: [[String: Any]] = []
+    bridge.eventSink = { events.append($0) }
+    bridge.navigationDidCommit(url: productionURL)
+    _ = await bridge.handle(message: hello(), context: allowedContext())
+    notifications.emit(
+      type: "calls.answerRequested",
+      payload: [
+        "actionId": "10000000-0000-4000-8000-000000000001",
+        "callId": "call-1",
+        "roomId": "!ops:example.cz",
+      ])
+    let failedEvent = try XCTUnwrap(events.first)
+
+    bridge.eventDeliveryDidFail(failedEvent)
+    XCTAssertEqual(invalidations, 1)
+    events.removeAll()
+    bridge.navigationDidCommit(url: productionURL)
+    _ = await bridge.handle(message: hello(), context: allowedContext())
+
+    XCTAssertEqual(events.count, 1)
+    XCTAssertEqual(
+      (events.first?["payload"] as? [String: Any])?["actionId"] as? String,
+      "10000000-0000-4000-8000-000000000001")
+  }
+
+  func testAuthenticatedMainFrameCanOpenNativeChat() async throws {
+    var opened = 0
+    let bridge = try makeBridge(openNativeChat: { opened += 1 })
+    bridge.navigationDidCommit(url: productionURL)
+    let ready = await bridge.handle(message: hello(), context: allowedContext())
+    let sessionID = try XCTUnwrap(ready["sessionId"] as? String)
+
+    let response = await bridge.handle(
+      message: request(method: "communications.openChat", sessionID: sessionID, params: [:]),
+      context: allowedContext())
+
+    XCTAssertEqual(response["ok"] as? Bool, true)
+    XCTAssertEqual((response["result"] as? [String: Any])?["opened"] as? Bool, true)
+    XCTAssertEqual(opened, 1)
+  }
+
+  func testCallPresentationAcceptsOnlyBoundedStateWithoutMediaPayload() async throws {
+    var updates: [(String, String, String?, String, String)] = []
+    let bridge = try makeBridge(updateCallPresentation: {
+      updates.append(($0, $1, $2, $3, $4))
+      return true
+    })
+    bridge.navigationDidCommit(url: productionURL)
+    let ready = await bridge.handle(message: hello(), context: allowedContext())
+    let sessionID = try XCTUnwrap(ready["sessionId"] as? String)
+
+    let response = await bridge.handle(
+      message: request(
+        method: "calls.updatePresentation",
+        sessionID: sessionID,
+        params: [
+          "callId": "call-1", "roomId": "!ops:example.cz", "title": "COP Operator",
+          "direction": "incoming", "phase": "connected",
+        ]),
+      context: allowedContext())
+
+    XCTAssertEqual(response["ok"] as? Bool, true)
+    XCTAssertEqual(updates.count, 1)
+    XCTAssertEqual(updates.first?.0, "call-1")
+    XCTAssertEqual(updates.first?.4, "connected")
+
+    let rejected = await bridge.handle(
+      message: request(
+        method: "calls.updatePresentation",
+        sessionID: sessionID,
+        params: [
+          "callId": "call-2", "roomId": "!ops:example.cz", "direction": "incoming",
+          "phase": "ringing", "sdp": "forbidden",
+        ]),
+      context: allowedContext())
+    XCTAssertEqual((rejected["error"] as? [String: Any])?["code"] as? String, "INVALID_REQUEST")
+    XCTAssertEqual(updates.count, 1)
+  }
+
+  func testCallPresentationRequiresForegroundAndInvalidatesWithBridgeSession() async throws {
+    var updates = 0
+    var invalidations = 0
+    let bridge = try makeBridge(
+      isForeground: { false },
+      updateCallPresentation: { _, _, _, _, _ in
+        updates += 1
+        return true
+      },
+      invalidateCallPresentation: { invalidations += 1 }
+    )
+    bridge.navigationDidCommit(url: productionURL)
+    let ready = await bridge.handle(message: hello(), context: allowedContext())
+    let sessionID = try XCTUnwrap(ready["sessionId"] as? String)
+
+    let rejected = await bridge.handle(
+      message: request(
+        method: "calls.updatePresentation",
+        sessionID: sessionID,
+        params: [
+          "callId": "call-1", "roomId": "!ops:example.cz", "direction": "incoming",
+          "phase": "ringing",
+        ]),
+      context: allowedContext())
+
+    XCTAssertEqual((rejected["error"] as? [String: Any])?["code"] as? String, "NOT_FOREGROUND")
+    XCTAssertEqual(updates, 0)
+    bridge.invalidateSession()
+    XCTAssertEqual(invalidations, 1)
+  }
+
+  func testCallPresentationRateLimitSurvivesBridgeRehandshake() async throws {
+    let bridge = try makeBridge(updateCallPresentation: { _, _, _, _, _ in true })
+    bridge.navigationDidCommit(url: productionURL)
+    var ready = await bridge.handle(message: hello(), context: allowedContext())
+    var sessionID = try XCTUnwrap(ready["sessionId"] as? String)
+
+    for index in 0..<40 {
+      if index == 20 {
+        ready = await bridge.handle(message: hello(), context: allowedContext())
+        sessionID = try XCTUnwrap(ready["sessionId"] as? String)
+      }
+      let response = await bridge.handle(
+        message: request(
+          method: "calls.updatePresentation",
+          sessionID: sessionID,
+          params: [
+            "callId": "call-1", "roomId": "!ops:example.cz", "direction": "incoming",
+            "phase": "ringing",
+          ]),
+        context: allowedContext())
+      XCTAssertEqual(response["ok"] as? Bool, true)
+    }
+
+    let rejected = await bridge.handle(
+      message: request(
+        method: "calls.updatePresentation",
+        sessionID: sessionID,
+        params: [
+          "callId": "call-1", "roomId": "!ops:example.cz", "direction": "incoming",
+          "phase": "ringing",
+        ]),
+      context: allowedContext())
+    XCTAssertEqual((rejected["error"] as? [String: Any])?["code"] as? String, "RATE_LIMITED")
+  }
+
   private func makeBridge(
     location: DeviceLocationProviding? = nil,
-    notifications: PushNotificationProviding? = nil
+    notifications: PushNotificationProviding? = nil,
+    isForeground: @escaping () -> Bool = { true },
+    openNativeChat: @escaping () -> Void = {},
+    updateCallPresentation: @escaping (String, String, String?, String, String) -> Bool = {
+      _, _, _, _, _ in true
+    },
+    acknowledgeCallAction: @escaping (String, String, String, String) -> Bool = {
+      _, _, _, _ in false
+    },
+    invalidateCallPresentation: @escaping () -> Void = {}
   ) throws -> DeviceBridgeCoordinator {
     let origin = try WebOrigin(configurationValue: "https://cop.zeleznalady.cz")
     let policy = OriginPolicy(bridgeOrigins: [origin], navigationOrigins: [origin])
-    if location != nil || notifications != nil {
-      return DeviceBridgeCoordinator(
-        originPolicy: policy,
-        location: location ?? FakeLocationProvider(),
-        notifications: notifications ?? FakeNotificationProvider(),
-        isForeground: { true })
-    }
-    return DeviceBridgeCoordinator(originPolicy: policy)
+    return DeviceBridgeCoordinator(
+      originPolicy: policy,
+      location: location ?? FakeLocationProvider(),
+      notifications: notifications ?? FakeNotificationProvider(),
+      isForeground: isForeground,
+      openNativeChat: openNativeChat,
+      updateCallPresentation: updateCallPresentation,
+      acknowledgeCallAction: acknowledgeCallAction,
+      invalidateCallPresentation: invalidateCallPresentation)
   }
 
   private func hello() -> [String: Any] {
@@ -195,7 +419,9 @@ private final class FakeNotificationProvider: PushNotificationProviding {
   func status() async -> [String: Any] { ["authorization": "authorized"] }
   func requestAuthorization() async -> [String: Any] { ["authorization": "authorized"] }
   func registrationContext() -> [String: Any] { [:] }
-  func registerRemote(ticket: String, messagingBaseURL: String) async throws -> [String: Any] { [:] }
+  func registerRemote(ticket: String, messagingBaseURL: String) async throws -> [String: Any] {
+    [:]
+  }
   func recordDeviceToken(_ data: Data) {}
   func recordRegistrationFailure(_ error: any Error) {}
   func receiveRemoteNotification(_ userInfo: [AnyHashable: Any], interaction: Bool) {}

@@ -106,7 +106,9 @@ S prvními targety se doplní a v `AGENTS.md` přesně zopakují tyto kroky:
 
 Produkční app se nebuildí z `04 CSM messenger`. Tento projekt používá potvrzený
 Team `LM6W548X36` a legacy bundle ID, ale má vlastní build a release historii;
-legacy repo zůstává referencí.
+komunikační kód spotřebovává jen jako Swift Package připnutý na přesnou
+publikovanou Git revision. Lokální sibling cesta nesmí být součástí release
+projektu.
 
 ## Rollout
 

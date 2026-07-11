@@ -1,6 +1,7 @@
 #include "Base.xcconfig"
 
 INFOPLIST_FILE = Config/Info-Release.plist
+APS_ENVIRONMENT = production
 SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) COP_RELEASE
 SWIFT_OPTIMIZATION_LEVEL = -O
 ENABLE_TESTABILITY = NO

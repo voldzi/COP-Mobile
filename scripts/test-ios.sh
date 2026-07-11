@@ -37,5 +37,6 @@ xcodebuild \
   -scheme COPMobile \
   -configuration Debug \
   -destination "platform=iOS Simulator,id=$destination" \
+  -skipPackageUpdates \
   CODE_SIGNING_ALLOWED=NO \
   test
