@@ -93,12 +93,13 @@ review. Význam nesmí být širší než implementace. Doporučený český bas
 | `NSLocationWhenInUseUsageDescription` | „CSM používá polohu při práci s COP k zobrazení vaší pozice, směru a k připojení polohy pouze k akci, kterou spustíte.“ |
 | `NSMotionUsageDescription` | „CSM používá údaje o natočení telefonu při aktivní práci s orientací v COP.“ |
 | `NSCameraUsageDescription` | „CSM použije fotoaparát pouze tehdy, když pořídíte fotografii jako přílohu ve workflow COP.“ |
+| `NSMicrophoneUsageDescription` | „CSM používá mikrofon pouze během hlasového hovoru, který zahájíte nebo přijmete v COP Chatu.“ |
 
 `NSLocationAlwaysAndWhenInUseUsageDescription`, `NSPhotoLibraryUsageDescription`,
-`NSMicrophoneUsageDescription`, `NSFaceIDUsageDescription` a
-`NSUserTrackingUsageDescription` se do MVP nepřidávají bez funkce, která je
-skutečně potřebuje. CSM nepoužívá App Tracking Transparency pro analytické nebo
-reklamní sledování.
+`NSFaceIDUsageDescription` a `NSUserTrackingUsageDescription` se do MVP
+nepřidávají bez funkce, která je skutečně potřebuje. Mikrofon je povolen pouze
+pro uživatelem zahájený nebo přijatý webový hlasový hovor. CSM nepoužívá App
+Tracking Transparency pro analytické nebo reklamní sledování.
 
 ### Background modes a zakázané zkratky
 

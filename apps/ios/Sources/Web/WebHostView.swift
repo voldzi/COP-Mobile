@@ -14,6 +14,8 @@ struct WebHostView: UIViewRepresentable {
     webConfiguration.websiteDataStore = .default()
     webConfiguration.limitsNavigationsToAppBoundDomains = true
     webConfiguration.defaultWebpagePreferences.allowsContentJavaScript = true
+    webConfiguration.allowsInlineMediaPlayback = true
+    webConfiguration.mediaTypesRequiringUserActionForPlayback = []
 
     let contentController = WKUserContentController()
     let contentWorld = WKContentWorld.world(name: BridgeScripts.contentWorldName)
@@ -48,6 +50,7 @@ struct WebHostView: UIViewRepresentable {
 
     let webView = WKWebView(frame: .zero, configuration: webConfiguration)
     webView.navigationDelegate = context.coordinator
+    webView.uiDelegate = context.coordinator
     webView.allowsBackForwardNavigationGestures = true
     webView.scrollView.contentInsetAdjustmentBehavior = .automatic
     #if DEBUG
@@ -92,10 +95,11 @@ struct WebHostView: UIViewRepresentable {
   static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
     coordinator.teardown()
     webView.navigationDelegate = nil
+    webView.uiDelegate = nil
   }
 
   @MainActor
-  final class Coordinator: NSObject, WKNavigationDelegate, UIGestureRecognizerDelegate {
+  final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, UIGestureRecognizerDelegate {
     private let appConfiguration: AppConfiguration
     private let model: AppModel
     private let originPolicy: OriginPolicy
@@ -195,6 +199,28 @@ struct WebHostView: UIViewRepresentable {
     ) {
       bridge?.invalidateSession()
       model.webDidFail()
+    }
+
+    func webView(
+      _ webView: WKWebView,
+      requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+      initiatedByFrame frame: WKFrameInfo,
+      type: WKMediaCaptureType,
+      decisionHandler: @escaping @MainActor (WKPermissionDecision) -> Void
+    ) {
+      guard originPolicy.allowsMicrophoneCapture(
+        frameURL: frame.request.url,
+        mainFrameURL: webView.url,
+        requestingScheme: origin.protocol,
+        requestingHost: origin.host,
+        requestingPort: origin.port,
+        isMainFrame: frame.isMainFrame,
+        microphoneOnly: type == .microphone
+      ) else {
+        decisionHandler(.deny)
+        return
+      }
+      decisionHandler(.grant)
     }
 
     @objc func webContentTapped() {

@@ -124,7 +124,9 @@ kde chybí rozhodnutí nebo fyzický důkaz.
 
 ## OQ-014: Skutečný VoIP požadavek
 
-- Stav: běžný webový hovor existuje, native CallKit/PushKit scope není schválen
+- Stav: běžný webový hovor ve foreground `WKWebView` je podporován včetně
+  originově omezeného přístupu k mikrofonu; native CallKit/PushKit scope není
+  schválen
 - Vlastník: produkt + messaging
 - Dopad: telefonní incoming-call UX při background/terminated stavu
 - Rozhodnutí potřebné do: samostatná post-MVP VoIP feasibility fáze

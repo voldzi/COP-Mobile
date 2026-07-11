@@ -53,6 +53,10 @@ def main() -> int:
         "CSM používá polohu při práci s COP k zobrazení vaší pozice, směru a "
         "k připojení polohy pouze k akci, kterou spustíte."
     )
+    microphone_purpose = (
+        "CSM používá mikrofon pouze během hlasového hovoru, který zahájíte nebo "
+        "přijmete v COP Chatu."
+    )
     required_phone_orientations = {
         "UIInterfaceOrientationPortrait",
         "UIInterfaceOrientationLandscapeLeft",
@@ -67,6 +71,8 @@ def main() -> int:
             failures.append(f"{name} enables out-of-scope phase 2 capabilities: {sorted(present)}")
         if plist.get("NSLocationWhenInUseUsageDescription") != location_purpose:
             failures.append(f"{name} must contain the approved location purpose string")
+        if plist.get("NSMicrophoneUsageDescription") != microphone_purpose:
+            failures.append(f"{name} must contain the approved voice-call microphone purpose string")
         if plist.get("UIBackgroundModes") != ["remote-notification"]:
             failures.append(f"{name} must enable only the remote-notification background mode")
         if set(plist.get("UISupportedInterfaceOrientations", [])) != required_phone_orientations:
@@ -91,7 +97,7 @@ def main() -> int:
             print(f"FAIL: {failure}", file=sys.stderr)
         return 1
     print(
-        "iOS project configuration is fail-closed, APNs-enabled, location-When-In-Use only, and pinned "
+        "iOS project configuration is fail-closed, APNs-enabled, location-When-In-Use and voice-call microphone enabled, and pinned "
         "to iOS 26.0 / Swift 6 / approved signing identity."
     )
     return 0

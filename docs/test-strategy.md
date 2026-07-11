@@ -98,6 +98,8 @@ V COP repozitáři se ověří:
 - route z push/share vstupu projde stejnou autentizací a autorizací jako běžná
   navigace;
 - žádný webový kód nedostane APNs token ani filesystem cestu.
+- hlasový hovor v hlavním rámci přesného COP originu vyžádá systémové oprávnění
+  mikrofonu a lze jej přijmout; iframe, jiný origin a kamera jsou odmítnuty.
 
 ### Bezpečnost bridge
 

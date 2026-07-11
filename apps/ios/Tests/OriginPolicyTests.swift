@@ -41,6 +41,53 @@ final class OriginPolicyTests: XCTestCase {
     )
   }
 
+  func testMicrophoneCaptureRequiresExactAllowedMainFrameAndRejectsVideo() throws {
+    let allowed = try WebOrigin(configurationValue: "https://cop.zeleznalady.cz")
+    let policy = OriginPolicy(bridgeOrigins: [allowed], navigationOrigins: [allowed])
+    let frameURL = URL(string: "https://cop.zeleznalady.cz/chat")!
+
+    XCTAssertTrue(
+      policy.allowsMicrophoneCapture(
+        frameURL: frameURL,
+        mainFrameURL: frameURL,
+        requestingScheme: "https",
+        requestingHost: "cop.zeleznalady.cz",
+        requestingPort: 443,
+        isMainFrame: true,
+        microphoneOnly: true
+      ))
+    XCTAssertFalse(
+      policy.allowsMicrophoneCapture(
+        frameURL: frameURL,
+        mainFrameURL: frameURL,
+        requestingScheme: "https",
+        requestingHost: "cop.zeleznalady.cz",
+        requestingPort: 443,
+        isMainFrame: false,
+        microphoneOnly: true
+      ))
+    XCTAssertFalse(
+      policy.allowsMicrophoneCapture(
+        frameURL: frameURL,
+        mainFrameURL: frameURL,
+        requestingScheme: "https",
+        requestingHost: "cop.zeleznalady.cz",
+        requestingPort: 443,
+        isMainFrame: true,
+        microphoneOnly: false
+      ))
+    XCTAssertFalse(
+      policy.allowsMicrophoneCapture(
+        frameURL: frameURL,
+        mainFrameURL: frameURL,
+        requestingScheme: "https",
+        requestingHost: "lookalike.example",
+        requestingPort: 443,
+        isMainFrame: true,
+        microphoneOnly: true
+      ))
+  }
+
   private func url(_ value: String) throws -> URL {
     try XCTUnwrap(URL(string: value))
   }

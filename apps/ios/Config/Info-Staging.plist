@@ -26,6 +26,8 @@
   <string></string>
   <key>NSLocationWhenInUseUsageDescription</key>
   <string>CSM používá polohu při práci s COP k zobrazení vaší pozice, směru a k připojení polohy pouze k akci, kterou spustíte.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>CSM používá mikrofon pouze během hlasového hovoru, který zahájíte nebo přijmete v COP Chatu.</string>
   <key>WKAppBoundDomains</key>
   <array/>
   <key>UIApplicationSupportsIndirectInputEvents</key>

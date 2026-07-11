@@ -65,6 +65,26 @@ struct OriginPolicy: Sendable {
     return navigationOrigins.contains(origin)
   }
 
+  func allowsMicrophoneCapture(
+    frameURL: URL?,
+    mainFrameURL: URL?,
+    requestingScheme: String,
+    requestingHost: String,
+    requestingPort: Int,
+    isMainFrame: Bool,
+    microphoneOnly: Bool
+  ) -> Bool {
+    guard isMainFrame,
+      microphoneOnly,
+      let frameURL,
+      allowsBridge(frameURL: frameURL, mainFrameURL: mainFrameURL),
+      let frameOrigin = WebOrigin(url: frameURL)
+    else { return false }
+    return frameOrigin.scheme == requestingScheme.lowercased()
+      && frameOrigin.host == requestingHost.lowercased()
+      && frameOrigin.port == requestingPort
+  }
+
   func isBridgeOrigin(_ url: URL?) -> Bool {
     guard let url, let origin = WebOrigin(url: url) else { return false }
     return bridgeOrigins.contains(origin)
