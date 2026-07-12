@@ -28,7 +28,7 @@ settings:
 packages:
   CSMCommunicationKit:
     url: https://github.com/voldzi/CSM-messenger.git
-    revision: 27d2a48b7417698a4cf4639642b47c5dc0c64cc6
+    revision: 2351c7c48c5ccca3092d56f16fd6e206e4742906
 
 targets:
   COPMobile:
