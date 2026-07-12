@@ -137,6 +137,11 @@ web; chat má vlastní nativní `NavigationStack`/`NavigationSplitView` uvnitř
 stále živým WebView, aby návrat neztratil COP route ani webový call engine.
 Aktivní call overlay má nejvyšší prioritu bez ohledu na zvolený povrch.
 
+Domovská obrazovka chatu používá jedinou kompaktní nativní hlavičku `Chat`,
+vyhledávání nahoře, přepínač `Skupiny / Lidé`, vodorovné `Oblíbené` a úsporné
+chronologické řádky. Host nesmí přidávat druhou hlavičku; zavření, připravenost,
+nová zpráva a nová skupina zůstávají v nativních toolbar menu.
+
 Minimální provozní stavy jsou:
 
 | Stav | Význam | Povolené chování |
