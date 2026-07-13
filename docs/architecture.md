@@ -178,9 +178,13 @@ session; přechodný stav nezobrazuje login. Pokud session chybí, chat pouze
 vyzve k návratu a přihlášení v mapě. Toto UI pravidlo nekopíruje WebKit bearer
 token do nativního Keychainu a nemění oddělené OIDC klienty.
 
-Host předává komunikačnímu povrchu skutečný horní safe-area inset. Seznam i
-otevřená konverzace proto začínají pod status barem/Dynamic Island a hlavička
-konverzace je jedna plovoucí zaoblená Liquid Glass karta.
+Host předává komunikačnímu povrchu skutečný horní safe-area inset. Seznam jej
+použije jako kořenové odsazení, zatímco otevřená konverzace jej započítá uvnitř
+pevné hlavičky. Hlavička proto zůstává pod status barem/Dynamic Island jako
+jedna plovoucí zaoblená Liquid Glass karta i při otevřené klávesnici.
+Přímý chat zobrazuje avatar protějšku nebo jeho iniciály; skupina používá jen
+vlastní Matrix room avatar nebo iniciály názvu. V detailu skupiny lze tento
+avatar samostatně vybrat, změnit nebo odstranit.
 
 APNs token neopouští nativní vrstvu směrem do JavaScriptu a COP jej neukládá.
 COP Mobile je jediným vlastníkem process-wide notification delegate; běžný
@@ -278,7 +282,7 @@ milníku před implementací příslušné služby.
 | --- | --- | --- |
 | COP web/PWA | mapa, hlášení, vrstvy a business workflow; přechodný Matrix/WebRTC call engine | repozitář `01 COP` |
 | COP API | doménová data, pairing, device audit, snapshot, attachments, mesh gateway | `01 COP/openapi/openapi.json` |
-| `CSMCommunicationKit` | nativní chat UI, OIDC/Keychain, Matrix Rust E2EE, offline communication state a metadata-only voice-call launch callback | GitHub Swift Package `voldzi/CSM-messenger`, exact revision `f1cdc24bf66997f35dbd039c9284a5fb68ff3f01` + ADR 0009 |
+| `CSMCommunicationKit` | nativní chat UI, OIDC/Keychain, Matrix Rust E2EE, offline communication state a metadata-only voice-call launch callback | GitHub Swift Package `voldzi/CSM-messenger`, exact revision `ea42316f806f1172d801e8c355c462ba12324814` + ADR 0009 |
 | Keycloak | oddělené OIDC relace pro web a veřejný nativní PKCE klient | konfigurace a runbooky `01 COP` |
 | CSM Messaging / Matrix | APNs registry, push, conversation metadata, Matrix bootstrap a E2EE transport | kontrakt služby CSM Messaging/Matrix |
 | APNs | systémové doručení notifikací | Apple capability/provisioning |
