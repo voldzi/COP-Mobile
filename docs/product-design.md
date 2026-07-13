@@ -143,9 +143,9 @@ vyhledávání nahoře, přepínač `Skupiny / Lidé`, vodorovné `Oblíbené` a
 chronologické řádky. Host nesmí přidávat druhou hlavičku; zavření, připravenost,
 nová zpráva a nová skupina zůstávají v nativních toolbar menu.
 
-Otevřená konverzace respektuje horní safe area zařízení. Její avatar, název a
-primární akce jsou v jedné plovoucí zaoblené Liquid Glass kartě pod status
-barem/Dynamic Island; karta se nesmí posunout pod systémové prvky ani při
+Otevřená konverzace používá systémový `NavigationStack` bar. Její avatar,
+název a primární akce jsou v nativní iOS Liquid Glass navigaci pod status
+barem/Dynamic Island; SwiftUI ji nesmí posunout pod systémové prvky ani při
 otevřené klávesnici.
 
 Minimální provozní stavy jsou:

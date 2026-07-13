@@ -178,10 +178,11 @@ session; přechodný stav nezobrazuje login. Pokud session chybí, chat pouze
 vyzve k návratu a přihlášení v mapě. Toto UI pravidlo nekopíruje WebKit bearer
 token do nativního Keychainu a nemění oddělené OIDC klienty.
 
-Host předává komunikačnímu povrchu skutečný horní safe-area inset. Seznam jej
-použije jako kořenové odsazení, zatímco otevřená konverzace jej započítá uvnitř
-pevné hlavičky. Hlavička proto zůstává pod status barem/Dynamic Island jako
-jedna plovoucí zaoblená Liquid Glass karta i při otevřené klávesnici.
+Komunikační povrch nepřeměřuje ani znovu nepřičítá horní safe-area inset.
+Otevřená konverzace používá systémový `NavigationStack` bar, takže SwiftUI
+zajišťuje status bar, Dynamic Island i změnu při otevřené klávesnici. Na iOS
+26+ dodává systém nativní Liquid Glass vzhled navigace bez pevné překryvné
+hlavičky.
 Přímý chat zobrazuje avatar protějšku nebo jeho iniciály; skupina používá jen
 vlastní Matrix room avatar nebo iniciály názvu. V detailu skupiny lze tento
 avatar samostatně vybrat, změnit nebo odstranit.
@@ -282,7 +283,7 @@ milníku před implementací příslušné služby.
 | --- | --- | --- |
 | COP web/PWA | mapa, hlášení, vrstvy a business workflow; přechodný Matrix/WebRTC call engine | repozitář `01 COP` |
 | COP API | doménová data, pairing, device audit, snapshot, attachments, mesh gateway | `01 COP/openapi/openapi.json` |
-| `CSMCommunicationKit` | nativní chat UI, OIDC/Keychain, Matrix Rust E2EE, offline communication state a metadata-only voice-call launch callback | GitHub Swift Package `voldzi/CSM-messenger`, exact revision `ea42316f806f1172d801e8c355c462ba12324814` + ADR 0009 |
+| `CSMCommunicationKit` | nativní chat UI, OIDC/Keychain, Matrix Rust E2EE, offline communication state a metadata-only voice-call launch callback | GitHub Swift Package `voldzi/CSM-messenger`, exact revision `2246f5e94e40c74341980d52e93d3dbb0ba28a41` + ADR 0009 |
 | Keycloak | oddělené OIDC relace pro web a veřejný nativní PKCE klient | konfigurace a runbooky `01 COP` |
 | CSM Messaging / Matrix | APNs registry, push, conversation metadata, Matrix bootstrap a E2EE transport | kontrakt služby CSM Messaging/Matrix |
 | APNs | systémové doručení notifikací | Apple capability/provisioning |
