@@ -99,7 +99,7 @@ MVP neobsahuje:
 | Cesta | Vstup | Požadovaný výsledek | Chyba / fallback |
 | --- | --- | --- | --- |
 | První online start | Ikona CSM | Načte se důvěryhodný COP origin, proběhne login a bridge handshake | Nepovolený origin bridge nedostane; síťová chyba zobrazí lokální fallback s Retry |
-| První otevření nativního chatu | Tlačítko Chat nebo `communications.openChat` | Otevře se SwiftUI chat; bez nativní session proběhne OIDC/PKCE login a Matrix bootstrap | Cancel/denied/network chyba ponechá web COP funkční a nevystaví token diagnostice |
+| První otevření nativního chatu | Tlačítko Chat nebo `communications.openChat` | Platná nativní Keychain session se obnoví bez přihlašovacího probliknutí a otevře SwiftUI chat | Bez použitelné session se zobrazí pouze pokyn k přihlášení v mapě a návrat; druhý login formulář se v chatu nenabízí |
 | Nativní E2EE zpráva | Composer v konverzaci | Zpráva vstoupí do encrypted outboxu, Matrix ji odešle a UI rozliší pending/sent/failed | Offline položka zůstane lokálně, retry nevytvoří duplicitní serverový event |
 | Nativní dotaz COP AI | Composer v přímé konverzaci `COP AI Assistant` | Aktuální otázka se zpracuje kanonickým COP AI endpointem a odpověď se vrátí jako E2EE Matrix zpráva | Historie roomu se do COP neposílá; selhání AI nezmění doručení původní uživatelské zprávy |
 | Příchozí hovor | VoIP push nebo aktivní Matrix invite | CallKit okamžitě oznámí skutečný hovor a SwiftUI zobrazí ringing/connecting/connected | Expirovaný/ukončený hovor se zavře; presentation nikdy nepředstírá media connection |
@@ -143,6 +143,11 @@ vyhledávání nahoře, přepínač `Skupiny / Lidé`, vodorovné `Oblíbené` a
 chronologické řádky. Host nesmí přidávat druhou hlavičku; zavření, připravenost,
 nová zpráva a nová skupina zůstávají v nativních toolbar menu.
 
+Otevřená konverzace respektuje horní safe area zařízení. Její avatar, název a
+primární akce jsou v jedné plovoucí zaoblené Liquid Glass kartě pod status
+barem/Dynamic Island; karta se nesmí posunout pod systémové prvky ani při
+otevřené klávesnici.
+
 Minimální provozní stavy jsou:
 
 | Stav | Význam | Povolené chování |
@@ -153,7 +158,7 @@ Minimální provozní stavy jsou:
 | `OFFLINE_FALLBACK` | Není bezpečně použitelný web shell | Lokální technická nápověda, konektivita a Retry |
 | `SYNCING` | Webový outbox synchronizuje | Zobrazit průběh; položku neoznačit jako doručenou před serverovým ACK |
 | `BLOCKED` | Origin, verze protokolu nebo bezpečnostní kontrola selhala | Bridge vypnout, zobrazit bezpečnou chybu a diagnostický kód |
-| `CHAT_AUTH_REQUIRED` | Nativní communication session není dostupná | Zobrazit nativní OIDC login; webovou session nekopírovat ani automaticky neodhlašovat |
+| `CHAT_AUTH_REQUIRED` | Nativní communication session není dostupná | Zobrazit pokyn k přihlášení v mapě a návrat; v embedded chatu nenabízet druhý login a webovou session nekopírovat |
 | `CHAT_OFFLINE` | Matrix není dostupný, ale lokální E2EE store je odemčený | Zobrazit cached timeline a encrypted pending outbox s pravdivým stavem |
 | `CALL_RINGING/CONNECTING/CONNECTED` | Nativní prezentace stavu potvrzeného call enginem | CallKit/SwiftUI ovládání; `CONNECTED` pouze po potvrzení media enginu |
 

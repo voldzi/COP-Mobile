@@ -190,8 +190,13 @@ být injektovatelné, aby byly expiry a lifecycle scénáře deterministické.
 - nepřihlášený deep link projde loginem a až poté otevře autorizovanou route;
 - otevření/zavření `CSMCommunicationHost` nezruší WebView route ani aktivní
   webový call engine;
-- fresh nativní OIDC login, návrat přes `csm` redirect, obnovení Keychain session,
-  nativní logout a nezávislá webová session;
+- stav `.checking` při otevření embedded chatu ukáže pouze neutrální průběh,
+  nikdy standalone login; platná Keychain session otevře chat přímo a
+  `.signedOut` zobrazí jen pokyn k přihlášení v mapě a návrat;
+- standalone fresh nativní OIDC login, návrat přes `csm` redirect, obnovení
+  Keychain session, nativní logout a nezávislá webová session;
+- hlavička otevřené konverzace je pod status barem/Dynamic Island, zachová
+  horní safe area i s klávesnicí a používá jednu plovoucí Liquid Glass kartu;
 - E2EE send/receive mezi webem a nativním Matrix zařízením, offline outbox a
   reconnect bez duplicitního eventu;
 - call overlay nad COP i chatem, ringing/connecting/connected/failed/ended,
@@ -218,6 +223,10 @@ Modely, OS buildy a fyzická dostupnost se evidují v implementačním reportu.
 
 - OIDC/PKCE fresh login, cancel, přerušení callbacku, refresh po restartu,
   logout, revoked refresh token a přihlášení jiného subjectu;
+- otevření embedded chatu s platnou session bez probliknutí loginu, signed-out
+  instrukce pouze k přihlášení v mapě a návrat do stejné webové route;
+- portrait/landscape a otevřená klávesnice: hlavička chatu zůstává pod horní
+  safe area a její glass karta nekoliduje se status barem/Dynamic Island;
 - potvrzení, že WebKit a native mají oddělené session/device ID a že bridge ani
   log neobsahuje žádný access/refresh token nebo recovery material;
 - web → native a native → web E2EE zpráva, reakce/reply/příloha podle
