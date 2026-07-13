@@ -54,6 +54,9 @@ signalizace, ICE/TURN a médií a neúměrně zvýšilo riziko.
 6. Do dalšího samostatného gate zůstávají Matrix call signalizace, SDP/ICE a
    WebRTC média ve stávajícím COP Chat `matrix-js-sdk` enginu. Nativní call UI
    není důkazem nativního media enginu ani úspěšného spojení.
+   Při startu hovoru z nativního SwiftUI chatu zůstává nativní chat namountovaný
+   pod call overlayem; host nesmí odhalit webový chat nebo webový recovery flow
+   jen proto, že webový engine zatím připravuje media/call snapshot.
 7. PushKit se používá pouze pro skutečný příchozí VoIP hovor. VoIP push se musí
    okamžitě nahlásit CallKitu; obnovení webového media enginu nesmí zdržet
    povinný PushKit completion.

@@ -67,6 +67,17 @@ final class AppModel {
     surface = .cop
   }
 
+  func startNativeVoiceCall(
+    roomID: String,
+    title: String,
+    isGroup: Bool,
+    starter: (_ roomID: String, _ title: String, _ isGroup: Bool) -> Void = { roomID, title, isGroup in
+      VoiceCallService.shared.startVoiceCall(roomID: roomID, title: title, isGroup: isGroup)
+    }
+  ) {
+    starter(roomID, title, isGroup)
+  }
+
   private static func makeDiagnosticCode(prefix: String) -> String {
     let suffix = UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(8)
     return "\(prefix)-\(suffix)"

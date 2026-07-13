@@ -37,8 +37,7 @@ struct RootView: View {
           CSMCommunicationHost(
             onClose: model.closeNativeChat,
             onStartVoiceCall: { roomID, title, isGroup in
-              model.closeNativeChat()
-              VoiceCallService.shared.startVoiceCall(
+              model.startNativeVoiceCall(
                 roomID: roomID,
                 title: title,
                 isGroup: isGroup

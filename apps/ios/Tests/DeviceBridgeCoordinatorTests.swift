@@ -6,6 +6,26 @@ import XCTest
 final class DeviceBridgeCoordinatorTests: XCTestCase {
   private let productionURL = URL(string: "https://cop.zeleznalady.cz/app")!
 
+  func testStartingVoiceCallFromNativeChatKeepsChatSurfaceMounted() {
+    let model = AppModel()
+    var startRequests: [(String, String, Bool)] = []
+
+    model.openNativeChat()
+    model.startNativeVoiceCall(
+      roomID: "!ops:example.cz",
+      title: "COP Operator",
+      isGroup: false
+    ) { roomID, title, isGroup in
+      startRequests.append((roomID, title, isGroup))
+    }
+
+    XCTAssertEqual(model.surface, .chat)
+    XCTAssertEqual(startRequests.count, 1)
+    XCTAssertEqual(startRequests.first?.0, "!ops:example.cz")
+    XCTAssertEqual(startRequests.first?.1, "COP Operator")
+    XCTAssertEqual(startRequests.first?.2, false)
+  }
+
   func testOnlyOpeningNotificationActionsNavigateToNativeChat() {
     XCTAssertTrue(
       PushNotificationService.shouldOpenNativeChat(

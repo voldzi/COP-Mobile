@@ -128,6 +128,12 @@ autentizované kontrakty a vlastní svůj oddělený nativní OIDC/Matrix lifecy
 
 Komponenty jsou cílové; ve fázi 0 nejsou implementovány.
 
+Při startu hovoru z nativního chatu zůstává `CSMCommunicationKit` SwiftUI
+povrch namountovaný pod nativním call overlayem. Webový engine může dál
+obsloužit dočasnou Matrix signalizaci a WebRTC média, ale host nesmí kvůli
+čekání na webový call snapshot odhalit webový chat nebo webový E2EE recovery
+flow.
+
 ## Datové toky
 
 ### Online start a bridge handshake
@@ -283,7 +289,7 @@ milníku před implementací příslušné služby.
 | --- | --- | --- |
 | COP web/PWA | mapa, hlášení, vrstvy a business workflow; přechodný Matrix/WebRTC call engine | repozitář `01 COP` |
 | COP API | doménová data, pairing, device audit, snapshot, attachments, mesh gateway | `01 COP/openapi/openapi.json` |
-| `CSMCommunicationKit` | nativní chat UI, OIDC/Keychain, Matrix Rust E2EE, offline communication state a metadata-only voice-call launch callback | GitHub Swift Package `voldzi/CSM-messenger`, exact revision `a25a5dd1b801f5889675d46aa4ffb3a31bd1e1f9` + ADR 0009 |
+| `CSMCommunicationKit` | nativní chat UI, OIDC/Keychain, Matrix Rust E2EE, offline communication state a metadata-only voice-call launch callback | GitHub Swift Package `voldzi/CSM-messenger`, exact revision `3173eba6943f4f9d1efeea51711008d51bd4d672` + ADR 0009 |
 | Keycloak | oddělené OIDC relace pro web a veřejný nativní PKCE klient | konfigurace a runbooky `01 COP` |
 | CSM Messaging / Matrix | APNs registry, push, conversation metadata, Matrix bootstrap a E2EE transport | kontrakt služby CSM Messaging/Matrix |
 | APNs | systémové doručení notifikací | Apple capability/provisioning |
