@@ -222,6 +222,10 @@ Modely, OS buildy a fyzická dostupnost se evidují v implementačním reportu.
   log neobsahuje žádný access/refresh token nebo recovery material;
 - web → native a native → web E2EE zpráva, reakce/reply/příloha podle
   podporovaného povrchu, history pagination a recovery warning;
+- úplné stránkování dostupné timeline, avatary v seznamu/hlavičce/zprávě,
+  bubliny s ocasem a reakce připnuté k původní zprávě;
+- nativní otázka v `COP AI Assistant`, odpověď přes kanonický COP AI endpoint a
+  její následné zobrazení ve stejné E2EE Matrix room na webu i v iOS;
 - airplane mode s cached timeline a encrypted outboxem, reconnect, retry,
   idempotence a serverové potvrzení bez dvojité zprávy;
 - incoming i outgoing hovor přes Wi-Fi a mobilní síť, TURN relay, změna sítě,

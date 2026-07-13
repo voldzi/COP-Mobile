@@ -102,6 +102,10 @@ formát. Bridge má vlastní lokální error contract popsaný níže.
   dokumentace služby;
 - Matrix Client-Server API přes připnutý Matrix Rust SDK pro session restore,
   sync, E2EE timeline, send queue, media a recovery.
+- COP `POST /api/v1/ai/chat-agent/query` pouze pro explicitní přímou konverzaci
+  `COP AI Assistant`. Native posílá aktuální otázku a bezpečný identifikátor
+  konverzace, nikoli historii roomu nebo Matrix/E2EE tajemství; odpověď se
+  publikuje zpět přes Matrix E2EE.
 
 Konkrétní JSON response se nesmí ručně opisovat do tohoto repozitáře. Autoritou
 zůstávají OpenAPI služby a verzované Swift modely `CSMCommunicationKit`.
