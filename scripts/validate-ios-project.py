@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+import json
 import plistlib
+import struct
 import sys
 from pathlib import Path
 
@@ -37,6 +39,10 @@ def main() -> int:
         failures.append("project.yml must pin the reviewed CSMCommunicationKit Git revision")
     if 'path: "../../../04 CSM messenger"' in project:
         failures.append("release project must not depend on a local sibling CSM checkout")
+    if "- path: Resources" not in project:
+        failures.append("application target must compile the Resources asset catalog")
+    if "ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon" not in project:
+        failures.append("application target must compile AppIcon as its launcher icon")
 
     if release.get("COPWebOrigin") != "https://cop.zeleznalady.cz":
         failures.append("release COP origin must be exact production HTTPS origin")
@@ -76,6 +82,8 @@ def main() -> int:
         "UIInterfaceOrientationPortraitUpsideDown"
     }
     for name, plist in (("debug", debug), ("staging", staging), ("release", release)):
+        if plist.get("CFBundleDisplayName") != "COP Mobile":
+            failures.append(f"{name} launcher name must be COP Mobile")
         present = forbidden_keys.intersection(plist)
         if present:
             failures.append(f"{name} enables out-of-scope phase 2 capabilities: {sorted(present)}")
@@ -128,6 +136,34 @@ def main() -> int:
             failures.append(f"{filename} must declare {expected}")
     if "CODE_SIGN_ENTITLEMENTS: Config/COPMobile.entitlements" not in project:
         failures.append("application target must sign with the approved APNs entitlements file")
+
+    app_icon_set = IOS / "Resources" / "Assets.xcassets" / "AppIcon.appiconset"
+    app_icon = app_icon_set / "AppIcon-1024.png"
+    app_icon_manifest = app_icon_set / "Contents.json"
+    if not app_icon_manifest.is_file():
+        failures.append("AppIcon.appiconset must contain Contents.json")
+    else:
+        manifest = json.loads(app_icon_manifest.read_text(encoding="utf-8"))
+        expected_image = {
+            "filename": "AppIcon-1024.png",
+            "idiom": "universal",
+            "platform": "ios",
+            "size": "1024x1024",
+        }
+        if expected_image not in manifest.get("images", []):
+            failures.append("AppIcon.appiconset must declare the opaque universal 1024x1024 icon")
+    if not app_icon.is_file():
+        failures.append("AppIcon.appiconset must contain AppIcon-1024.png")
+    else:
+        png = app_icon.read_bytes()
+        if png[:8] != b"\x89PNG\r\n\x1a\n" or len(png) < 33:
+            failures.append("AppIcon-1024.png must be a valid PNG")
+        else:
+            width, height, _, color_type = struct.unpack(">IIBB", png[16:26])
+            if (width, height) != (1024, 1024):
+                failures.append("AppIcon-1024.png must be exactly 1024x1024 pixels")
+            if color_type in {4, 6} or b"tRNS" in png:
+                failures.append("AppIcon-1024.png must be opaque")
 
     if failures:
         for failure in failures:
