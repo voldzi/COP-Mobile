@@ -26,3 +26,4 @@ Use ADRs for important, costly, risky, or hard-to-reverse technical decisions.
 - `0007-approved-xcode-27-beta-toolchain.md` — pinned Xcode 27 beta build and CI boundary
 - `0008-real-voip-pushkit-callkit.md` — real incoming-call wake and CallKit lifecycle
 - `0009-native-communications-surface.md` — native E2EE chat and native call presentation with a staged WebRTC migration
+- `0010-dedicated-webkit-runtime.md` — dedicated persistent WebKit profile without a browser service worker or blocking startup cleanup

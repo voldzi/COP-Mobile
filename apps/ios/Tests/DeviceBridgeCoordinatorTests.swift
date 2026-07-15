@@ -6,36 +6,9 @@ import XCTest
 final class DeviceBridgeCoordinatorTests: XCTestCase {
   private let productionURL = URL(string: "https://cop.zeleznalady.cz/app")!
 
-  func testWebHostWaitsForPersistentRuntimePreparation() {
-    let model = AppModel()
-
-    XCTAssertFalse(model.webRuntimePrepared)
-    model.webRuntimeDidPrepare()
-    XCTAssertTrue(model.webRuntimePrepared)
-  }
-
-  func testPersistentRuntimeRepairsOnlyChangedOrInterruptedLaunches() async {
-    let suiteName = "PersistentWebRuntimeTests-\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
-    var repairCount = 0
-
-    await PersistentWebRuntime.prepareForLaunch(defaults: defaults) {
-      repairCount += 1
-    }
-    XCTAssertEqual(repairCount, 1)
-
-    PersistentWebRuntime.markNavigationCompleted(defaults: defaults)
-    await PersistentWebRuntime.prepareForLaunch(defaults: defaults) {
-      repairCount += 1
-    }
-    XCTAssertEqual(repairCount, 1)
-
-    PersistentWebRuntime.markNavigationCommitted(defaults: defaults)
-    await PersistentWebRuntime.prepareForLaunch(defaults: defaults) {
-      repairCount += 1
-    }
-    XCTAssertEqual(repairCount, 2)
+  func testWebHostUsesDedicatedPersistentRuntime() {
+    XCTAssertTrue(PersistentWebRuntime.websiteDataStore.isPersistent)
+    XCTAssertNotNil(PersistentWebRuntime.websiteDataStore.identifier)
   }
 
   func testStartingVoiceCallFromNativeChatKeepsChatSurfaceMounted() {

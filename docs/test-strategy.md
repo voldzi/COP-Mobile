@@ -181,9 +181,10 @@ být injektovatelné, aby byly expiry a lifecycle scénáře deterministické.
 ### Integration a UI testy
 
 - trusted WebView start, handshake a capability refresh;
-- příprava persistentního WebKit runtime před vytvořením WebView, jednorázová
-  oprava cache schématu a opakovaná oprava po přerušeném committed loadu bez
-  mazání cookies, Local Storage nebo IndexedDB;
+- okamžité vytvoření WebView ve vlastním pojmenovaném persistentním data store,
+  bez startup závislosti na `removeData` a bez registrace browser service workeru;
+- jeden časově omezený reload bez cache a následný lokální fallback bez mazání
+  cookies, Local Storage nebo IndexedDB;
 - nepovolený origin, externí link, redirect a reload session;
 - lokální fallback a přechod zpět na COP po obnovení sítě;
 - permission pre-prompt, systémový dialog, denied a Settings round-trip;

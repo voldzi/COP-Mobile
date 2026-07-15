@@ -18,7 +18,6 @@ final class AppModel {
 
   let configuration: Result<AppConfiguration, AppConfigurationError>
   private(set) var phase: Phase = .loading
-  private(set) var webRuntimePrepared = false
   private(set) var reloadToken = 0
   var surface: Surface = .cop
 
@@ -36,10 +35,6 @@ final class AppModel {
 
   func webDidStartLoading() {
     phase = .loading
-  }
-
-  func webRuntimeDidPrepare() {
-    webRuntimePrepared = true
   }
 
   func webDidBecomeReady() {

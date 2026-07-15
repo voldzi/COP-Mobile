@@ -139,7 +139,8 @@ flow.
 ### Online start a bridge handshake
 
 1. Host načte release konfiguraci a okamžitě zahájí navigaci na přesný COP HTTPS
-   origin v persistentním `WKWebsiteDataStore`.
+   origin ve vlastním pojmenovaném persistentním `WKWebsiteDataStore`. Profil
+   není sdílený se Safari ani s výchozím WebKit profilem jiné aplikace.
 2. WebKit obslouží síťový nebo dříve cachovaný web shell. Bridge zůstává vypnutý
    během redirectů, pro iframe a na všech ostatních originech.
 3. COP Device SDK odešle `bridge.hello` s podporovanými verzemi a ID web
@@ -216,14 +217,13 @@ timeline ani Matrix interní stav.
 
 ### Offline start
 
-- Po alespoň jednom úspěšném online startu host znovu naviguje na stejný HTTPS
-  origin a využije existující COP service worker, Cache Storage a IndexedDB.
-- Před vytvořením `WKWebView` host opraví přerušený předchozí commit navigace a
-  při změně verze cache schématu jednorázově odstraní pouze service-worker
-  registrace a přechodné Fetch/disk/memory cache. Cookies, Local Storage,
-  IndexedDB, webová OIDC relace ani nativní Matrix úložiště se nemažou. Po
-  úspěšném `didFinish` se navigace označí jako dokončená; nedokončený commit se
-  tak bezpečně opraví při příštím startu bez globálního resetu aplikace.
+- Host vytváří `WKWebView` okamžitě; žádné mazání nebo migrace WebKit dat nesmí
+  blokovat první obrazovku. Jednou opakuje navigaci bez cache a potom zobrazí
+  lokální fallback.
+- COP web v nativním hostu neregistruje browser service worker. Offline start se
+  proto neopírá o PWA navigační intercept, který na fyzickém zařízení blokoval
+  WebKit proces. Pojmenovaný profil dál bezpečně uchovává cookies, Local Storage,
+  IndexedDB a webovou OIDC relaci; nativní Matrix úložiště zůstává oddělené.
 - Pokud není k dispozici použitelný shell, zobrazí se lokálně zabalený SwiftUI
   fallback se stavem konektivity a opakováním; bridge ani doménové operace v něm
   nejsou dostupné.

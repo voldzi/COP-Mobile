@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — 2026-07-11
+Superseded for the native WebKit runtime by ADR 0010 — 2026-07-15
 
 ## Context
 

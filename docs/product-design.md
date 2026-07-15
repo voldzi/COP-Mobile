@@ -182,9 +182,10 @@ měnit význam stavů MVP.
   ikony, názvu a schválených brand tokenů, ne do vlastního paralelního systému.
 - Pohyb je minimální, respektuje Reduce Motion a nesmí skrývat čekání na síť,
   lokaci nebo oprávnění. Loading má timeout a přechod do pojmenovaného stavu.
-  Webový povrch se vytvoří až po dokončení neblokující přípravy persistentního
-  WebKit runtime; poškozený service worker nesmí ponechat uživatele na
-  neomezeném spinneru ani vynutit nové přihlášení.
+  Webový povrch se vytvoří okamžitě ve vlastním persistentním WebKit profilu;
+  údržba cache nesmí předcházet jeho vytvoření. Browser service worker je v
+  COP Mobile vypnutý a žádný jeho stav tak nesmí ponechat uživatele na
+  neomezeném spinneru.
 - Akce s dopadem na soukromí mají explicitní aktivaci. Start a Stop trackingu
   nesmějí být závislé pouze na gestu, časovači nebo přítomnosti WebView.
 - Každá systémová chyba má krátký uživatelský text a stabilní diagnostický kód;

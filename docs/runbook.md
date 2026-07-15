@@ -156,12 +156,13 @@ krok.
 1. Ověřte veřejný HTTPS origin a zachyťte `WKNavigationDelegate` přechody.
    Commit bez `didFinish`, při kterém nereaguje ani JavaScript, značí poškozený
    persistentní WebKit runtime, ne automaticky výpadek COP API.
-2. Host před vytvořením dalšího `WKWebView` automaticky opraví změněné cache
-   schéma nebo přerušený předchozí commit odstraněním service-worker registrací
-   a přechodných Fetch/disk/memory cache.
-3. Cookies, Local Storage, IndexedDB, webovou OIDC relaci ani nativní Matrix
-   store nemažte. Globální odinstalace či reset aplikace není standardní opravou.
-4. Pokud se ani čistá navigace nedokončí, zobrazte lokální fallback s opakováním
+2. Ověřte, že host používá vlastní pojmenovaný persistentní data store a že COP
+   web při přítomnosti native transportu neregistruje browser service worker.
+   Start aplikace nesmí čekat na `removeData` completion handler WebKitu.
+3. Host po osmi sekundách jednou zopakuje navigaci bez cache. Cookies, Local
+   Storage, IndexedDB, webovou OIDC relaci ani nativní Matrix store automaticky
+   nemažte; globální odinstalace není standardní opravou.
+4. Pokud se ani opakovaná navigace nedokončí, zobrazte lokální fallback s opakováním
    a diagnostickým kódem a pokračujte kontrolou TLS, origin policy a web buildu.
 
 ## Relay je aktivní v release nebo přijímá citlivý payload

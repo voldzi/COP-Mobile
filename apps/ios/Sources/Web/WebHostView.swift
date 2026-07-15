@@ -11,7 +11,7 @@ struct WebHostView: UIViewRepresentable {
 
   func makeUIView(context: Context) -> WKWebView {
     let webConfiguration = WKWebViewConfiguration()
-    webConfiguration.websiteDataStore = .default()
+    webConfiguration.websiteDataStore = PersistentWebRuntime.websiteDataStore
     webConfiguration.limitsNavigationsToAppBoundDomains = true
     webConfiguration.defaultWebpagePreferences.allowsContentJavaScript = true
     webConfiguration.allowsInlineMediaPlayback = true
@@ -167,12 +167,12 @@ struct WebHostView: UIViewRepresentable {
       DispatchQueue.main.asyncAfter(deadline: .now() + Self.initialLoadDeadline) { [weak self] in
         guard let self, self.loadGeneration == generation else { return }
         Task { @MainActor in
-          await self.handleLoadDeadline()
+          self.handleLoadDeadline()
         }
       }
     }
 
-    private func handleLoadDeadline() async {
+    private func handleLoadDeadline() {
       guard let webView else { return }
       if webRuntimeRecoveryAttempted {
         finishNavigationAttempt()
@@ -183,13 +183,8 @@ struct WebHostView: UIViewRepresentable {
 
       webRuntimeRecoveryAttempted = true
       loadGeneration += 1
-      let recoveryGeneration = loadGeneration
       bridge?.invalidateSession()
       webView.stopLoading()
-      await PersistentWebRuntime.clearTransientData(
-        from: webView.configuration.websiteDataStore
-      )
-      guard loadGeneration == recoveryGeneration else { return }
       startNavigation(cachePolicy: .reloadIgnoringLocalAndRemoteCacheData)
     }
 
@@ -242,7 +237,6 @@ struct WebHostView: UIViewRepresentable {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-      PersistentWebRuntime.markNavigationCommitted()
       bridge?.navigationDidCommit(url: webView.url)
     }
 
@@ -250,12 +244,10 @@ struct WebHostView: UIViewRepresentable {
       guard originPolicy.allowsInternalNavigation(to: webView.url ?? appConfiguration.initialURL)
       else {
         finishNavigationAttempt()
-        PersistentWebRuntime.markNavigationCompleted()
         model.webWasBlocked()
         return
       }
       finishNavigationAttempt()
-      PersistentWebRuntime.markNavigationCompleted()
       model.webDidBecomeReady()
     }
 
@@ -266,7 +258,6 @@ struct WebHostView: UIViewRepresentable {
     ) {
       guard !isCancelledNavigation(error) else { return }
       finishNavigationAttempt()
-      PersistentWebRuntime.markNavigationCompleted()
       bridge?.invalidateSession()
       model.webDidFail()
     }
@@ -276,14 +267,12 @@ struct WebHostView: UIViewRepresentable {
     ) {
       guard !isCancelledNavigation(error) else { return }
       finishNavigationAttempt()
-      PersistentWebRuntime.markNavigationCompleted()
       bridge?.invalidateSession()
       model.webDidFail()
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
       finishNavigationAttempt()
-      PersistentWebRuntime.markNavigationCompleted()
       bridge?.invalidateSession()
       model.webDidFail()
     }
@@ -345,51 +334,9 @@ struct WebHostView: UIViewRepresentable {
 
 @MainActor
 enum PersistentWebRuntime {
-  private static let cacheSchemaVersion = 2
-  private static let cacheSchemaKey = "COPWebRuntimeCacheSchemaVersion"
-  private static let interruptedNavigationKey = "COPWebRuntimeNavigationInterrupted"
-  private static let transientWebsiteDataTypes: Set<String> = [
-    WKWebsiteDataTypeFetchCache,
-    WKWebsiteDataTypeDiskCache,
-    WKWebsiteDataTypeMemoryCache,
-    WKWebsiteDataTypeServiceWorkerRegistrations,
-  ]
+  private static let dataStoreIdentifier = UUID(
+    uuidString: "F4EA421E-6246-42A9-9FE1-2D2216377851"
+  )!
 
-  static func prepareForLaunch() async {
-    await prepareForLaunch(defaults: .standard) {
-      await clearTransientData(from: .default())
-    }
-  }
-
-  static func prepareForLaunch(
-    defaults: UserDefaults,
-    clearTransientData: @MainActor () async -> Void
-  ) async {
-    let cacheSchemaChanged = defaults.integer(forKey: cacheSchemaKey) < cacheSchemaVersion
-    let previousNavigationWasInterrupted = defaults.bool(forKey: interruptedNavigationKey)
-    if cacheSchemaChanged || previousNavigationWasInterrupted {
-      await clearTransientData()
-    }
-    defaults.set(cacheSchemaVersion, forKey: cacheSchemaKey)
-    defaults.set(false, forKey: interruptedNavigationKey)
-  }
-
-  static func markNavigationCommitted(defaults: UserDefaults = .standard) {
-    defaults.set(true, forKey: interruptedNavigationKey)
-  }
-
-  static func markNavigationCompleted(defaults: UserDefaults = .standard) {
-    defaults.set(false, forKey: interruptedNavigationKey)
-  }
-
-  static func clearTransientData(from dataStore: WKWebsiteDataStore) async {
-    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-      dataStore.removeData(
-        ofTypes: transientWebsiteDataTypes,
-        modifiedSince: .distantPast
-      ) {
-        continuation.resume()
-      }
-    }
-  }
+  static let websiteDataStore = WKWebsiteDataStore(forIdentifier: dataStoreIdentifier)
 }
