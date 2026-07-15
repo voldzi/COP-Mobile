@@ -218,6 +218,12 @@ timeline ani Matrix interní stav.
 
 - Po alespoň jednom úspěšném online startu host znovu naviguje na stejný HTTPS
   origin a využije existující COP service worker, Cache Storage a IndexedDB.
+- Před vytvořením `WKWebView` host opraví přerušený předchozí commit navigace a
+  při změně verze cache schématu jednorázově odstraní pouze service-worker
+  registrace a přechodné Fetch/disk/memory cache. Cookies, Local Storage,
+  IndexedDB, webová OIDC relace ani nativní Matrix úložiště se nemažou. Po
+  úspěšném `didFinish` se navigace označí jako dokončená; nedokončený commit se
+  tak bezpečně opraví při příštím startu bez globálního resetu aplikace.
 - Pokud není k dispozici použitelný shell, zobrazí se lokálně zabalený SwiftUI
   fallback se stavem konektivity a opakováním; bridge ani doménové operace v něm
   nejsou dostupné.

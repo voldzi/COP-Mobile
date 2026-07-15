@@ -8,7 +8,9 @@ struct RootView: View {
     switch model.configuration {
     case .success(let configuration):
       ZStack {
-        WebHostView(configuration: configuration, model: model)
+        if model.webRuntimePrepared {
+          WebHostView(configuration: configuration, model: model)
+        }
 
         switch model.phase {
         case .loading:
@@ -56,6 +58,11 @@ struct RootView: View {
         }
       }
       .animation(.easeInOut(duration: 0.22), value: model.surface)
+      .task {
+        guard !model.webRuntimePrepared else { return }
+        await PersistentWebRuntime.prepareForLaunch()
+        model.webRuntimeDidPrepare()
+      }
       .onReceive(NotificationCenter.default.publisher(for: .copNativeChatRequested)) { _ in
         model.openNativeChat()
       }

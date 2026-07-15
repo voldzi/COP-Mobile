@@ -122,8 +122,11 @@ struct WebHostView: UIViewRepresentable {
     private var contentWorld: WKContentWorld?
     private var lastReloadToken = 0
     private var bridgeEventRecoveryAttempted = false
+    private var webRuntimeRecoveryAttempted = false
+    private var loadGeneration = 0
     fileprivate weak var tapHaptics: UITapGestureRecognizer?
 
+    private static let initialLoadDeadline: TimeInterval = 8
     init(configuration: AppConfiguration, model: AppModel) {
       appConfiguration = configuration
       self.model = model
@@ -148,12 +151,55 @@ struct WebHostView: UIViewRepresentable {
     }
 
     func loadInitialPage() {
+      webRuntimeRecoveryAttempted = false
+      startNavigation(cachePolicy: .useProtocolCachePolicy)
+    }
+
+    private func startNavigation(cachePolicy: URLRequest.CachePolicy) {
       guard let webView else { return }
+      loadGeneration += 1
+      let generation = loadGeneration
       model.webDidStartLoading()
       webView.load(
         URLRequest(
-          url: appConfiguration.initialURL, cachePolicy: .useProtocolCachePolicy,
+          url: appConfiguration.initialURL, cachePolicy: cachePolicy,
           timeoutInterval: 30))
+      DispatchQueue.main.asyncAfter(deadline: .now() + Self.initialLoadDeadline) { [weak self] in
+        guard let self, self.loadGeneration == generation else { return }
+        Task { @MainActor in
+          await self.handleLoadDeadline()
+        }
+      }
+    }
+
+    private func handleLoadDeadline() async {
+      guard let webView else { return }
+      if webRuntimeRecoveryAttempted {
+        finishNavigationAttempt()
+        bridge?.invalidateSession()
+        model.webDidFail()
+        return
+      }
+
+      webRuntimeRecoveryAttempted = true
+      loadGeneration += 1
+      let recoveryGeneration = loadGeneration
+      bridge?.invalidateSession()
+      webView.stopLoading()
+      await PersistentWebRuntime.clearTransientData(
+        from: webView.configuration.websiteDataStore
+      )
+      guard loadGeneration == recoveryGeneration else { return }
+      startNavigation(cachePolicy: .reloadIgnoringLocalAndRemoteCacheData)
+    }
+
+    private func finishNavigationAttempt() {
+      loadGeneration += 1
+    }
+
+    private func isCancelledNavigation(_ error: any Error) -> Bool {
+      let error = error as NSError
+      return error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled
     }
 
     func reloadIfNeeded(token: Int) {
@@ -196,15 +242,20 @@ struct WebHostView: UIViewRepresentable {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+      PersistentWebRuntime.markNavigationCommitted()
       bridge?.navigationDidCommit(url: webView.url)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
       guard originPolicy.allowsInternalNavigation(to: webView.url ?? appConfiguration.initialURL)
       else {
+        finishNavigationAttempt()
+        PersistentWebRuntime.markNavigationCompleted()
         model.webWasBlocked()
         return
       }
+      finishNavigationAttempt()
+      PersistentWebRuntime.markNavigationCompleted()
       model.webDidBecomeReady()
     }
 
@@ -213,6 +264,9 @@ struct WebHostView: UIViewRepresentable {
       didFailProvisionalNavigation navigation: WKNavigation!,
       withError error: any Error
     ) {
+      guard !isCancelledNavigation(error) else { return }
+      finishNavigationAttempt()
+      PersistentWebRuntime.markNavigationCompleted()
       bridge?.invalidateSession()
       model.webDidFail()
     }
@@ -220,11 +274,16 @@ struct WebHostView: UIViewRepresentable {
     func webView(
       _ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error
     ) {
+      guard !isCancelledNavigation(error) else { return }
+      finishNavigationAttempt()
+      PersistentWebRuntime.markNavigationCompleted()
       bridge?.invalidateSession()
       model.webDidFail()
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+      finishNavigationAttempt()
+      PersistentWebRuntime.markNavigationCompleted()
       bridge?.invalidateSession()
       model.webDidFail()
     }
@@ -269,6 +328,7 @@ struct WebHostView: UIViewRepresentable {
     }
 
     func teardown() {
+      finishNavigationAttempt()
       bridge?.invalidateSession()
       bridge?.detachEventReceiver()
       if let tapHaptics {
@@ -279,6 +339,57 @@ struct WebHostView: UIViewRepresentable {
           forName: BridgeScripts.handlerName, contentWorld: contentWorld)
       }
       handler = nil
+    }
+  }
+}
+
+@MainActor
+enum PersistentWebRuntime {
+  private static let cacheSchemaVersion = 1
+  private static let cacheSchemaKey = "COPWebRuntimeCacheSchemaVersion"
+  private static let interruptedNavigationKey = "COPWebRuntimeNavigationInterrupted"
+  private static let transientWebsiteDataTypes: Set<String> = [
+    WKWebsiteDataTypeFetchCache,
+    WKWebsiteDataTypeDiskCache,
+    WKWebsiteDataTypeMemoryCache,
+    WKWebsiteDataTypeServiceWorkerRegistrations,
+  ]
+
+  static func prepareForLaunch() async {
+    await prepareForLaunch(defaults: .standard) {
+      await clearTransientData(from: .default())
+    }
+  }
+
+  static func prepareForLaunch(
+    defaults: UserDefaults,
+    clearTransientData: @MainActor () async -> Void
+  ) async {
+    let cacheSchemaChanged = defaults.integer(forKey: cacheSchemaKey) < cacheSchemaVersion
+    let previousNavigationWasInterrupted = defaults.bool(forKey: interruptedNavigationKey)
+    if cacheSchemaChanged || previousNavigationWasInterrupted {
+      await clearTransientData()
+    }
+    defaults.set(cacheSchemaVersion, forKey: cacheSchemaKey)
+    defaults.set(false, forKey: interruptedNavigationKey)
+  }
+
+  static func markNavigationCommitted(defaults: UserDefaults = .standard) {
+    defaults.set(true, forKey: interruptedNavigationKey)
+  }
+
+  static func markNavigationCompleted(defaults: UserDefaults = .standard) {
+    defaults.set(false, forKey: interruptedNavigationKey)
+  }
+
+  static func clearTransientData(from dataStore: WKWebsiteDataStore) async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+      dataStore.removeData(
+        ofTypes: transientWebsiteDataTypes,
+        modifiedSince: .distantPast
+      ) {
+        continuation.resume()
+      }
     }
   }
 }

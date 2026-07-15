@@ -151,6 +151,19 @@ krok.
 4. WebKit/Matrix a native stores jsou oddělené; globální mazání vyžaduje
    potvrzení a dokumentovaný dopad.
 
+## COP zůstane na „Načítám COP“
+
+1. Ověřte veřejný HTTPS origin a zachyťte `WKNavigationDelegate` přechody.
+   Commit bez `didFinish`, při kterém nereaguje ani JavaScript, značí poškozený
+   persistentní WebKit runtime, ne automaticky výpadek COP API.
+2. Host před vytvořením dalšího `WKWebView` automaticky opraví změněné cache
+   schéma nebo přerušený předchozí commit odstraněním service-worker registrací
+   a přechodných Fetch/disk/memory cache.
+3. Cookies, Local Storage, IndexedDB, webovou OIDC relaci ani nativní Matrix
+   store nemažte. Globální odinstalace či reset aplikace není standardní opravou.
+4. Pokud se ani čistá navigace nedokončí, zobrazte lokální fallback s opakováním
+   a diagnostickým kódem a pokračujte kontrolou TLS, origin policy a web buildu.
+
 ## Relay je aktivní v release nebo přijímá citlivý payload
 
 1. Jde o security incident: okamžitě aktivujte serverový kill switch a zastavte
