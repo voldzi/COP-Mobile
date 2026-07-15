@@ -345,7 +345,7 @@ struct WebHostView: UIViewRepresentable {
 
 @MainActor
 enum PersistentWebRuntime {
-  private static let cacheSchemaVersion = 1
+  private static let cacheSchemaVersion = 2
   private static let cacheSchemaKey = "COPWebRuntimeCacheSchemaVersion"
   private static let interruptedNavigationKey = "COPWebRuntimeNavigationInterrupted"
   private static let transientWebsiteDataTypes: Set<String> = [
