@@ -53,6 +53,7 @@ struct WebHostView: UIViewRepresentable {
         bridgeOrigins: configuration.bridgeOrigins,
         navigationOrigins: configuration.navigationOrigins
       ),
+      location: model.deviceLocationProvider,
       openNativeChat: model.openNativeChat
     )
     let handler = BridgeMessageHandler(bridge: bridge)

@@ -31,6 +31,31 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     XCTAssertEqual(startRequests.first?.2, false)
   }
 
+  func testAIChatUsesAlreadyAuthorizedLocationWithoutPrompting() async throws {
+    let provider = FakeLocationProvider()
+    let model = AppModel(deviceLocationProvider: provider)
+
+    let resolvedLocation = await model.currentCommunicationLocation()
+    let location = try XCTUnwrap(resolvedLocation)
+
+    XCTAssertEqual(location.latitude, 50.0755)
+    XCTAssertEqual(location.longitude, 14.4378)
+    XCTAssertEqual(location.radiusKilometers, 15)
+    XCTAssertEqual(location.label, "Aktuální poloha")
+    XCTAssertEqual(provider.authorizationRequestCount, 0)
+  }
+
+  func testAIChatDoesNotRequestLocationWhenPermissionIsMissing() async {
+    let provider = FakeLocationProvider()
+    provider.permission = "notDetermined"
+    let model = AppModel(deviceLocationProvider: provider)
+
+    let location = await model.currentCommunicationLocation()
+
+    XCTAssertNil(location)
+    XCTAssertEqual(provider.authorizationRequestCount, 0)
+  }
+
   func testOnlyOpeningNotificationActionsNavigateToNativeChat() {
     XCTAssertTrue(
       PushNotificationService.shouldOpenNativeChat(

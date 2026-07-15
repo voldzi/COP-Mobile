@@ -35,6 +35,7 @@ struct RootView: View {
 
         if model.surface == .chat {
           CSMCommunicationHost(
+            currentLocationProvider: model.currentCommunicationLocation,
             onClose: model.closeNativeChat,
             onStartVoiceCall: { roomID, title, isGroup in
               model.startNativeVoiceCall(

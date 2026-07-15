@@ -100,6 +100,10 @@ XSS ochrany.
   encrypted message outbox a bootstrap cache. Každý store je subject- a
   device-bound, má integrity/retention policy a nesmí se zaměnit s WebKit
   IndexedDB.
+- AI chat může od hostu získat krátkodobý vzorek aktuální polohy jen tehdy,
+  pokud hlavní COP map/device flow už má oprávnění. Komunikační vrstva sama
+  systémový permission dialog nikdy nevyvolává; bez oprávnění předá nulovou
+  polohu a backend si vyžádá název místa běžnou otázkou.
 - Tracking samples, Share inbox a asset metadata používají encrypted/protected
   files, atomic writes, integrity hash, subject/app-instance scope, byte quota,
   TTL a explicitní cleanup.

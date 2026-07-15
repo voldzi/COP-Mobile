@@ -1,3 +1,4 @@
+import CSMCommunicationKit
 import Foundation
 import Observation
 
@@ -17,11 +18,16 @@ final class AppModel {
   }
 
   let configuration: Result<AppConfiguration, AppConfigurationError>
+  let deviceLocationProvider: any DeviceLocationProviding
   private(set) var phase: Phase = .loading
   private(set) var reloadToken = 0
   var surface: Surface = .cop
 
-  init(bundle: Bundle = .main) {
+  init(
+    bundle: Bundle = .main,
+    deviceLocationProvider: any DeviceLocationProviding = CoreLocationService()
+  ) {
+    self.deviceLocationProvider = deviceLocationProvider
     do {
       configuration = .success(try AppConfiguration.load(from: bundle))
     } catch let error as AppConfigurationError {
@@ -65,6 +71,26 @@ final class AppModel {
 
   func closeNativeChat() {
     surface = .cop
+  }
+
+  /// Supplies an already-authorized, short-lived location sample to the
+  /// native communication surface. Chat never prompts for location itself;
+  /// permission remains owned by the main COP map/device flow.
+  func currentCommunicationLocation() async -> CSMCommunicationLocation? {
+    guard deviceLocationProvider.permission == "granted",
+      let sample = try? await deviceLocationProvider.currentLocation(timeout: .seconds(4)),
+      sample["valid"] as? Bool == true,
+      let latitude = sample["latitude"] as? Double,
+      let longitude = sample["longitude"] as? Double
+    else {
+      return nil
+    }
+    return CSMCommunicationLocation(
+      latitude: latitude,
+      longitude: longitude,
+      radiusKilometers: 15,
+      label: "Aktuální poloha"
+    )
   }
 
   func startNativeVoiceCall(
