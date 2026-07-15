@@ -1,6 +1,35 @@
 import SwiftUI
 @preconcurrency import WebKit
 
+enum WebNavigationResponseAction: Equatable {
+  case allow
+  case retry
+  case fail
+}
+
+enum WebNavigationResponsePolicy {
+  static func action(
+    for response: URLResponse,
+    isForMainFrame: Bool,
+    recoveryAttempted: Bool
+  ) -> WebNavigationResponseAction {
+    guard isForMainFrame, let httpResponse = response as? HTTPURLResponse else {
+      return .allow
+    }
+    guard !(200...399).contains(httpResponse.statusCode) else {
+      return .allow
+    }
+
+    let retryableStatusCodes = [408, 425, 429]
+    let isRetryable = retryableStatusCodes.contains(httpResponse.statusCode)
+      || (500...599).contains(httpResponse.statusCode)
+    if isRetryable, !recoveryAttempted {
+      return .retry
+    }
+    return .fail
+  }
+}
+
 struct WebHostView: UIViewRepresentable {
   let configuration: AppConfiguration
   let model: AppModel
@@ -234,6 +263,33 @@ struct WebHostView: UIViewRepresentable {
         model.webWasBlocked()
       }
       return .cancel
+    }
+
+    func webView(
+      _ webView: WKWebView,
+      decidePolicyFor navigationResponse: WKNavigationResponse
+    ) async -> WKNavigationResponsePolicy {
+      switch WebNavigationResponsePolicy.action(
+        for: navigationResponse.response,
+        isForMainFrame: navigationResponse.isForMainFrame,
+        recoveryAttempted: webRuntimeRecoveryAttempted
+      ) {
+      case .allow:
+        return .allow
+      case .retry:
+        webRuntimeRecoveryAttempted = true
+        finishNavigationAttempt()
+        bridge?.invalidateSession()
+        DispatchQueue.main.async { [weak self] in
+          self?.startNavigation(cachePolicy: .reloadIgnoringLocalAndRemoteCacheData)
+        }
+        return .cancel
+      case .fail:
+        finishNavigationAttempt()
+        bridge?.invalidateSession()
+        model.webDidFail()
+        return .cancel
+      }
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {

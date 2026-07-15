@@ -227,6 +227,10 @@ timeline ani Matrix interní stav.
 - Pokud není k dispozici použitelný shell, zobrazí se lokálně zabalený SwiftUI
   fallback se stavem konektivity a opakováním; bridge ani doménové operace v něm
   nejsou dostupné.
+- HTTP chyby hlavního dokumentu se nikdy nezobrazují jako obsah aplikace. Stav
+  `408`, `425`, `429` nebo `5xx` host jednou zopakuje bez cache; další neúspěch
+  a ostatní `4xx` přepnou na nativní fallback. Chyba subframe nesmí nahradit celý
+  aplikační povrch.
 - Současný COP offline snapshot je read-only. Offline vytvoření hlášení bude
   povoleno až po implementaci webového outboxu v 01 COP a contract testech.
 

@@ -164,6 +164,10 @@ krok.
    nemažte; globální odinstalace není standardní opravou.
 4. Pokud se ani opakovaná navigace nedokončí, zobrazte lokální fallback s opakováním
    a diagnostickým kódem a pokračujte kontrolou TLS, origin policy a web buildu.
+5. Ověřte také HTTP stav hlavního dokumentu. `4xx`/`5xx` se nesmí vykreslit uvnitř
+   aplikace; retryable odpověď se jednou opakuje a pak musí skončit nativním
+   fallbackem. Současně ověřte `/health/ready` a stav `docker compose ps` na
+   produkčním hostu.
 
 ## Relay je aktivní v release nebo přijímá citlivý payload
 
