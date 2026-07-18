@@ -54,7 +54,9 @@ struct WebHostView: UIViewRepresentable {
         navigationOrigins: configuration.navigationOrigins
       ),
       location: model.deviceLocationProvider,
-      openNativeChat: model.openNativeChat
+      openNativeChat: { expectedSubjectID in
+        model.openNativeChat(expectedSubjectID: expectedSubjectID)
+      }
     )
     let handler = BridgeMessageHandler(bridge: bridge)
     contentController.addScriptMessageHandler(

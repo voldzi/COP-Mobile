@@ -21,6 +21,7 @@ final class AppModel {
   let deviceLocationProvider: any DeviceLocationProviding
   private(set) var phase: Phase = .loading
   private(set) var reloadToken = 0
+  private(set) var nativeChatExpectedSubjectID: String?
   var surface: Surface = .cop
 
   init(
@@ -65,7 +66,9 @@ final class AppModel {
     phase = .loading
   }
 
-  func openNativeChat() {
+  func openNativeChat(expectedSubjectID: String? = nil) {
+    let normalizedSubjectID = expectedSubjectID?.trimmingCharacters(in: .whitespacesAndNewlines)
+    nativeChatExpectedSubjectID = normalizedSubjectID?.isEmpty == false ? normalizedSubjectID : nil
     surface = .chat
   }
 

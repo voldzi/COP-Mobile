@@ -35,7 +35,7 @@ def main() -> int:
         failures.append("project.yml must use the approved Apple Development Team")
     if "url: https://github.com/voldzi/CSM-messenger.git" not in project:
         failures.append("project.yml must consume CSMCommunicationKit from the published GitHub repository")
-    if "revision: 2061a381cbf69713b4610a183c80dfae8732ea6a" not in project:
+    if "revision: 687f6f7ec4da8c57f57c2152e6a10c5afdcc1dca" not in project:
         failures.append("project.yml must pin the reviewed CSMCommunicationKit Git revision")
     if 'path: "../../../04 CSM messenger"' in project:
         failures.append("release project must not depend on a local sibling CSM checkout")

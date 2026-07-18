@@ -36,6 +36,7 @@ struct RootView: View {
         if model.surface == .chat {
           CSMCommunicationHost(
             currentLocationProvider: model.currentCommunicationLocation,
+            expectedSubjectID: model.nativeChatExpectedSubjectID,
             onClose: model.closeNativeChat,
             onStartVoiceCall: { roomID, title, isGroup in
               model.startNativeVoiceCall(
@@ -58,7 +59,7 @@ struct RootView: View {
       }
       .animation(.easeInOut(duration: 0.22), value: model.surface)
       .onReceive(NotificationCenter.default.publisher(for: .copNativeChatRequested)) { _ in
-        model.openNativeChat()
+        model.openNativeChat(expectedSubjectID: nil)
       }
       .onReceive(NotificationCenter.default.publisher(for: .copWebMediaInvalidationRequired)) { _ in
         model.invalidateWebMedia()

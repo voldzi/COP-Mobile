@@ -99,7 +99,7 @@ MVP neobsahuje:
 | Cesta | Vstup | Požadovaný výsledek | Chyba / fallback |
 | --- | --- | --- | --- |
 | První online start | Ikona CSM | Načte se důvěryhodný COP origin, proběhne login a bridge handshake | Nepovolený origin bridge nedostane; síťová chyba zobrazí lokální fallback s Retry |
-| První otevření nativního chatu | Tlačítko Chat nebo `communications.openChat` | Platná nativní Keychain session se obnoví bez přihlašovacího probliknutí a otevře SwiftUI chat | Bez použitelné session se zobrazí pouze pokyn k přihlášení v mapě a návrat; druhý login formulář se v chatu nenabízí |
+| První otevření nativního chatu | Tlačítko Chat nebo `communications.openChat` | Platná nativní Keychain session se obnoví bez probliknutí; bez ní explicitní tap otevře bezpečný nativní OIDC/PKCE tok přímo v COP Mobile | Zrušené přihlášení nabídne „Přihlásit“; pokud mapa očekává jiný účet než native, chat zůstane zavřený a nabídne bezpečné přepnutí účtu |
 | Nativní E2EE zpráva | Composer v konverzaci | Zpráva vstoupí do encrypted outboxu, Matrix ji odešle a UI rozliší pending/sent/failed | Offline položka zůstane lokálně, retry nevytvoří duplicitní serverový event |
 | Nativní dotaz COP AI | Composer v přímé konverzaci `COP AI Assistant` | Aktuální otázka se zpracuje kanonickým COP AI endpointem a odpověď se vrátí jako E2EE Matrix zpráva | Historie roomu se do COP neposílá; selhání AI nezmění doručení původní uživatelské zprávy |
 | Příchozí hovor | VoIP push nebo aktivní Matrix invite | CallKit okamžitě oznámí skutečný hovor a SwiftUI zobrazí ringing/connecting/connected | Expirovaný/ukončený hovor se zavře; presentation nikdy nepředstírá media connection |
@@ -158,7 +158,8 @@ Minimální provozní stavy jsou:
 | `OFFLINE_FALLBACK` | Není bezpečně použitelný web shell | Lokální technická nápověda, konektivita a Retry |
 | `SYNCING` | Webový outbox synchronizuje | Zobrazit průběh; položku neoznačit jako doručenou před serverovým ACK |
 | `BLOCKED` | Origin, verze protokolu nebo bezpečnostní kontrola selhala | Bridge vypnout, zobrazit bezpečnou chybu a diagnostický kód |
-| `CHAT_AUTH_REQUIRED` | Nativní communication session není dostupná | Zobrazit pokyn k přihlášení v mapě a návrat; v embedded chatu nenabízet druhý login a webovou session nekopírovat |
+| `CHAT_AUTH_REQUIRED` | Nativní communication session není dostupná | Po explicitním vstupu do chatu spustit nativní OIDC/PKCE; webovou session nekopírovat. Uživatel může COP Mobile používat jen pro chat bez předchozí návštěvy webu |
+| `CHAT_ACCOUNT_MISMATCH` | Native je přihlášený jiným subjectem než přihlášená mapa | Nezobrazit seznam ani zprávy; nabídnout nucené znovupřihlášení správným účtem |
 | `CHAT_OFFLINE` | Matrix není dostupný, ale lokální E2EE store je odemčený | Zobrazit cached timeline a encrypted pending outbox s pravdivým stavem |
 | `CALL_RINGING/CONNECTING/CONNECTED` | Nativní prezentace stavu potvrzeného call enginem | CallKit/SwiftUI ovládání; `CONNECTED` pouze po potvrzení media enginu |
 

@@ -303,8 +303,12 @@ Nesmí nařídit navigaci na libovolnou URL.
 
 ### Native communications a call presentation
 
-`communications.openChat` přijímá pouze `{}` a vrací `{ "opened": true }`.
-Nevytváří session, nepřijímá room ID a neposílá do webu chatový stav.
+`communications.openChat` přijímá `{}` nebo přesně
+`{ "subjectId": "<opaque-oidc-sub>" }` (po trimu nejvýše 160 znaků) a vrací
+`{ "opened": true }`. Volitelný subject je pouze očekávaná identita pro
+fail-closed porovnání s nezávisle přihlášeným nativním actorem. Metoda
+nevytváří session, nepřijímá room ID, token, profil ani obsah zprávy a neposílá
+do webu chatový stav.
 
 `calls.updatePresentation` přijímá jen:
 

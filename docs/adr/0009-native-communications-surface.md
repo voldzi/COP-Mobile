@@ -41,9 +41,17 @@ signalizace, ICE/TURN a médií a neúměrně zvýšilo riziko.
    spravovaných `CSMCommunicationKit`. Modul nevystavuje credentials hostu ani
    webovému JavaScriptu.
 4. Bridge smí otevřít nativní chat pouze úzkou metodou
-   `communications.openChat`. Tato metoda nepřenáší obsah zpráv, identity,
-   tokeny ani Matrix eventy.
-5. Hovor dostane nativní SwiftUI full-screen prezentaci, CallKit lifecycle,
+   `communications.openChat`. Vedle prázdného payloadu smí exact-origin host
+   dodat jen bounded opaque očekávaný OIDC subject. Je to fail-closed ochrana
+   proti záměně účtu, nikoli credential: native jej porovná s actorem získaným
+   vlastním OIDC/bootstrap tokem. Metoda nepřenáší obsah zpráv, tokeny, profil,
+   Matrix identitu ani Matrix eventy.
+5. COP Mobile musí podporovat uživatele bez webového použití. Explicitní tap na
+   Chat může při chybějící native session spustit OIDC Authorization Code +
+   PKCE přímo v aplikaci. Platná Keychain session se obnoví bez login
+   probliknutí; neshoda s očekávaným web subjectem blokuje celý chat a nabízí
+   nucené znovupřihlášení.
+6. Hovor dostane nativní SwiftUI full-screen prezentaci, CallKit lifecycle,
    `AVAudioSession` routing, mute/speaker ovládání a proximity blackout.
    Přechodný bridge `calls.updatePresentation` přenáší jen validovaný stav
    hovoru a opaque `callId`/`roomId`/display title. Aktivní stav lze měnit jen
@@ -51,24 +59,24 @@ signalizace, ICE/TURN a médií a neúměrně zvýšilo riziko.
    stav je vždy přenesen kvůli bezpečnému úklidu CallKitu. Native navíc drží
    procesní kvótu aktualizací/identit a rozlišuje PushKit call čekající na média
    od hovoru, jehož media engine už vlastní WebView.
-6. Do dalšího samostatného gate zůstávají Matrix call signalizace, SDP/ICE a
+7. Do dalšího samostatného gate zůstávají Matrix call signalizace, SDP/ICE a
    WebRTC média ve stávajícím COP Chat `matrix-js-sdk` enginu. Nativní call UI
    není důkazem nativního media enginu ani úspěšného spojení.
    Při startu hovoru z nativního SwiftUI chatu zůstává nativní chat namountovaný
    pod call overlayem; host nesmí odhalit webový chat nebo webový recovery flow
    jen proto, že webový engine zatím připravuje media/call snapshot.
-7. PushKit se používá pouze pro skutečný příchozí VoIP hovor. VoIP push se musí
+8. PushKit se používá pouze pro skutečný příchozí VoIP hovor. VoIP push se musí
    okamžitě nahlásit CallKitu; obnovení webového media enginu nesmí zdržet
    povinný PushKit completion.
-8. COP Mobile zůstává jediným `UNUserNotificationCenterDelegate`. APNs token a
+9. COP Mobile zůstává jediným `UNUserNotificationCenterDelegate`. APNs token a
    foreground/background/action callbacky předává do
    `CSMCommunicationNotifications`; vložený modul globální delegate nepřepisuje
    a před připojením chatového surface drží omezenou metadata-only push frontu.
-9. Plně nativní WebRTC vyžaduje nové ADR a gate: kompatibilní Matrix signaling,
+10. Plně nativní WebRTC vyžaduje nové ADR a gate: kompatibilní Matrix signaling,
    auditovanou WebRTC dependency, TURN/ICE interoperabilitu, audio interruption
    state machine, background/terminated real-device testy a bezpečný rollout s
    možností návratu k ověřenému webovému enginu.
-10. CallKit user action je dvoufázová: native vytvoří stabilní `actionId`, event
+11. CallKit user action je dvoufázová: native vytvoří stabilní `actionId`, event
     retryuje a `CXAction` fulfillne teprve po identity-bound ACK z webového
     Matrix enginu. COP Chat drží command do existence odpovídajícího call
     snapshotu a deduplikuje retry. Timeout/záporné ACK jsou fail-closed; chyba
@@ -77,7 +85,7 @@ signalizace, ICE/TURN a médií a neúměrně zvýšilo riziko.
     Záporný ACK, nativní timeout i CallKit `timedOutPerforming` vynutí reload
     webového media enginu, report/remove call a deaktivaci audia. Teprve po
     forced close se `end`/`reject` může fulfillnout; `answer`/`mute` failuje.
-11. Skupinový hlasový hovor se zahajuje z nativního detailu skupiny a v aktivním
+12. Skupinový hlasový hovor se zahajuje z nativního detailu skupiny a v aktivním
     call view lze přes `+` postupně přizvat další aktivní členy místnosti. Native
     přenáší pouze `group` kind, bounded participant presentation a opaque
     `start`/`addParticipants` action; webový Matrix `GroupCall` zůstává jediným
@@ -127,7 +135,8 @@ signalizace, ICE/TURN a médií a neúměrně zvýšilo riziko.
   exportu.
 - Lokální Matrix/outbox stores jsou subject- a device-bound, šifrované, chráněné
   Data Protection a při změně účtu nesmí ukázat data předchozího subjectu.
-- Web může nativní chat pouze otevřít a zrcadlit call presentation. Nesmí
+- Web může nativní chat pouze otevřít, dodat očekávaný opaque subject pro
+  kontrolu shody a zrcadlit call presentation. Nesmí
   ovládat arbitrary audio, CallKit, URLSession ani Matrix API.
 - Package dependency musí být pro release reprodukovatelně připnutá a výsledný
   artifact musí projít privacy manifest, embedded-framework a secret scanem.

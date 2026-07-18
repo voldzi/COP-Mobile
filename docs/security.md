@@ -27,10 +27,14 @@ Chráníme zejména:
   `CSMCommunicationKit` vlastní oddělenou nativní OIDC/PKCE relaci pro veřejný
   `csm-mobile` klient. Native nečte WebKit token storage a webový token se
   nekopíruje do Keychainu.
-- Mapa je v COP Mobile jediné viditelné místo pro přihlášení. Embedded chat
-  během tiché obnovy nativní Keychain session neukazuje login a při chybějící
-  session pouze odkáže zpět do mapy. Toto sjednocení UI není token bridge:
-  webové cookies/bearer tokeny se nečtou ani nepřenášejí do nativního klienta.
+- Uživatel může používat jen nativní komunikaci COP Mobile bez webové mapy.
+  Embedded chat tiše obnoví vlastní Keychain session a po explicitním tapu na
+  Chat může spustit nativní OIDC Authorization Code + PKCE. Webové
+  cookies/bearer tokeny se nečtou ani nepřenášejí do nativního klienta.
+- Přihlášená mapa smí přes exact-origin bridge předat pouze bounded opaque
+  očekávaný OIDC `subjectId`. Native jej porovná s actor subjectem z vlastního
+  bootstrapu a při neshodě failuje zavřeně. Toto není credential bridge:
+  cookie, bearer/refresh token, profil, Matrix ID ani obsah zpráv se nepřenáší.
 - Nativní OIDC callback musí ověřit issuer, redirect URI, state a PKCE verifier;
   aplikace nesmí obsahovat OIDC client secret.
 - Nativní access/refresh token a Matrix device/session material jsou dostupné

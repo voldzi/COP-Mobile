@@ -293,19 +293,64 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
   }
 
   func testAuthenticatedMainFrameCanOpenNativeChat() async throws {
-    var opened = 0
-    let bridge = try makeBridge(openNativeChat: { opened += 1 })
+    var openedSubjects: [String?] = []
+    let bridge = try makeBridge(openNativeChat: { openedSubjects.append($0) })
     bridge.navigationDidCommit(url: productionURL)
     let ready = await bridge.handle(message: hello(), context: allowedContext())
     let sessionID = try XCTUnwrap(ready["sessionId"] as? String)
 
     let response = await bridge.handle(
-      message: request(method: "communications.openChat", sessionID: sessionID, params: [:]),
+      message: request(
+        method: "communications.openChat",
+        sessionID: sessionID,
+        params: ["subjectId": "subject-jirina"]
+      ),
       context: allowedContext())
 
     XCTAssertEqual(response["ok"] as? Bool, true)
     XCTAssertEqual((response["result"] as? [String: Any])?["opened"] as? Bool, true)
-    XCTAssertEqual(opened, 1)
+    XCTAssertEqual(openedSubjects.count, 1)
+    XCTAssertEqual(openedSubjects.first!, "subject-jirina")
+  }
+
+  func testNativeOnlyChatCanOpenWithoutWebIdentity() async throws {
+    var openedSubjects: [String?] = []
+    let bridge = try makeBridge(openNativeChat: { openedSubjects.append($0) })
+    bridge.navigationDidCommit(url: productionURL)
+    let ready = await bridge.handle(message: hello(), context: allowedContext())
+    let sessionID = try XCTUnwrap(ready["sessionId"] as? String)
+
+    let response = await bridge.handle(
+      message: request(
+        method: "communications.openChat",
+        sessionID: sessionID,
+        params: [:]
+      ),
+      context: allowedContext())
+
+    XCTAssertEqual(response["ok"] as? Bool, true)
+    XCTAssertEqual((response["result"] as? [String: Any])?["opened"] as? Bool, true)
+    XCTAssertEqual(openedSubjects.count, 1)
+    XCTAssertNil(openedSubjects.first!)
+  }
+
+  func testNativeChatRejectsUnexpectedIdentityFields() async throws {
+    var opened = 0
+    let bridge = try makeBridge(openNativeChat: { _ in opened += 1 })
+    bridge.navigationDidCommit(url: productionURL)
+    let ready = await bridge.handle(message: hello(), context: allowedContext())
+    let sessionID = try XCTUnwrap(ready["sessionId"] as? String)
+
+    let response = await bridge.handle(
+      message: request(
+        method: "communications.openChat",
+        sessionID: sessionID,
+        params: ["subjectId": "subject-jirina", "token": "forbidden"]
+      ),
+      context: allowedContext())
+
+    XCTAssertEqual(response["ok"] as? Bool, false)
+    XCTAssertEqual(opened, 0)
   }
 
   func testCallPresentationAcceptsOnlyBoundedStateWithoutMediaPayload() async throws {
@@ -428,7 +473,7 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     location: DeviceLocationProviding? = nil,
     notifications: PushNotificationProviding? = nil,
     isForeground: @escaping () -> Bool = { true },
-    openNativeChat: @escaping () -> Void = {},
+    openNativeChat: @escaping (String?) -> Void = { _ in },
     updateCallPresentation: @escaping (
       String, String, String?, String, String, VoiceCallKind, [VoiceCallParticipant],
       [VoiceCallParticipant]

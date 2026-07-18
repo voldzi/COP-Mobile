@@ -20,7 +20,7 @@ final class DeviceBridgeCoordinator {
   private let location: DeviceLocationProviding
   private let notifications: PushNotificationProviding
   private let isForeground: () -> Bool
-  private let openNativeChat: () -> Void
+  private let openNativeChat: (String?) -> Void
   private let updateCallPresentation: (
     String, String, String?, String, String, VoiceCallKind, [VoiceCallParticipant],
     [VoiceCallParticipant]
@@ -47,7 +47,7 @@ final class DeviceBridgeCoordinator {
     location: DeviceLocationProviding = CoreLocationService(),
     notifications: PushNotificationProviding = PushNotificationService.shared,
     isForeground: @escaping () -> Bool = { UIApplication.shared.applicationState == .active },
-    openNativeChat: @escaping () -> Void = {},
+    openNativeChat: @escaping (String?) -> Void = { _ in },
     updateCallPresentation: @escaping (
       String, String, String?, String, String, VoiceCallKind, [VoiceCallParticipant],
       [VoiceCallParticipant]
@@ -329,9 +329,20 @@ final class DeviceBridgeCoordinator {
       return try await notifications.registerRemote(
         ticket: ticket, messagingBaseURL: messagingBaseURL)
     case "communications.openChat":
-      guard params.isEmpty else { throw DeviceLocationError.invalidSample }
+      guard Set(params.keys).isSubset(of: ["subjectId"]) else {
+        throw DeviceLocationError.invalidSample
+      }
+      let expectedSubjectID: String?
+      if params.keys.contains("subjectId") {
+        guard let subjectID = boundedBridgeString(params["subjectId"], maximum: 160) else {
+          throw DeviceLocationError.invalidSample
+        }
+        expectedSubjectID = subjectID
+      } else {
+        expectedSubjectID = nil
+      }
       guard isForeground() else { throw BridgeExecutionError.notForeground }
-      openNativeChat()
+      openNativeChat(expectedSubjectID)
       return ["opened": true]
     case "calls.updatePresentation":
       guard Set(params.keys).isSubset(of: [

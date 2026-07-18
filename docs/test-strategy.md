@@ -77,7 +77,8 @@ Minimální společná sada:
 - start/read/stop background tracking session a obnovení po reloadu WebView;
 - validní `NativeAssetRef`, expirovaný/missing asset a nepovolený media type;
 - validní push deep link a route s nepovoleným originem;
-- `communications.openChat` pouze s prázdným payloadem;
+- `communications.openChat` s `{}` a s jediným bounded opaque `subjectId`;
+  odmítnutí tokenu, profilu, room ID a neznámého pole;
 - `calls.updatePresentation` pro všechny direction/phase hodnoty, bounded ID a
   title, direct/group kind, bounded participant/eligible seznam, foreground a
   povolené state transitions, plus odmítnutí SDP/ICE,
@@ -110,7 +111,8 @@ V COP repozitáři se ověří:
 - žádný webový kód nedostane APNs token ani filesystem cestu.
 - hlasový hovor v hlavním rámci přesného COP originu vyžádá systémové oprávnění
   mikrofonu a lze jej přijmout; iframe, jiný origin a kamera jsou odmítnuty.
-- otevření nativního chatu nepřenáší room content, user token ani auth stav;
+- otevření nativního chatu nepřenáší room content ani user token; volitelný
+  očekávaný OIDC subject se používá pouze pro fail-closed kontrolu shody účtu;
 - webový call engine posílá nativní prezentaci `connected` až po skutečném media
   spojení a po `ended`/`failed` call overlay i proximity stav zaniknou;
 - APNs callbacky mají jediného host delegate, Matrix facade obdrží token i
@@ -194,9 +196,13 @@ být injektovatelné, aby byly expiry a lifecycle scénáře deterministické.
 - nepřihlášený deep link projde loginem a až poté otevře autorizovanou route;
 - otevření/zavření `CSMCommunicationHost` nezruší WebView route ani aktivní
   webový call engine;
-- stav `.checking` při otevření embedded chatu ukáže pouze neutrální průběh,
-  nikdy standalone login; platná Keychain session otevře chat přímo a
-  `.signedOut` zobrazí jen pokyn k přihlášení v mapě a návrat;
+- stav `.checking` při otevření embedded chatu ukáže pouze neutrální průběh;
+  platná Keychain session otevře chat přímo, `.signedOut` po explicitním tapu
+  spustí nativní OIDC/PKCE a po zrušení nabídne tlačítko Přihlásit;
+- shodný web/native subject otevře chat, rozdílný subject nezobrazí žádnou
+  konverzaci a přepnutí účtu vynutí OIDC reauthentication;
+- čistá instalace umožní přihlásit a používat pouze COP Mobile chat bez
+  předchozího přihlášení ve webové mapě;
 - standalone fresh nativní OIDC login, návrat přes `csm` redirect, obnovení
   Keychain session, nativní logout a nezávislá webová session;
 - hlavička otevřené konverzace je pod status barem/Dynamic Island, zachová
@@ -227,8 +233,10 @@ Modely, OS buildy a fyzická dostupnost se evidují v implementačním reportu.
 
 - OIDC/PKCE fresh login, cancel, přerušení callbacku, refresh po restartu,
   logout, revoked refresh token a přihlášení jiného subjectu;
-- otevření embedded chatu s platnou session bez probliknutí loginu, signed-out
-  instrukce pouze k přihlášení v mapě a návrat do stejné webové route;
+- otevření embedded chatu s platnou session bez probliknutí loginu, fresh
+  nativní login přímo v COP Mobile a návrat do stejné webové route;
+- účet A v mapě + účet B v native musí failovat zavřeně bez náhledu zpráv;
+  přepnutí na účet A musí projít nuceným přihlášením;
 - portrait/landscape a otevřená klávesnice: hlavička chatu zůstává pod horní
   safe area a její glass karta nekoliduje se status barem/Dynamic Island;
 - potvrzení, že WebKit a native mají oddělené session/device ID a že bridge ani

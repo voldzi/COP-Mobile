@@ -179,11 +179,17 @@ COP/CSM Matrix bootstrapu. Session se nesdílejí a native nikdy nečte WebKit
 storage. Logout/revokace a změna subjectu čistí příslušná nativní credentials a
 subject-bound stores bez zpřístupnění dat předchozího uživatele.
 
-COP Mobile má přesto jen jedno viditelné místo pro přihlášení: mapu. Při
-otevření chatu komunikační modul nejprve tiše obnoví svou nativní Keychain
-session; přechodný stav nezobrazuje login. Pokud session chybí, chat pouze
-vyzve k návratu a přihlášení v mapě. Toto UI pravidlo nekopíruje WebKit bearer
-token do nativního Keychainu a nemění oddělené OIDC klienty.
+COP Mobile podporuje i uživatele, kteří webovou mapu vůbec nepoužívají.
+Při otevření chatu komunikační modul nejprve tiše obnoví svou nativní Keychain
+session; pokud neexistuje, explicitní tap na Chat smí otevřít nativní
+Authorization Code + PKCE tok uvnitř aplikace. WebKit bearer token se
+nekopíruje do nativního Keychainu a oba OIDC klienty zůstávají oddělené.
+
+Pokud je webová mapa přihlášená, předá přes exact-origin bridge pouze bounded
+opaque očekávaný OIDC `subjectId`. Nativní chat jej porovná s actor subjectem
+získaným vlastním bootstrapem. Při neshodě failuje zavřeně a nezobrazí ani
+seznam konverzací; nabídne nucené znovupřihlášení. Hodnota není credential a
+bridge nikdy nenese cookie, bearer token, profil, Matrix ID nebo obsah zprávy.
 
 Komunikační povrch nepřeměřuje ani znovu nepřičítá horní safe-area inset.
 Otevřená konverzace používá systémový `NavigationStack` bar, takže SwiftUI
@@ -212,8 +218,9 @@ a APNs tokenem registruje zařízení přímo u CSM Messaging. Tato serverová z
 je blokující podmínkou pro remote push, ne pro lokální notifikace.
 
 Web může otevřít nativní komunikační povrch metodou
-`communications.openChat`; payload je prázdný. Modul hostu nevrací token,
-timeline ani Matrix interní stav.
+`communications.openChat`; payload je prázdný nebo obsahuje jen volitelný
+bounded opaque očekávaný OIDC `subjectId`. Modul hostu nevrací token, timeline
+ani Matrix interní stav.
 
 ### Offline start
 
@@ -299,7 +306,7 @@ milníku před implementací příslušné služby.
 | --- | --- | --- |
 | COP web/PWA | mapa, hlášení, vrstvy a business workflow; přechodný Matrix/WebRTC call engine | repozitář `01 COP` |
 | COP API | doménová data, pairing, device audit, snapshot, attachments, mesh gateway | `01 COP/openapi/openapi.json` |
-| `CSMCommunicationKit` | nativní chat UI, OIDC/Keychain, Matrix Rust E2EE, offline communication state a metadata-only voice-call launch callback | GitHub Swift Package `voldzi/CSM-messenger`, exact revision `2061a381cbf69713b4610a183c80dfae8732ea6a` + ADR 0009 |
+| `CSMCommunicationKit` | nativní chat UI, OIDC/Keychain, Matrix Rust E2EE, offline communication state a metadata-only voice-call launch callback | GitHub Swift Package `voldzi/CSM-messenger`, exact revision `687f6f7ec4da8c57f57c2152e6a10c5afdcc1dca` + ADR 0009 |
 | Keycloak | oddělené OIDC relace pro web a veřejný nativní PKCE klient | konfigurace a runbooky `01 COP` |
 | CSM Messaging / Matrix | APNs registry, push, conversation metadata, Matrix bootstrap a E2EE transport | kontrakt služby CSM Messaging/Matrix |
 | APNs | systémové doručení notifikací | Apple capability/provisioning |
@@ -322,7 +329,8 @@ kontraktů je v `docs/api.md`.
   navigační originy nikdy nezískají Device API.
 - Externí odkazy se otevírají mimo interní WebView. Wildcard origin a bridge v
   iframe jsou zakázané.
-- `communications.openChat` pouze prezentuje nativní povrch;
+- `communications.openChat` prezentuje nativní povrch a smí dodat pouze
+  očekávaný OIDC subject jako ochranu proti záměně účtu;
   `calls.updatePresentation` přijme omezený enum stavu a bounded opaque ID.
   Žádná metoda nevystavuje nativní OIDC/Matrix credentials, zprávy, SDP nebo
   ICE kandidáty.
