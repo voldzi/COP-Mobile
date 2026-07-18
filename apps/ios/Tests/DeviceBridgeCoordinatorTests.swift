@@ -43,8 +43,13 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     service.startVoiceCall(
       roomID: "!retry-start:example.cz",
       title: "Jiřina Volková",
-      isGroup: false
+      isGroup: false,
+      registerWithSystemCallUI: false
     )
+    XCTAssertEqual(service.presentation.activeCall?.roomID, "!retry-start:example.cz")
+    XCTAssertEqual(service.presentation.activeCall?.title, "Jiřina Volková")
+    XCTAssertEqual(service.presentation.activeCall?.phase, .connecting)
+    XCTAssertEqual(service.presentation.activeCall?.direction, .outgoing)
     let first = try XCTUnwrap(events.first)
     let actionID = try XCTUnwrap(first.1["actionId"] as? String)
     let callID = try XCTUnwrap(first.1["callId"] as? String)
@@ -67,6 +72,46 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     let acknowledgedCount = events.count
     try await Task.sleep(for: .milliseconds(1_100))
     XCTAssertEqual(events.count, acknowledgedCount)
+    XCTAssertTrue(
+      service.updateFromWeb(
+        callID: callID,
+        roomID: roomID,
+        title: "Jiřina Volková",
+        direction: "outgoing",
+        phase: "failed"
+      )
+    )
+    XCTAssertNil(service.presentation.activeCall)
+  }
+
+  func testNativeStartVoiceCallIsVisibleWhileWebBridgeReconnects() throws {
+    let service = VoiceCallService.shared
+    let previousReceiver = service.eventReceiver
+    service.eventReceiver = nil
+    defer { service.eventReceiver = previousReceiver }
+
+    service.startVoiceCall(
+      roomID: "!cold-web-engine:example.cz",
+      title: "COP Operator",
+      isGroup: false,
+      registerWithSystemCallUI: false
+    )
+
+    let activeCall = try XCTUnwrap(service.presentation.activeCall)
+    XCTAssertEqual(activeCall.roomID, "!cold-web-engine:example.cz")
+    XCTAssertEqual(activeCall.title, "COP Operator")
+    XCTAssertEqual(activeCall.phase, .connecting)
+
+    XCTAssertTrue(
+      service.updateFromWeb(
+        callID: activeCall.callID,
+        roomID: activeCall.roomID,
+        title: activeCall.title,
+        direction: "outgoing",
+        phase: "failed"
+      )
+    )
+    XCTAssertNil(service.presentation.activeCall)
   }
 
   func testAIChatUsesAlreadyAuthorizedLocationWithoutPrompting() async throws {

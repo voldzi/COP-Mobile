@@ -631,7 +631,12 @@ final class VoiceCallService:
     )
   }
 
-  func startVoiceCall(roomID: String, title: String, isGroup: Bool) {
+  func startVoiceCall(
+    roomID: String,
+    title: String,
+    isGroup: Bool,
+    registerWithSystemCallUI: Bool = true
+  ) {
     guard presentation.activeCall == nil else {
       logger.notice("Outgoing call start ignored because another call is still active")
       return
@@ -661,6 +666,14 @@ final class VoiceCallService:
       registeredWithCallKit: false,
       ownership: .webMedia
     )
+    // A user-initiated VoIP call must enter CallKit immediately. Waiting for
+    // the hidden web media engine to acknowledge the Matrix request made the
+    // native phone button appear inert and could leave CallKit without a call
+    // to perform on slower iOS 26/27 devices. Keep the media negotiation
+    // reliable through the bridge, but make the native call lifecycle the
+    // visible source of truth from the first tap.
+    calls[uuid] = pendingCall
+    publish(uuid)
     queueReliableAction(
       kind: .start,
       uuid: uuid,
@@ -668,6 +681,9 @@ final class VoiceCallService:
       callKitAction: nil,
       voiceCallKind: kind
     )
+    if registerWithSystemCallUI {
+      registerWithCallKit(uuid: uuid, call: pendingCall)
+    }
   }
 
   func pushRegistry(
@@ -890,6 +906,13 @@ final class VoiceCallService:
   }
 
   private func registerWithCallKit(uuid: UUID, call: CallContext) {
+    // Mark the registration request before crossing the asynchronous CallKit
+    // boundary. A very fast Matrix state update can otherwise observe the call
+    // as unregistered and submit a duplicate CXStartCallAction.
+    if var current = calls[uuid] {
+      current.registeredWithCallKit = true
+      calls[uuid] = current
+    }
     switch call.direction {
     case .incoming:
       reportIncomingCall(uuid: uuid, call: call, completion: {})
@@ -1149,6 +1172,12 @@ final class VoiceCallService:
     pendingCallActionTasks.removeValue(forKey: actionID)?.cancel()
     pendingCallActions.removeValue(forKey: actionID)
     if pending.kind == .start {
+      logger.error("Outgoing call could not be started by the web media engine")
+      if calls[pending.callUUID]?.registeredWithCallKit == true {
+        provider.reportCall(with: pending.callUUID, endedAt: Date(), reason: .failed)
+      }
+      removeCall(pending.callUUID)
+      deactivateAudioSession()
       return
     }
     if pending.kind == .addParticipants {
