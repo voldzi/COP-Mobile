@@ -347,11 +347,12 @@ až po tomto nuceném lokálním uzavření. Remote `ended` zruší všechny če
 akce stejného call UUID, aby pozdější retry nemohl hovor obnovit.
 
 Nativní detail konverzace může vyslat `calls.startRequested` s opaque call/room
-ID a `kind`. Aktivní skupinový call view může vyslat
+ID a `kind`. Start používá stabilní `actionId`, bounded retry a identity-bound
+ACK stejně jako ostatní call povely; opakování stejného ID není nový hovor.
+Aktivní skupinový call view může vyslat
 `calls.addParticipantsRequested` s nejvýše pěti unikátními Matrix user ID z
 aktuálního `eligibleParticipants`. Obě akce používají stabilní `actionId` a
-bounded delivery; `addParticipants` navíc používá ACK/retry model aktivního
-hovoru. Seznam v UI není autorizační rozhodnutí: web a COP API musí členství
+bounded ACK/retry delivery. Seznam v UI není autorizační rozhodnutí: web a COP API musí členství
 znovu ověřit před odesláním cíleného VoIP wake.
 
 Metoda řídí pouze nativní presentation state. SDP, ICE candidates, TURN

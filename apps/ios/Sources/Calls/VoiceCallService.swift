@@ -204,6 +204,7 @@ final class VoiceCallService:
   private static let callKitPollInterval = Duration.milliseconds(50)
 
   private enum ReliableActionKind {
+    case start
     case answer
     case end
     case mute
@@ -213,6 +214,7 @@ final class VoiceCallService:
 
     var eventType: String {
       switch self {
+      case .start: "calls.startRequested"
       case .answer: "calls.answerRequested"
       case .end, .resetEnd: "calls.endRequested"
       case .mute: "calls.muteRequested"
@@ -227,7 +229,7 @@ final class VoiceCallService:
       // fulfilled before this bridge operation, so the longer bounded timeout
       // does not hold the system CallKit transaction open.
       switch self {
-      case .answer:
+      case .start, .answer:
         35
       default:
         12
@@ -245,6 +247,7 @@ final class VoiceCallService:
     let callKitAction: CXAction?
     let muted: Bool?
     let participantUserIDs: [String]?
+    let voiceCallKind: VoiceCallKind?
   }
 
   private struct CallContext {
@@ -527,6 +530,8 @@ final class VoiceCallService:
     pendingCallActions.removeValue(forKey: normalizedActionID)
 
     switch pending.kind {
+    case .start:
+      break
     case .answer:
       if var call = calls[pending.callUUID], call.phase.keepsPresentationVisible {
         call.answered = true
@@ -607,15 +612,30 @@ final class VoiceCallService:
       let roomID = boundedString(roomID),
       let title = boundedString(title)
     else { return }
-    eventReceiver?(
-      "calls.startRequested",
-      [
-        "actionId": UUID().uuidString.lowercased(),
-        "callId": "start-\(UUID().uuidString.lowercased())",
-        "kind": isGroup ? "group" : "direct",
-        "roomId": roomID,
-        "title": title,
-      ]
+    let callID = "start-\(UUID().uuidString.lowercased())"
+    let uuid = callUUID(callID: callID, roomID: roomID)
+    let kind: VoiceCallKind = isGroup ? .group : .direct
+    let pendingCall = CallContext(
+      callID: callID,
+      roomID: roomID,
+      title: title,
+      direction: .outgoing,
+      eligibleParticipants: [],
+      kind: kind,
+      participants: [],
+      phase: .connecting,
+      answered: false,
+      muted: false,
+      connectedAt: nil,
+      registeredWithCallKit: false,
+      ownership: .webMedia
+    )
+    queueReliableAction(
+      kind: .start,
+      uuid: uuid,
+      call: pendingCall,
+      callKitAction: nil,
+      voiceCallKind: kind
     )
   }
 
@@ -938,6 +958,8 @@ final class VoiceCallService:
       pendingCallActionTasks.removeValue(forKey: actionID)?.cancel()
       pendingCallActions.removeValue(forKey: actionID)
       switch pending.kind {
+      case .start:
+        break
       case .end, .reject, .resetEnd:
         pending.callKitAction?.fulfill()
       case .addParticipants:
@@ -970,11 +992,12 @@ final class VoiceCallService:
     call: CallContext,
     callKitAction: CXAction?,
     muted: Bool? = nil,
-    participantUserIDs: [String]? = nil
+    participantUserIDs: [String]? = nil,
+    voiceCallKind: VoiceCallKind? = nil
   ) {
     if pendingCallActions.values.contains(where: {
       $0.callUUID == uuid && $0.kind.eventType == kind.eventType
-        && ($0.callKitAction != nil || kind == .addParticipants)
+        && ($0.callKitAction != nil || kind == .addParticipants || kind == .start)
     }) {
       callKitAction?.fail()
       return
@@ -989,7 +1012,8 @@ final class VoiceCallService:
       kind: kind,
       callKitAction: callKitAction,
       muted: muted,
-      participantUserIDs: participantUserIDs
+      participantUserIDs: participantUserIDs,
+      voiceCallKind: voiceCallKind
     )
     pendingCallActions[actionID] = pending
     emit(pending)
@@ -1015,6 +1039,8 @@ final class VoiceCallService:
     for task in tasks { task.cancel() }
     for pending in actions {
       switch pending.kind {
+      case .start:
+        break
       case .end, .reject, .resetEnd:
         pending.callKitAction?.fulfill()
       case .addParticipants:
@@ -1028,6 +1054,9 @@ final class VoiceCallService:
   private func resolveFailedAction(actionID: String, pending: PendingCallAction) {
     pendingCallActionTasks.removeValue(forKey: actionID)?.cancel()
     pendingCallActions.removeValue(forKey: actionID)
+    if pending.kind == .start {
+      return
+    }
     if pending.kind == .addParticipants {
       return
     }
@@ -1038,6 +1067,8 @@ final class VoiceCallService:
     removeCall(pending.callUUID)
     deactivateAudioSession()
     switch pending.kind {
+    case .start:
+      break
     case .end, .reject, .resetEnd:
       pending.callKitAction?.fulfill()
     case .addParticipants:
@@ -1058,6 +1089,9 @@ final class VoiceCallService:
     }
     if let participantUserIDs = pending.participantUserIDs {
       payload["participantUserIds"] = participantUserIDs
+    }
+    if let voiceCallKind = pending.voiceCallKind {
+      payload["kind"] = voiceCallKind.rawValue
     }
     eventReceiver?(
       pending.kind.eventType,

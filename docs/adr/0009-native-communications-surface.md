@@ -83,6 +83,9 @@ signalizace, ICE/TURN a médií a neúměrně zvýšilo riziko.
    možností návratu k ověřenému webovému enginu.
 11. CallKit user action je dvoufázová: native vytvoří stabilní `actionId` a
     event retryuje do identity-bound ACK z webového Matrix enginu.
+    Stejný retry/ACK kanál používá i odchozí start, takže jednorázový povel
+    nemůže zmizet před přihlášením web listeneru. Persistentní webový media host
+    je od mountu render-active off-screen, aby mohl první start/answer zpracovat.
     End/reject/mute `CXAction` čekají na ACK. Answer je nutná lifecycle výjimka:
     po nativní konfiguraci audia se `CXAnswerCallAction` fulfillne, aby CallKit
     vyvolal `didActivate`; Matrix answer pokračuje jako samostatná spolehlivá

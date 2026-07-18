@@ -131,6 +131,10 @@ V COP repozitáři se ověří:
   fail-closed uzavřou media call. Cold-start answer má 35 sekund a command
   doručený před Matrix call snapshotem se provede po jeho vzniku nejpozději
   v 30sekundovém webovém pending okně; ostatní nativní akce mají 12 sekund;
+- odchozí `calls.startRequested` se stabilním `actionId` se opakuje do ACK,
+  přežije start před přihlášením web listeneru a po ACK již není znovu emitován;
+- persistentní webový Matrix/WebRTC host je render-active off-screen už před
+  prvním call snapshotem a dokáže zpracovat cold-start start/answer;
 - JavaScript delivery error invaliduje bridge, zachová jediný pending event se
   stejným `actionId` a po novém handshake jej doručí znovu. `CXProvider` reset
   vyvolá webový hangup a opožděný `CXStartCallAction` nesníží `connected` na

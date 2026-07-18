@@ -31,6 +31,44 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     XCTAssertEqual(startRequests.first?.2, false)
   }
 
+  func testNativeStartVoiceCallRetriesStableActionUntilWebAcknowledgesIt() async throws {
+    let service = VoiceCallService.shared
+    let previousReceiver = service.eventReceiver
+    defer { service.eventReceiver = previousReceiver }
+    var events: [(String, [String: Any])] = []
+    service.eventReceiver = { type, payload in
+      events.append((type, payload))
+    }
+
+    service.startVoiceCall(
+      roomID: "!retry-start:example.cz",
+      title: "Jiřina Volková",
+      isGroup: false
+    )
+    let first = try XCTUnwrap(events.first)
+    let actionID = try XCTUnwrap(first.1["actionId"] as? String)
+    let callID = try XCTUnwrap(first.1["callId"] as? String)
+    let roomID = try XCTUnwrap(first.1["roomId"] as? String)
+    XCTAssertEqual(first.0, "calls.startRequested")
+    XCTAssertEqual(first.1["kind"] as? String, "direct")
+
+    try await Task.sleep(for: .milliseconds(1_100))
+    XCTAssertGreaterThanOrEqual(events.count, 2)
+    XCTAssertTrue(events.allSatisfy { $0.1["actionId"] as? String == actionID })
+
+    XCTAssertTrue(
+      service.acknowledgeAction(
+        actionID: actionID,
+        callID: callID,
+        roomID: roomID,
+        outcome: "succeeded"
+      )
+    )
+    let acknowledgedCount = events.count
+    try await Task.sleep(for: .milliseconds(1_100))
+    XCTAssertEqual(events.count, acknowledgedCount)
+  }
+
   func testAIChatUsesAlreadyAuthorizedLocationWithoutPrompting() async throws {
     let provider = FakeLocationProvider()
     let model = AppModel(deviceLocationProvider: provider)

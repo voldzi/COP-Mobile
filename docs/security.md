@@ -162,6 +162,8 @@ XSS ochrany.
 - CallKit user action používá náhodné stabilní `actionId`, bounded retry a
   identity-bound ACK. End/reject/mute se nefulfillují na základě pouhého doručení
   do JavaScriptu; vyžadují úspěšné dokončení Matrix commandu.
+  `calls.startRequested` používá stejný retry/ACK kanál, takže emit před
+  přihlášením web listeneru není považován za dokončené doručení.
   `CXAnswerCallAction` se po nativní audio konfiguraci fulfillne, aby CallKit
   mohl aktivovat `AVAudioSession`, ale Matrix answer zůstává bounded a při
   timeoutu nebo záporném ACK hovor fail-closed ukončí. Opakovaný event je

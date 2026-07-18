@@ -261,8 +261,10 @@ Bridge zrcadlí pouze bounded presentation state, nikdy SDP/ICE nebo credentials
 U skupinového hovoru obsahuje presentation pouze typ hovoru a jméno/user ID/
 connected flag členů. `start` a `addParticipants` se vracejí jako spolehlivé
 opaque akce; cílové členství ověřuje web a COP API, nikoli SwiftUI seznam.
-Call action vzniklá před bridge handshake se drží v omezené paměťové frontě;
-každý povel má stabilní `actionId`, native jej do bounded timeoutu opakuje a
+Call action vzniklá před bridge handshake se drží v omezené paměťové frontě.
+Nativní start používá stejný stabilní `actionId` a retry/ACK cestu jako ostatní
+call akce, takže se neztratí ani v okně mezi vytvořením webového receiveru a
+přihlášením JavaScript listeneru. Každý povel native do bounded timeoutu opakuje a
 CallKit end/reject/mute action splní až po Matrix ACK vedeném zpět přes chat,
 host a Device bridge. `CXAnswerCallAction` je po nativní konfiguraci zvuku
 splněna okamžitě, aby CallKit mohl aktivovat `AVAudioSession`; vlastní Matrix
@@ -290,7 +292,9 @@ se proto nemohou předběhnout ani zablokovat SwiftUI.
 WebKit při CallKit-owned hovoru pouze nakonfiguruje audio kategorii a čeká na
 `provider(_:didActivate:)`; nikdy sám neaktivuje tutéž session. Odchozí Matrix
 call identity je publikována ještě před `getUserMedia`, aby měl native čas
-CallKit vlastnictví převzít.
+CallKit vlastnictví převzít. Persistentní Matrix/WebRTC iframe zůstává v
+nativním hostu render-active off-screen už od mountu, nikoli až od existence
+call snapshotu, aby mohl první start/answer zpracovat i při cold startu.
 
 ## Úložiště a vlastnictví dat
 
