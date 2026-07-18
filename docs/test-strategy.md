@@ -121,6 +121,9 @@ V COP repozitáři se ověří:
   a otevře vybranou konverzaci;
 - malformed/stale call update nemůže vytvořit CallKit transakci nebo aktivovat
   audio session.
+- foreground aktivace a ukončení audio session nezablokují hlavní vlákno;
+  souběžné activate/deactivate požadavky se provedou v pořadí a poslední
+  potvrzený stav odpovídá lifecycle hovoru;
 - CallKit answer/reject/end/mute zůstane pending do ACK Matrix commandu,
   opakuje stejné `actionId`, deduplikuje command i ACK a při 12s timeoutu nebo
   záporném ACK failuje. Cold-start command doručený před Matrix call snapshotem

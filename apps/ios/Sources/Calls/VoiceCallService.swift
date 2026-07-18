@@ -101,6 +101,98 @@ final class VoiceCallPresentationState {
   }
 }
 
+private enum AudioSessionTransitionError: LocalizedError {
+  case activationRejected
+  case deactivationRejected
+
+  var errorDescription: String? {
+    switch self {
+    case .activationRejected:
+      "Audio session activation was rejected."
+    case .deactivationRejected:
+      "Audio session deactivation was rejected."
+    }
+  }
+}
+
+private actor AudioSessionActivationCoordinator {
+  private var transitionInProgress = false
+  private var transitionWaiters: [CheckedContinuation<Void, Never>] = []
+
+  func activate() async throws {
+    await acquireTransition()
+    defer { releaseTransition() }
+
+    if #available(iOS 27.0, *) {
+      try await withCheckedThrowingContinuation {
+        (continuation: CheckedContinuation<Void, any Error>) in
+        AVAudioSession.sharedInstance().activate(options: []) { activated, error in
+          if let error {
+            continuation.resume(throwing: error)
+          } else if activated {
+            continuation.resume()
+          } else {
+            continuation.resume(throwing: AudioSessionTransitionError.activationRejected)
+          }
+        }
+      }
+    } else {
+      try await Task.detached(priority: .userInitiated) {
+        try AVAudioSession.sharedInstance().setActive(true)
+      }.value
+    }
+  }
+
+  func deactivate() async {
+    await acquireTransition()
+    defer { releaseTransition() }
+
+    if #available(iOS 27.0, *) {
+      try? await withCheckedThrowingContinuation {
+        (continuation: CheckedContinuation<Void, any Error>) in
+        AVAudioSession.sharedInstance().deactivate(
+          options: [.notifyOthersOnDeactivation]
+        ) { deactivated, error in
+          if let error {
+            continuation.resume(throwing: error)
+          } else if deactivated {
+            continuation.resume()
+          } else {
+            continuation.resume(throwing: AudioSessionTransitionError.deactivationRejected)
+          }
+        }
+      }
+    } else {
+      try? await Task.detached(priority: .utility) {
+        try AVAudioSession.sharedInstance().setActive(
+          false,
+          options: .notifyOthersOnDeactivation
+        )
+      }.value
+    }
+  }
+
+  private func acquireTransition() async {
+    guard transitionInProgress else {
+      transitionInProgress = true
+      return
+    }
+
+    await withCheckedContinuation { continuation in
+      transitionWaiters.append(continuation)
+    }
+  }
+
+  private func releaseTransition() {
+    guard !transitionWaiters.isEmpty else {
+      transitionInProgress = false
+      return
+    }
+
+    transitionWaiters.removeFirst().resume()
+  }
+}
+
 @MainActor
 final class VoiceCallService:
   NSObject, @preconcurrency CXProviderDelegate, @preconcurrency PKPushRegistryDelegate
@@ -175,6 +267,7 @@ final class VoiceCallService:
   private var pushToken: String?
   private var tokenContinuation: CheckedContinuation<String, any Error>?
   private var proximityMonitoringEnabled = false
+  private let audioSessionActivationCoordinator = AudioSessionActivationCoordinator()
   var eventReceiver: ((String, [String: Any]) -> Void)?
 
   private override init() {
@@ -214,17 +307,19 @@ final class VoiceCallService:
 
   /// Used by foreground WebKit media capture. CallKit-owned calls only configure
   /// the session here and wait for `provider(_:didActivate:)` before using it.
-  func prepareForegroundAudio() throws {
+  func prepareForegroundAudio() async throws {
     let session = AVAudioSession.sharedInstance()
     try configureAudioSession(session)
-    try session.setActive(true)
+    try await audioSessionActivationCoordinator.activate()
     updateAudioRoute(using: session)
   }
 
   func requestMicrophoneAndPrepare(_ completion: @escaping @MainActor (Bool) -> Void) {
     switch AVAudioApplication.shared.recordPermission {
     case .granted:
-      completion((try? prepareForegroundAudio()) != nil)
+      Task { @MainActor in
+        completion((try? await prepareForegroundAudio()) != nil)
+      }
     case .denied:
       completion(false)
     case .undetermined:
@@ -234,7 +329,7 @@ final class VoiceCallService:
             completion(false)
             return
           }
-          completion((try? self.prepareForegroundAudio()) != nil)
+          completion((try? await self.prepareForegroundAudio()) != nil)
         }
       }
     @unknown default:
@@ -808,8 +903,11 @@ final class VoiceCallService:
     setProximityMonitoring(false)
     let session = AVAudioSession.sharedInstance()
     try? session.overrideOutputAudioPort(.none)
-    try? session.setActive(false, options: .notifyOthersOnDeactivation)
-    updateAudioRoute(using: session)
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      await audioSessionActivationCoordinator.deactivate()
+      updateAudioRoute(using: AVAudioSession.sharedInstance())
+    }
   }
 
   private func queueReliableAction(

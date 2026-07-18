@@ -279,6 +279,10 @@ Tím může `end`/`reject` skončit jako splněný až po prokazatelném forced 
 `answer`/`mute` zůstává fail-closed. Stejná větev se spouští z CallKit
 `timedOutPerforming`, protože běžný retry `Task` nemusí při suspendovaném procesu
 běžet.
+Aktivace a deaktivace `AVAudioSession` jsou serializované mimo hlavní vlákno:
+na iOS 27 používají nativní asynchronní API a kompatibilní iOS 26 větev přesouvá
+starší blokující volání na pracovní executor. Rychlé ukončení a navazující hovor
+se proto nemohou předběhnout ani zablokovat SwiftUI.
 
 ## Úložiště a vlastnictví dat
 

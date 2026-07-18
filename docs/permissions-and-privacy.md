@@ -108,7 +108,9 @@ Tracking Transparency pro analytické nebo reklamní sledování.
 Integrovaný COP Chat může mikrofon požádat ze same-origin iframe; nativní host
 ověřuje shodu přesného originu iframe, hlavního COP dokumentu a žádosti WebKitu.
 Před udělením WebKit media-capture oprávnění host explicitně ověří nebo vyžádá
-`AVAudioApplication` record permission a teprve po souhlasu aktivuje audio session.
+`AVAudioApplication` record permission a teprve po souhlasu asynchronně aktivuje
+audio session. Přechody audio session jsou serializované; neprobíhají blokujícím
+voláním na hlavním vlákně.
 
 ### Background modes a zakázané zkratky
 
