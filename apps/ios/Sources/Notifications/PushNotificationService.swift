@@ -74,7 +74,10 @@ final class PushNotificationService: NSObject, PushNotificationProviding,
 
   func requestAuthorization() async -> [String: Any] {
     do {
-      _ = try await center.requestAuthorization(options: [.alert, .sound, .badge, .timeSensitive])
+      // Time Sensitive authorization is granted through the signed
+      // com.apple.developer.usernotifications.time-sensitive entitlement.
+      // UNAuthorizationOption.timeSensitive has been deprecated since iOS 15.
+      _ = try await center.requestAuthorization(options: [.alert, .sound, .badge])
       registrationFailure = nil
       UIApplication.shared.registerForRemoteNotifications()
     } catch {

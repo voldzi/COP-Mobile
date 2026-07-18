@@ -35,7 +35,7 @@ def main() -> int:
         failures.append("project.yml must use the approved Apple Development Team")
     if "url: https://github.com/voldzi/CSM-messenger.git" not in project:
         failures.append("project.yml must consume CSMCommunicationKit from the published GitHub repository")
-    if "revision: cda92ee27bdbe5378d5f456a7461c0788eeefe3a" not in project:
+    if "revision: a1b8928a1f5d18fc2c664e24bdc8a2f844c40fa9" not in project:
         failures.append("project.yml must pin the reviewed CSMCommunicationKit Git revision")
     if 'path: "../../../04 CSM messenger"' in project:
         failures.append("release project must not depend on a local sibling CSM checkout")
@@ -124,8 +124,15 @@ def main() -> int:
     else:
         with entitlements[0].open("rb") as handle:
             entitlement_values = plistlib.load(handle)
-        if entitlement_values != {"aps-environment": "$(APS_ENVIRONMENT)"}:
-            failures.append("COPMobile.entitlements must contain only the configuration-bound aps-environment")
+        expected_entitlement_values = {
+            "aps-environment": "$(APS_ENVIRONMENT)",
+            "com.apple.developer.usernotifications.time-sensitive": True,
+        }
+        if entitlement_values != expected_entitlement_values:
+            failures.append(
+                "COPMobile.entitlements must contain only the configuration-bound aps-environment "
+                "and the Time Sensitive Notifications entitlement"
+            )
     xcconfig_expectations = {
         "Debug.xcconfig": "APS_ENVIRONMENT = development",
         "Staging.xcconfig": "APS_ENVIRONMENT = production",

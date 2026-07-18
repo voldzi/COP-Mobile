@@ -310,6 +310,10 @@ prostor. Export důkazů obsahuje pouze agregované metriky nebo redigovanou tra
 - první request, denied, později změněný stav v Nastavení a zrušená registrace;
 - běžná, Time Sensitive a lokální notifikace při foreground, background,
   terminated a zamčeném telefonu;
+- podepsaný build obsahuje
+  `com.apple.developer.usernotifications.time-sensitive`; runtime autorizace
+  žádá pouze o alert, sound a badge a nepoužívá zastaralou
+  `UNAuthorizationOption.timeSensitive`;
 - Focus, mute, vypnutý zvuk, vypnuté Time Sensitive a Scheduled Summary;
 - validní, expirovaný, duplicitní a neautorizovaný deep link;
 - payload inspection potvrzující absenci citlivého textu a tokenu;
