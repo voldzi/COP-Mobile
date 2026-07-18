@@ -121,6 +121,11 @@ XSS ochrany.
   subjectu, revokace zařízení a remote wipe nikdy nezpřístupní cache předchozího
   uživatele; cleanup Matrix stores musí upozornit na recovery dopad a nesmí
   smazat webovou session bez explicitní produktové akce.
+- Nativní relace zůstává v device-only Keychainu do explicitního logoutu, wipe
+  nebo serverem potvrzeného OAuth `invalid_grant`. Access token se obnovuje
+  centrálně a na vyžádání; timeout, offline stav, dočasná chyba OIDC a
+  nedostupnost chráněných dat nesmí tokeny smazat. Zrušené Face ID pouze uzamkne
+  chráněný obsah a nabídne nové odemknutí.
 
 ## Background tracking
 

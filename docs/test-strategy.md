@@ -205,6 +205,9 @@ být injektovatelné, aby byly expiry a lifecycle scénáře deterministické.
   předchozího přihlášení ve webové mapě;
 - standalone fresh nativní OIDC login, návrat přes `csm` redirect, obnovení
   Keychain session, nativní logout a nezávislá webová session;
+- expirovaný access token se za běhu obnoví právě jednou i při souběžných
+  požadavcích a rotovaný refresh token se uloží; offline/timeout/IdP výpadek ani
+  zrušené Face ID relaci nesmažou, zatímco potvrzený `invalid_grant` ano;
 - hlavička otevřené konverzace je pod status barem/Dynamic Island, zachová
   horní safe area i s klávesnicí a používá jednu plovoucí Liquid Glass kartu;
 - E2EE send/receive mezi webem a nativním Matrix zařízením, offline outbox a
@@ -232,7 +235,9 @@ Modely, OS buildy a fyzická dostupnost se evidují v implementačním reportu.
 ### Nativní komunikace a hovory na fyzickém zařízení
 
 - OIDC/PKCE fresh login, cancel, přerušení callbacku, refresh po restartu,
-  logout, revoked refresh token a přihlášení jiného subjectu;
+  automatický refresh za běhu, offline/IdP výpadek bez logoutu, lokální
+  odemknutí bez smazání tokenu, logout, revoked refresh token a přihlášení
+  jiného subjectu;
 - otevření embedded chatu s platnou session bez probliknutí loginu, fresh
   nativní login přímo v COP Mobile a návrat do stejné webové route;
 - účet A v mapě + účet B v native musí failovat zavřeně bez náhledu zpráv;

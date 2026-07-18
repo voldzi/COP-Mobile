@@ -176,8 +176,13 @@ COP web vlastní svou OIDC relaci v odděleném WebKit origin storage.
 `CSMCommunicationKit` vlastní druhou, nativní Authorization Code + PKCE relaci
 pro veřejný klient `csm-mobile`, ukládá ji do Keychainu a používá ji k získání
 COP/CSM Matrix bootstrapu. Session se nesdílejí a native nikdy nečte WebKit
-storage. Logout/revokace a změna subjectu čistí příslušná nativní credentials a
-subject-bound stores bez zpřístupnění dat předchozího uživatele.
+storage. Jeden actor-isolated token lifecycle obnovuje krátkodobý access token
+při startu i za běžného provozu, ukládá rotovaný refresh token a sdílí jedinou
+probíhající obnovu mezi souběžnými požadavky. Výpadek sítě, dočasná
+nedostupnost identity provideru ani lokální zrušení Face ID nejsou logout.
+Credentials se smažou až po explicitním odhlášení, wipe nebo potvrzeném OAuth
+`invalid_grant`; revokace a změna subjectu zároveň čistí subject-bound stores
+bez zpřístupnění dat předchozího uživatele.
 
 COP Mobile podporuje i uživatele, kteří webovou mapu vůbec nepoužívají.
 Při otevření chatu komunikační modul nejprve tiše obnoví svou nativní Keychain
@@ -306,7 +311,7 @@ milníku před implementací příslušné služby.
 | --- | --- | --- |
 | COP web/PWA | mapa, hlášení, vrstvy a business workflow; přechodný Matrix/WebRTC call engine | repozitář `01 COP` |
 | COP API | doménová data, pairing, device audit, snapshot, attachments, mesh gateway | `01 COP/openapi/openapi.json` |
-| `CSMCommunicationKit` | nativní chat UI, OIDC/Keychain, Matrix Rust E2EE, offline communication state a metadata-only voice-call launch callback | GitHub Swift Package `voldzi/CSM-messenger`, exact revision `687f6f7ec4da8c57f57c2152e6a10c5afdcc1dca` + ADR 0009 |
+| `CSMCommunicationKit` | nativní chat UI, OIDC/Keychain, Matrix Rust E2EE, offline communication state a metadata-only voice-call launch callback | GitHub Swift Package `voldzi/CSM-messenger`, exact revision `cda92ee27bdbe5378d5f456a7461c0788eeefe3a` + ADR 0009 |
 | Keycloak | oddělené OIDC relace pro web a veřejný nativní PKCE klient | konfigurace a runbooky `01 COP` |
 | CSM Messaging / Matrix | APNs registry, push, conversation metadata, Matrix bootstrap a E2EE transport | kontrakt služby CSM Messaging/Matrix |
 | APNs | systémové doručení notifikací | Apple capability/provisioning |

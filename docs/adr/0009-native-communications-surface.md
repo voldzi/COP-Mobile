@@ -35,11 +35,16 @@ signalizace, ICE/TURN a médií a neúměrně zvýšilo riziko.
      session, timeline, offline outbox a komunikační lokální stores.
 2. Nativní chat používá vlastní OIDC Authorization Code + PKCE session vůči
    schválenému `csm-mobile` klientovi. Webová a nativní OIDC session jsou
-   oddělené; tokeny se mezi WebKitem, bridge a modulem nekopírují.
+   oddělené; tokeny se mezi WebKitem, bridge a modulem nekopírují. Jediný
+   actor-isolated lifecycle obnovuje access token při startu i na požadavek,
+   bezpečně ukládá rotovaný refresh token a dočasnou síťovou/IdP/Keychain chybu
+   nikdy neinterpretuje jako logout.
 3. OIDC a Matrix access/refresh tokeny, Matrix device binding a šifrovací
    passphrase se ukládají pouze do Keychainu a chráněných lokálních stores
    spravovaných `CSMCommunicationKit`. Modul nevystavuje credentials hostu ani
-   webovému JavaScriptu.
+   webovému JavaScriptu. OIDC tokeny odstraní jen explicitní logout, bezpečnostní
+   wipe nebo serverem potvrzený `invalid_grant`; zrušení lokální biometrie pouze
+   uzamkne chráněný obsah a dovolí nové odemknutí.
 4. Bridge smí otevřít nativní chat pouze úzkou metodou
    `communications.openChat`. Vedle prázdného payloadu smí exact-origin host
    dodat jen bounded opaque očekávaný OIDC subject. Je to fail-closed ochrana
