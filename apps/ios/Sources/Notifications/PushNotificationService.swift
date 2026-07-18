@@ -22,7 +22,11 @@ private final class NotificationCompletionBox<Value>: @unchecked Sendable {
 @MainActor
 protocol PushNotificationProviding: AnyObject {
   var deviceToken: String? { get }
-  var eventReceiver: ((String, [String: Any]) -> Void)? { get set }
+  func attachEventReceiver(
+    ownerID: UUID,
+    receiver: @escaping (String, [String: Any]) -> Void
+  )
+  func detachEventReceiver(ownerID: UUID)
   func status() async -> [String: Any]
   func requestAuthorization() async -> [String: Any]
   func registrationContext() -> [String: Any]
@@ -53,9 +57,8 @@ final class PushNotificationService: NSObject, PushNotificationProviding,
   private var registrationFailure: String?
   private var tokenContinuation: CheckedContinuation<String, any Error>?
   private var pendingBridgeEvents: [(String, [String: Any])] = []
-  var eventReceiver: ((String, [String: Any]) -> Void)? {
-    didSet { flushPendingBridgeEvents() }
-  }
+  private var eventReceiverOwnerID: UUID?
+  private var eventReceiver: ((String, [String: Any]) -> Void)?
 
   private override init() {
     super.init()
@@ -152,7 +155,18 @@ final class PushNotificationService: NSObject, PushNotificationProviding,
     }
   }
 
-  func detachEventReceiver() {
+  func attachEventReceiver(
+    ownerID: UUID,
+    receiver: @escaping (String, [String: Any]) -> Void
+  ) {
+    eventReceiverOwnerID = ownerID
+    eventReceiver = receiver
+    flushPendingBridgeEvents()
+  }
+
+  func detachEventReceiver(ownerID: UUID) {
+    guard eventReceiverOwnerID == ownerID else { return }
+    eventReceiverOwnerID = nil
     eventReceiver = nil
   }
 

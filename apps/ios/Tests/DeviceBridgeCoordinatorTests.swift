@@ -270,6 +270,32 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     XCTAssertEqual((events.first?["payload"] as? [String: Any])?["callId"] as? String, "call-1")
   }
 
+  func testOlderBridgeCannotDetachNewerCallEventReceiver() async throws {
+    let notifications = FakeNotificationProvider()
+    let olderBridge = try makeBridge(notifications: notifications)
+    let currentBridge = try makeBridge(notifications: notifications)
+    var events: [[String: Any]] = []
+    currentBridge.eventSink = { events.append($0) }
+    currentBridge.navigationDidCommit(url: productionURL)
+    _ = await currentBridge.handle(message: hello(), context: allowedContext())
+
+    olderBridge.detachEventReceiver()
+    notifications.emit(
+      type: "calls.startRequested",
+      payload: [
+        "actionId": "10000000-0000-4000-8000-000000000002",
+        "callId": "call-new",
+        "roomId": "!ops:example.cz",
+      ])
+
+    XCTAssertEqual(events.count, 1)
+    XCTAssertEqual(events.first?["type"] as? String, "calls.startRequested")
+    XCTAssertEqual(
+      (events.first?["payload"] as? [String: Any])?["callId"] as? String,
+      "call-new"
+    )
+  }
+
   func testCallActionAcknowledgementIsIdentityBoundAndDeliveredToCallService() async throws {
     var acknowledgements: [(String, String, String, String)] = []
     let bridge = try makeBridge(acknowledgeCallAction: {
@@ -562,7 +588,22 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
 @MainActor
 private final class FakeNotificationProvider: PushNotificationProviding {
   var deviceToken: String?
-  var eventReceiver: ((String, [String: Any]) -> Void)?
+  private var eventReceiverOwnerID: UUID?
+  private var eventReceiver: ((String, [String: Any]) -> Void)?
+
+  func attachEventReceiver(
+    ownerID: UUID,
+    receiver: @escaping (String, [String: Any]) -> Void
+  ) {
+    eventReceiverOwnerID = ownerID
+    eventReceiver = receiver
+  }
+
+  func detachEventReceiver(ownerID: UUID) {
+    guard eventReceiverOwnerID == ownerID else { return }
+    eventReceiverOwnerID = nil
+    eventReceiver = nil
+  }
 
   func status() async -> [String: Any] { ["authorization": "authorized"] }
   func requestAuthorization() async -> [String: Any] { ["authorization": "authorized"] }

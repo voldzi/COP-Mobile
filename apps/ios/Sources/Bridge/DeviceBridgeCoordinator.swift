@@ -19,6 +19,7 @@ final class DeviceBridgeCoordinator {
   private let originPolicy: OriginPolicy
   private let location: DeviceLocationProviding
   private let notifications: PushNotificationProviding
+  private let eventReceiverOwnerID = UUID()
   private let isForeground: () -> Bool
   private let openNativeChat: (String?) -> Void
   private let updateCallPresentation: (
@@ -85,7 +86,7 @@ final class DeviceBridgeCoordinator {
     self.updateCallPresentation = updateCallPresentation
     self.acknowledgeCallAction = acknowledgeCallAction
     self.invalidateCallPresentation = invalidateCallPresentation
-    notifications.eventReceiver = { [weak self] type, payload in
+    notifications.attachEventReceiver(ownerID: eventReceiverOwnerID) { [weak self] type, payload in
       self?.emit(type: type, payload: payload)
     }
   }
@@ -109,7 +110,7 @@ final class DeviceBridgeCoordinator {
   }
 
   func detachEventReceiver() {
-    notifications.eventReceiver = nil
+    notifications.detachEventReceiver(ownerID: eventReceiverOwnerID)
   }
 
   func eventDeliveryDidFail(_ event: [String: Any]) {
