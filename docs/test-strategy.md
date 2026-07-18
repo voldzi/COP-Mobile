@@ -143,9 +143,15 @@ V COP repozitáři se ověří:
   web media enginu, report/remove call a deaktivaci audia; `end`/`reject` se po
   forced close fulfillne, Matrix answer/mute selže a remote ended odstraní pending
   akce stejného call UUID;
-- odchozí call snapshot vznikne před WebKit microphone capture, foreground
-  permission delegate během CallKit hovoru neaktivuje session ručně a media
-  capture pokračuje až po `provider(_:didActivate:)`;
+- odchozí call snapshot vznikne před jediným WebKit microphone capture vlastněným
+  Matrix SDK; foreground permission delegate během CallKit hovoru neaktivuje
+  session ručně ani nečeká s permission callbackem na `provider(_:didActivate:)`.
+  Test ověří, že se nepoužije samostatný probe-and-stop stream a Matrix
+  start/answer proto nemůže uvíznout v audio/CallKit kruhovém čekání;
+- pokud po fulfilled CallKit start/answer nepřijde do deseti sekund
+  `provider(_:didActivate:)`, activation watchdog označí hovor jako failed,
+  invaliduje webová média a uvolní stav tak, aby další hovor šel zahájit bez
+  restartu aplikace;
 
 ### Bezpečnost bridge
 

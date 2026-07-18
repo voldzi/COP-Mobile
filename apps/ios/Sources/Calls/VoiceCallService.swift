@@ -3,6 +3,7 @@ import AVFAudio
 import CryptoKit
 import Foundation
 import Observation
+import OSLog
 @preconcurrency import PushKit
 import UIKit
 
@@ -199,8 +200,8 @@ final class VoiceCallService:
 {
   static let shared = VoiceCallService()
   private static let actionRetryInterval = Duration.seconds(1)
-  private static let callKitClaimPollCount = 100
-  private static let callKitAudioActivationPollCount = 200
+  private static let callKitAudioActivationTimeout = Duration.seconds(10)
+  private static let callKitClaimPollCount = 20
   private static let callKitPollInterval = Duration.milliseconds(50)
 
   private enum ReliableActionKind {
@@ -278,8 +279,14 @@ final class VoiceCallService:
 
   private let provider: CXProvider
   private let callController = CXCallController()
+  private let logger = Logger(
+    subsystem: "cz.zeleznalady.csm.messenger",
+    category: "voice-call"
+  )
   private var registry: PKPushRegistry!
   private var calls: [UUID: CallContext] = [:]
+  private var audioActivationWatchdogCallUUID: UUID?
+  private var audioActivationWatchdogTask: Task<Void, Never>?
   private var pendingCallActions: [String: PendingCallAction] = [:]
   private var pendingCallActionTasks: [String: Task<Void, Never>] = [:]
   private var pushToken: String?
@@ -323,18 +330,20 @@ final class VoiceCallService:
     }
   }
 
-  /// Used by foreground WebKit media capture. CallKit-owned calls only configure
-  /// the session here and wait for `provider(_:didActivate:)` before using it.
+  /// Used by foreground WebKit media capture. For CallKit-owned calls the media
+  /// permission decision must not wait for `provider(_:didActivate:)`: WebKit
+  /// cannot enter its Matrix answer/place operation until that decision
+  /// completes, while CallKit activation may itself wait for the media client.
+  /// CallKit still owns activation; this method only configures the session.
   func prepareForegroundAudio() async throws {
     let session = AVAudioSession.sharedInstance()
     try configureAudioSession(session)
     if await waitForCallKitOwnership() {
-      guard await waitForCallKitAudioActivation() else {
-        throw AudioSessionTransitionError.activationRejected
-      }
+      logger.debug("WebKit media prepared for a CallKit-owned call")
       updateAudioRoute(using: session)
       return
     }
+    logger.debug("WebKit media prepared without CallKit ownership; activating application audio")
     try await audioSessionActivationCoordinator.activate()
     updateAudioRoute(using: session)
   }
@@ -351,32 +360,38 @@ final class VoiceCallService:
     return false
   }
 
-  private func waitForCallKitAudioActivation() async -> Bool {
-    for _ in 0..<Self.callKitAudioActivationPollCount {
-      if presentation.isAudioActive {
-        return true
-      }
-      try? await Task.sleep(for: Self.callKitPollInterval)
-    }
-    return false
-  }
-
   func requestMicrophoneAndPrepare(_ completion: @escaping @MainActor (Bool) -> Void) {
     switch AVAudioApplication.shared.recordPermission {
     case .granted:
       Task { @MainActor in
-        completion((try? await prepareForegroundAudio()) != nil)
+        do {
+          try await prepareForegroundAudio()
+          completion(true)
+        } catch {
+          logger.error("WebKit microphone preparation failed: \(error.localizedDescription, privacy: .public)")
+          completion(false)
+        }
       }
     case .denied:
+      logger.notice("WebKit microphone permission is denied")
       completion(false)
     case .undetermined:
       AVAudioApplication.requestRecordPermission { granted in
         Task { @MainActor in
           guard granted else {
+            self.logger.notice("WebKit microphone permission request was denied")
             completion(false)
             return
           }
-          completion((try? await self.prepareForegroundAudio()) != nil)
+          do {
+            try await self.prepareForegroundAudio()
+            completion(true)
+          } catch {
+            self.logger.error(
+              "WebKit microphone preparation failed: \(error.localizedDescription, privacy: .public)"
+            )
+            completion(false)
+          }
         }
       }
     @unknown default:
@@ -426,6 +441,9 @@ final class VoiceCallService:
 
     let normalizedTitle = boundedString(title) ?? "COP kontakt"
     let uuid = callUUID(callID: normalizedCallID, roomID: normalizedRoomID)
+    logger.debug(
+      "Received web call state \(parsedDirection.rawValue, privacy: .public)/\(parsedPhase.rawValue, privacy: .public)"
+    )
     if let activeCall = presentation.activeCall,
       activeCall.id != uuid,
       parsedPhase.keepsPresentationVisible
@@ -523,9 +541,15 @@ final class VoiceCallService:
 
     let normalizedActionID = actionID.lowercased()
     guard outcome == "succeeded" else {
+      logger.error(
+        "Web rejected reliable call action \(pending.kind.eventType, privacy: .public)"
+      )
       resolveFailedAction(actionID: normalizedActionID, pending: pending)
       return true
     }
+    logger.debug(
+      "Web acknowledged reliable call action \(pending.kind.eventType, privacy: .public)"
+    )
     pendingCallActionTasks.removeValue(forKey: normalizedActionID)?.cancel()
     pendingCallActions.removeValue(forKey: normalizedActionID)
 
@@ -608,10 +632,17 @@ final class VoiceCallService:
   }
 
   func startVoiceCall(roomID: String, title: String, isGroup: Bool) {
-    guard presentation.activeCall == nil,
-      let roomID = boundedString(roomID),
+    guard presentation.activeCall == nil else {
+      logger.notice("Outgoing call start ignored because another call is still active")
+      return
+    }
+    guard let roomID = boundedString(roomID),
       let title = boundedString(title)
-    else { return }
+    else {
+      logger.error("Outgoing call start rejected because native metadata is invalid")
+      return
+    }
+    logger.info("Queueing an outgoing \(isGroup ? "group" : "direct", privacy: .public) call")
     let callID = "start-\(UUID().uuidString.lowercased())"
     let uuid = callUUID(callID: callID, roomID: roomID)
     let kind: VoiceCallKind = isGroup ? .group : .direct
@@ -732,6 +763,7 @@ final class VoiceCallService:
       requestWebMediaInvalidation()
     }
     calls.removeAll()
+    cancelAudioActivationWatchdog()
     setProximityMonitoring(false)
     presentation.clear()
     deactivateAudioSession()
@@ -752,6 +784,8 @@ final class VoiceCallService:
       calls[action.callUUID] = call
       publish(action.callUUID)
       action.fulfill()
+      logger.info("CallKit fulfilled an outgoing start action")
+      scheduleAudioActivationWatchdog(for: action.callUUID)
       if shouldReportConnecting {
         provider.reportOutgoingCall(with: action.callUUID, startedConnectingAt: Date())
       }
@@ -779,6 +813,8 @@ final class VoiceCallService:
       calls[action.callUUID] = call
       publish(action.callUUID)
       action.fulfill()
+      logger.info("CallKit fulfilled an incoming answer action; Matrix answer is queued")
+      scheduleAudioActivationWatchdog(for: action.callUUID)
       queueReliableAction(kind: .answer, uuid: action.callUUID, call: call, callKitAction: nil)
     } catch {
       action.fail()
@@ -815,6 +851,7 @@ final class VoiceCallService:
   }
 
   func provider(_ provider: CXProvider, timedOutPerforming action: CXAction) {
+    logger.error("CallKit action timed out")
     if let entry = pendingCallActions.first(where: { $0.value.callKitAction === action }) {
       resolveFailedAction(actionID: entry.key, pending: entry.value)
       return
@@ -830,12 +867,22 @@ final class VoiceCallService:
   }
 
   func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+    logger.info("CallKit activated the audio session")
+    cancelAudioActivationWatchdog()
+    guard calls.values.contains(where: {
+      $0.registeredWithCallKit && $0.phase.keepsPresentationVisible
+    }) else {
+      logger.notice("Ignoring late CallKit audio activation because no call is active")
+      deactivateAudioSession()
+      return
+    }
     presentation.setAudioActive(true)
     updateAudioRoute(using: audioSession)
     updateProximityPolicy()
   }
 
   func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+    logger.info("CallKit deactivated the audio session")
     presentation.setAudioActive(false)
     setProximityMonitoring(false)
     try? audioSession.overrideOutputAudioPort(.none)
@@ -944,6 +991,7 @@ final class VoiceCallService:
   }
 
   private func removeCall(_ uuid: UUID) {
+    cancelAudioActivationWatchdog(for: uuid)
     resolvePendingActionsForRemovedCall(uuid)
     calls.removeValue(forKey: uuid)
     if presentation.activeCall?.id == uuid {
@@ -972,6 +1020,48 @@ final class VoiceCallService:
 
   private func requestWebMediaInvalidation() {
     NotificationCenter.default.post(name: .copWebMediaInvalidationRequired, object: nil)
+  }
+
+  /// CallKit should activate the audio session shortly after a fulfilled start
+  /// or answer transaction. If that callback never arrives, keep neither the
+  /// system call nor the web Matrix media engine in a ghost "connecting" state.
+  /// The next call must be allowed to start without restarting the application.
+  private func scheduleAudioActivationWatchdog(for uuid: UUID) {
+    cancelAudioActivationWatchdog()
+    guard !presentation.isAudioActive else { return }
+    audioActivationWatchdogCallUUID = uuid
+    audioActivationWatchdogTask = Task { @MainActor [weak self] in
+      do {
+        try await Task.sleep(for: Self.callKitAudioActivationTimeout)
+      } catch {
+        return
+      }
+      guard let self,
+        self.audioActivationWatchdogCallUUID == uuid,
+        let call = self.calls[uuid],
+        call.registeredWithCallKit,
+        call.phase.keepsPresentationVisible,
+        !self.presentation.isAudioActive
+      else {
+        return
+      }
+      self.audioActivationWatchdogTask = nil
+      self.audioActivationWatchdogCallUUID = nil
+      self.logger.error("CallKit audio activation timed out; failing the stuck call")
+      self.requestWebMediaInvalidation()
+      self.provider.reportCall(with: uuid, endedAt: Date(), reason: .failed)
+      self.removeCall(uuid)
+      self.deactivateAudioSession()
+    }
+  }
+
+  private func cancelAudioActivationWatchdog(for uuid: UUID? = nil) {
+    if let uuid, audioActivationWatchdogCallUUID != uuid {
+      return
+    }
+    audioActivationWatchdogTask?.cancel()
+    audioActivationWatchdogTask = nil
+    audioActivationWatchdogCallUUID = nil
   }
 
   private func deactivateAudioSession() {
@@ -1016,6 +1106,7 @@ final class VoiceCallService:
       voiceCallKind: voiceCallKind
     )
     pendingCallActions[actionID] = pending
+    logger.debug("Queueing reliable call action \(pending.kind.eventType, privacy: .public)")
     emit(pending)
     pendingCallActionTasks[actionID] = Task { @MainActor [weak self] in
       while !Task.isCancelled {
@@ -1023,6 +1114,9 @@ final class VoiceCallService:
         guard !Task.isCancelled, let self else { return }
         guard let current = self.pendingCallActions[actionID] else { return }
         if Date() >= current.deadline {
+          self.logger.error(
+            "Reliable call action \(current.kind.eventType, privacy: .public) timed out"
+          )
           self.resolveFailedAction(actionID: actionID, pending: current)
           return
         }
@@ -1093,7 +1187,13 @@ final class VoiceCallService:
     if let voiceCallKind = pending.voiceCallKind {
       payload["kind"] = voiceCallKind.rawValue
     }
-    eventReceiver?(
+    guard let eventReceiver else {
+      logger.debug(
+        "Reliable call action \(pending.kind.eventType, privacy: .public) is waiting for the web bridge"
+      )
+      return
+    }
+    eventReceiver(
       pending.kind.eventType,
       payload
     )

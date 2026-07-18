@@ -98,7 +98,12 @@ signalizace, ICE/TURN a médií a neúměrně zvýšilo riziko.
     webového media enginu, report/remove call a deaktivaci audia. Teprve po
     forced close se `end`/`reject` může fulfillnout; Matrix answer/mute selže.
     Před `getUserMedia` musí web publikovat call identity; CallKit-owned
-    `AVAudioSession` aktivuje výhradně CallKit.
+    `AVAudioSession` aktivuje výhradně CallKit. Permission callback po konfiguraci
+    nesmí blokovat na `didActivate`, protože Matrix SDK potřebuje dokončit
+    `placeVoiceCall`/`answer`; média pořizuje jediný SDK stream bez předchozího
+    probe-and-stop capture. Pokud systém po fulfilled start/answer nedoručí
+    `didActivate` do deseti sekund, native ukončí CallKit i webová média jako
+    failed a odstraní ghost stav před dalším pokusem.
 12. Skupinový hlasový hovor se zahajuje z nativního detailu skupiny a v aktivním
     call view lze přes `+` postupně přizvat další aktivní členy místnosti. Native
     přenáší pouze `group` kind, bounded participant presentation a opaque

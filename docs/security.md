@@ -176,8 +176,10 @@ XSS ochrany.
   `end`/`reject` smí fulfillnout až po tomto forced close, zatímco Matrix answer
   a mute selžou. CallKit `timedOutPerforming` používá stejnou větev i při suspendu.
 - CallKit-owned audio session smí aktivovat pouze CallKit. WebKit permission
-  delegate čeká na `didActivate`; ruční aktivace je povolena jen když se v
-  krátkém claim okně neobjeví žádný CallKit hovor.
+  delegate po ověření mikrofonu a konfiguraci kategorie rozhodne bez čekání na
+  `didActivate`, aby nevytvořil kruhové čekání mezi CallKit a Matrix/WebRTC.
+  Samotné WebRTC audio se řídí CallKit aktivací; ruční aktivace je povolena jen
+  když se v krátkém claim okně neobjeví žádný CallKit hovor.
 - Host zůstává jediným `UNUserNotificationCenterDelegate`; komunikační kit
   přijímá APNs token a delivery/action callbacky pouze přes typovanou nativní
   facade a nesmí delegate hostitele přepsat. Před mountem drží nejvýše 16

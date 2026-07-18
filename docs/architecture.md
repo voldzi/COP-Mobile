@@ -289,10 +289,18 @@ Aktivace a deaktivace `AVAudioSession` jsou serializované mimo hlavní vlákno:
 na iOS 27 používají nativní asynchronní API a kompatibilní iOS 26 větev přesouvá
 starší blokující volání na pracovní executor. Rychlé ukončení a navazující hovor
 se proto nemohou předběhnout ani zablokovat SwiftUI.
-WebKit při CallKit-owned hovoru pouze nakonfiguruje audio kategorii a čeká na
-`provider(_:didActivate:)`; nikdy sám neaktivuje tutéž session. Odchozí Matrix
-call identity je publikována ještě před `getUserMedia`, aby měl native čas
-CallKit vlastnictví převzít. Persistentní Matrix/WebRTC iframe zůstává v
+WebKit při CallKit-owned hovoru pouze nakonfiguruje audio kategorii; permission
+callback však nesmí blokovat na `provider(_:didActivate:)`, protože SDK nemůže
+dokončit `placeVoiceCall`/`answer` a CallKit lifecycle by se vzájemně zablokoval.
+CallKit zůstává jediným vlastníkem aktivace session. Odchozí Matrix call identity
+je publikována ještě před jediným `getUserMedia` požadavkem vlastněným SDK, aby
+měl native čas CallKit vlastnictví převzít. Samostatný probe-and-stop stream se
+nepoužívá, protože může deaktivovat živý track právě během CallKit přechodu.
+Po splnění CallKit start/answer transakce běží desetisekundový activation
+watchdog. Když systém nedoručí `didActivate`, aplikace deterministicky ukončí
+CallKit i webová média jako failed; nesmí zůstat ghost hovor, který blokuje další
+odchozí pokus až do restartu aplikace.
+Persistentní Matrix/WebRTC iframe zůstává v
 nativním hostu render-active off-screen už od mountu, nikoli až od existence
 call snapshotu, aby mohl první start/answer zpracovat i při cold startu.
 
