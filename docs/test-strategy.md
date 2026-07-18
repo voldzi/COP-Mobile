@@ -124,18 +124,24 @@ V COP repozitáři se ověří:
 - foreground aktivace a ukončení audio session nezablokují hlavní vlákno;
   souběžné activate/deactivate požadavky se provedou v pořadí a poslední
   potvrzený stav odpovídá lifecycle hovoru;
-- CallKit answer/reject/end/mute zůstane pending do ACK Matrix commandu,
-  opakuje stejné `actionId`, deduplikuje command i ACK a při 12s timeoutu nebo
-  záporném ACK failuje. Cold-start command doručený před Matrix call snapshotem
-  se provede po jeho vzniku, nejpozději v 9s webovém pending okně;
+- CallKit reject/end/mute zůstane pending do ACK Matrix commandu. Answer
+  fulfillne systémovou akci po audio konfiguraci, vyvolá CallKit `didActivate`
+  a ponechá Matrix answer samostatně pending. Obě větve opakují stejné
+  `actionId`, deduplikují command i ACK a při timeoutu nebo záporném ACK
+  fail-closed uzavřou media call. Cold-start answer má 35 sekund a command
+  doručený před Matrix call snapshotem se provede po jeho vzniku nejpozději
+  v 30sekundovém webovém pending okně; ostatní nativní akce mají 12 sekund;
 - JavaScript delivery error invaliduje bridge, zachová jediný pending event se
   stejným `actionId` a po novém handshake jej doručí znovu. `CXProvider` reset
   vyvolá webový hangup a opožděný `CXStartCallAction` nesníží `connected` na
   `connecting`.
-- záporný ACK, 12s nativní timeout a CallKit `timedOutPerforming` vyvolají reload
+- záporný ACK, bounded nativní timeout a CallKit `timedOutPerforming` vyvolají reload
   web media enginu, report/remove call a deaktivaci audia; `end`/`reject` se po
-  forced close fulfillne, `answer`/`mute` failne a remote ended odstraní pending
+  forced close fulfillne, Matrix answer/mute selže a remote ended odstraní pending
   akce stejného call UUID;
+- odchozí call snapshot vznikne před WebKit microphone capture, foreground
+  permission delegate během CallKit hovoru neaktivuje session ručně a media
+  capture pokračuje až po `provider(_:didActivate:)`;
 
 ### Bezpečnost bridge
 

@@ -199,7 +199,9 @@ final class VoiceCallService:
 {
   static let shared = VoiceCallService()
   private static let actionRetryInterval = Duration.seconds(1)
-  private static let actionAcknowledgementTimeout: TimeInterval = 12
+  private static let callKitClaimPollCount = 100
+  private static let callKitAudioActivationPollCount = 200
+  private static let callKitPollInterval = Duration.milliseconds(50)
 
   private enum ReliableActionKind {
     case answer
@@ -216,6 +218,19 @@ final class VoiceCallService:
       case .mute: "calls.muteRequested"
       case .addParticipants: "calls.addParticipantsRequested"
       case .reject: "calls.rejectRequested"
+      }
+    }
+
+    var acknowledgementTimeout: TimeInterval {
+      // A cold start on an older device can need materially longer to restore
+      // the persistent WKWebView Matrix session. The CallKit answer action is
+      // fulfilled before this bridge operation, so the longer bounded timeout
+      // does not hold the system CallKit transaction open.
+      switch self {
+      case .answer:
+        35
+      default:
+        12
       }
     }
   }
@@ -310,8 +325,37 @@ final class VoiceCallService:
   func prepareForegroundAudio() async throws {
     let session = AVAudioSession.sharedInstance()
     try configureAudioSession(session)
+    if await waitForCallKitOwnership() {
+      guard await waitForCallKitAudioActivation() else {
+        throw AudioSessionTransitionError.activationRejected
+      }
+      updateAudioRoute(using: session)
+      return
+    }
     try await audioSessionActivationCoordinator.activate()
     updateAudioRoute(using: session)
+  }
+
+  private func waitForCallKitOwnership() async -> Bool {
+    for _ in 0..<Self.callKitClaimPollCount {
+      if calls.values.contains(where: {
+        $0.registeredWithCallKit && $0.phase.keepsPresentationVisible
+      }) {
+        return true
+      }
+      try? await Task.sleep(for: Self.callKitPollInterval)
+    }
+    return false
+  }
+
+  private func waitForCallKitAudioActivation() async -> Bool {
+    for _ in 0..<Self.callKitAudioActivationPollCount {
+      if presentation.isAudioActive {
+        return true
+      }
+      try? await Task.sleep(for: Self.callKitPollInterval)
+    }
+    return false
   }
 
   func requestMicrophoneAndPrepare(_ completion: @escaping @MainActor (Bool) -> Void) {
@@ -698,14 +742,24 @@ final class VoiceCallService:
   }
 
   func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
-    guard let call = calls[action.callUUID], call.direction == .incoming, call.phase == .ringing
+    guard var call = calls[action.callUUID], call.direction == .incoming, call.phase == .ringing
     else {
       action.fail()
       return
     }
     do {
       try configureAudioSession(AVAudioSession.sharedInstance())
-      queueReliableAction(kind: .answer, uuid: action.callUUID, call: call, callKitAction: action)
+      // CallKit must own and activate AVAudioSession before WKWebView asks for
+      // getUserMedia. Holding CXAnswerCallAction until the Matrix ACK creates a
+      // cycle: WebRTC waits for audio, while CallKit waits for WebRTC. Fulfil
+      // the system action now, then keep the Matrix answer independently
+      // fail-closed through the reliable bridge command.
+      call.answered = true
+      call.phase = .connecting
+      calls[action.callUUID] = call
+      publish(action.callUUID)
+      action.fulfill()
+      queueReliableAction(kind: .answer, uuid: action.callUUID, call: call, callKitAction: nil)
     } catch {
       action.fail()
     }
@@ -931,7 +985,7 @@ final class VoiceCallService:
       callID: call.callID,
       roomID: call.roomID,
       callUUID: uuid,
-      deadline: Date().addingTimeInterval(Self.actionAcknowledgementTimeout),
+      deadline: Date().addingTimeInterval(kind.acknowledgementTimeout),
       kind: kind,
       callKitAction: callKitAction,
       muted: muted,

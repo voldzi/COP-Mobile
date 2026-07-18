@@ -330,16 +330,19 @@ okně; překročení vrací `RATE_LIMITED`.
 
 `calls.acknowledgeAction` přijímá přesně `actionId`, `callId`, `roomId` a
 `outcome` (`succeeded` nebo `failed`). Identita musí odpovídat čekajícímu
-nativnímu povelu. CallKit `answer`, `reject`, `end` ani `mute` se neoznačí jako
-splněný před kladným potvrzením, které COP Chat odešle až po dokončení příslušné
-operace Matrix call enginu. Native opakuje event se stejným `actionId`; bez ACK
-do 12 sekund akci failne. COP Chat drží před provedením nejvýše 9 sekund bounded
-pending command, takže cold-start command nezmizí jen proto, že Matrix call
-snapshot ještě není připravený. Neznámé nebo pozdní ACK vrací
+nativnímu povelu. CallKit `reject`, `end` ani `mute` se neoznačí jako splněný
+před kladným potvrzením, které COP Chat odešle až po dokončení příslušné operace
+Matrix call enginu. `CXAnswerCallAction` se po konfiguraci audia splní předem,
+aby CallKit aktivoval session; Matrix answer přesto čeká na stejné ACK a při
+selhání hovor fail-closed ukončí. Native opakuje event se stejným `actionId`;
+answer má 35sekundový cold-start limit, ostatní akce 12 sekund. COP Chat drží
+před provedením nejvýše 30 sekund bounded pending command, takže cold-start
+command nezmizí jen proto, že Matrix call snapshot ještě není připravený.
+Neznámé nebo pozdní ACK vrací
 `{ "acknowledged": false }` a nemění CallKit stav.
 Záporný ACK, nativní timeout i CallKit `timedOutPerforming` vynutí process-wide
 invalidaci a reload webového media enginu, ukončení presentation a deaktivaci
-audio session. `answer`/`mute` v této větvi failnou; `end`/`reject` lze fulfillnout
+audio session. Matrix answer/mute v této větvi selžou; `end`/`reject` lze fulfillnout
 až po tomto nuceném lokálním uzavření. Remote `ended` zruší všechny čekající
 akce stejného call UUID, aby pozdější retry nemohl hovor obnovit.
 

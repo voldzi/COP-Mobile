@@ -81,15 +81,21 @@ signalizace, ICE/TURN a médií a neúměrně zvýšilo riziko.
    auditovanou WebRTC dependency, TURN/ICE interoperabilitu, audio interruption
    state machine, background/terminated real-device testy a bezpečný rollout s
    možností návratu k ověřenému webovému enginu.
-11. CallKit user action je dvoufázová: native vytvoří stabilní `actionId`, event
-    retryuje a `CXAction` fulfillne teprve po identity-bound ACK z webového
-    Matrix enginu. COP Chat drží command do existence odpovídajícího call
-    snapshotu a deduplikuje retry. Timeout/záporné ACK jsou fail-closed; chyba
-    JavaScript delivery event requeueuje. `CXProvider` reset vynutí webový
+11. CallKit user action je dvoufázová: native vytvoří stabilní `actionId` a
+    event retryuje do identity-bound ACK z webového Matrix enginu.
+    End/reject/mute `CXAction` čekají na ACK. Answer je nutná lifecycle výjimka:
+    po nativní konfiguraci audia se `CXAnswerCallAction` fulfillne, aby CallKit
+    vyvolal `didActivate`; Matrix answer pokračuje jako samostatná spolehlivá
+    fail-closed akce. COP Chat drží command do existence odpovídajícího call
+    snapshotu nejvýše 30 sekund a deduplikuje retry. Matrix answer má 35sekundové
+    cold-start okno, ostatní akce 12 sekund. Timeout/záporné ACK jsou fail-closed;
+    chyba JavaScript delivery event requeueuje. `CXProvider` reset vynutí webový
     hangup a pozdní `CXStartCallAction` nesmí regresovat connected/terminal stav.
     Záporný ACK, nativní timeout i CallKit `timedOutPerforming` vynutí reload
     webového media enginu, report/remove call a deaktivaci audia. Teprve po
-    forced close se `end`/`reject` může fulfillnout; `answer`/`mute` failuje.
+    forced close se `end`/`reject` může fulfillnout; Matrix answer/mute selže.
+    Před `getUserMedia` musí web publikovat call identity; CallKit-owned
+    `AVAudioSession` aktivuje výhradně CallKit.
 12. Skupinový hlasový hovor se zahajuje z nativního detailu skupiny a v aktivním
     call view lze přes `+` postupně přizvat další aktivní členy místnosti. Native
     přenáší pouze `group` kind, bounded participant presentation a opaque

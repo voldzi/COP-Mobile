@@ -263,8 +263,11 @@ connected flag členů. `start` a `addParticipants` se vracejí jako spolehlivé
 opaque akce; cílové členství ověřuje web a COP API, nikoli SwiftUI seznam.
 Call action vzniklá před bridge handshake se drží v omezené paměťové frontě;
 každý povel má stabilní `actionId`, native jej do bounded timeoutu opakuje a
-CallKit action splní až po Matrix ACK vedeném zpět přes chat, host a Device
-bridge. Chat drží povel do vzniku odpovídajícího Matrix call snapshotu; retry se
+CallKit end/reject/mute action splní až po Matrix ACK vedeném zpět přes chat,
+host a Device bridge. `CXAnswerCallAction` je po nativní konfiguraci zvuku
+splněna okamžitě, aby CallKit mohl aktivovat `AVAudioSession`; vlastní Matrix
+answer zůstává samostatnou spolehlivou fail-closed akcí. Chat drží povel až
+30 sekund do vzniku odpovídajícího Matrix call snapshotu; retry se
 stejným `actionId` znovu nespustí Matrix operaci, pouze zopakuje uložené ACK.
 Chyba při předání eventu do JavaScriptu invaliduje bridge session a vrátí event
 do bounded fronty. Zánik webového procesu nebo aktivní bridge session ukončí
@@ -276,13 +279,18 @@ connected hovor zpět do connecting.
 Záporný ACK nebo timeout vyvolá process-wide invalidaci webových médií přes
 `AppModel`, reload WebView, report/remove CallKit call a deaktivaci audio session.
 Tím může `end`/`reject` skončit jako splněný až po prokazatelném forced close;
-`answer`/`mute` zůstává fail-closed. Stejná větev se spouští z CallKit
+Matrix `answer` a `mute` zůstávají fail-closed. Pro answer platí delší
+35sekundové cold-start okno, ostatní akce mají 12 sekund. Stejná větev se spouští z CallKit
 `timedOutPerforming`, protože běžný retry `Task` nemusí při suspendovaném procesu
 běžet.
 Aktivace a deaktivace `AVAudioSession` jsou serializované mimo hlavní vlákno:
 na iOS 27 používají nativní asynchronní API a kompatibilní iOS 26 větev přesouvá
 starší blokující volání na pracovní executor. Rychlé ukončení a navazující hovor
 se proto nemohou předběhnout ani zablokovat SwiftUI.
+WebKit při CallKit-owned hovoru pouze nakonfiguruje audio kategorii a čeká na
+`provider(_:didActivate:)`; nikdy sám neaktivuje tutéž session. Odchozí Matrix
+call identity je publikována ještě před `getUserMedia`, aby měl native čas
+CallKit vlastnictví převzít.
 
 ## Úložiště a vlastnictví dat
 

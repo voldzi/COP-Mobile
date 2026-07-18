@@ -160,16 +160,22 @@ XSS ochrany.
   COP API přesto každou identitu znovu ověřuje vůči aktivnímu členství v místnosti.
   Webový E2EE peer mesh je omezen na šest osob.
 - CallKit user action používá náhodné stabilní `actionId`, bounded retry a
-  identity-bound ACK. Native akci nefulfilluje na základě pouhého doručení do
-  JavaScriptu; vyžaduje úspěšné dokončení Matrix commandu a při timeoutu nebo
-  záporném ACK failuje. Opakovaný event je idempotentní a pozdní/cizí ACK nesmí
+  identity-bound ACK. End/reject/mute se nefulfillují na základě pouhého doručení
+  do JavaScriptu; vyžadují úspěšné dokončení Matrix commandu.
+  `CXAnswerCallAction` se po nativní audio konfiguraci fulfillne, aby CallKit
+  mohl aktivovat `AVAudioSession`, ale Matrix answer zůstává bounded a při
+  timeoutu nebo záporném ACK hovor fail-closed ukončí. Opakovaný event je
+  idempotentní a pozdní/cizí ACK nesmí
   ovlivnit jiný hovor. Chyba WebKit JavaScript delivery invaliduje session a
   povel bezpečně requeueuje; reset CallKit provideru vynutí ukončení webového
   media enginu.
 - Timeout/záporný ACK nikdy nenechá běžet neřízený webový track: host vyvolá
   process-wide reload WebView, reportuje a odstraní call a deaktivuje audio.
-  `end`/`reject` smí fulfillnout až po tomto forced close, zatímco `answer`/`mute`
-  failuje. CallKit `timedOutPerforming` používá stejnou větev i při suspendu.
+  `end`/`reject` smí fulfillnout až po tomto forced close, zatímco Matrix answer
+  a mute selžou. CallKit `timedOutPerforming` používá stejnou větev i při suspendu.
+- CallKit-owned audio session smí aktivovat pouze CallKit. WebKit permission
+  delegate čeká na `didActivate`; ruční aktivace je povolena jen když se v
+  krátkém claim okně neobjeví žádný CallKit hovor.
 - Host zůstává jediným `UNUserNotificationCenterDelegate`; komunikační kit
   přijímá APNs token a delivery/action callbacky pouze přes typovanou nativní
   facade a nesmí delegate hostitele přepsat. Před mountem drží nejvýše 16
