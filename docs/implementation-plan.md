@@ -132,5 +132,6 @@ vypnuté, dokud neprojdou identity, key lifecycle, E2E a fyzická interoperabili
 2. Měnit nejprve autoritativní schema/fixtures, potom web adapter a nakonec
    nativní implementaci stejné verze.
 3. Každá fáze má samostatný review, test report a aktualizaci dokumentace.
-4. Legacy `04 CSM messenger` zůstane read-only referencí do úspěšné TestFlight
-   akceptace nového hostu; následná archivace je samostatné rozhodnutí.
+4. Legacy `04 CSM messenger` je pouze historická reference. Release projekt
+   ani lokální komunikační balíček na něm nesmějí mít build/runtime závislost;
+   jeho archivace nebo odstranění nesmí ovlivnit COP Mobile.

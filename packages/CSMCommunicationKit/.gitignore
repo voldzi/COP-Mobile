@@ -1,0 +1,16 @@
+.DS_Store
+.claude/
+.chroma-state/
+.codex-fs-probe
+.derivedData/
+DerivedData/
+build/
+.build/
+*.xcuserdata/
+*.xcuserstate
+*.moved-aside
+*.ipa
+*.dSYM.zip
+*.dSYM
+CSMMobile 2.xcodeproj/
+CSMMobile [0-9]*.xcodeproj/

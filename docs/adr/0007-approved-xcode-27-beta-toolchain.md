@@ -8,13 +8,13 @@ Accepted — 2026-07-11
 
 COP Mobile targets iOS/iPadOS 26. The product owner requires Xcode 27 beta for
 development and validation. The current workstation provides Xcode 27.0 build
-`27A5218g` and iOS SDK 27.0. GitHub-hosted macOS runner images do not currently
+`27A5228h` and iOS SDK 27.0. GitHub-hosted macOS runner images do not currently
 provide Xcode 27, so selecting an older hosted Xcode would violate the approved
 toolchain decision.
 
 ## Decision
 
-- Pin builds and tests to Xcode 27.0 build `27A5218g` and iOS SDK 27.0.
+- Pin builds and tests to Xcode 27.0 build `27A5228h` and iOS SDK 27.0.
 - Keep `IPHONEOS_DEPLOYMENT_TARGET=26.0`; SDK selection does not raise the
   minimum supported system.
 - Enforce the exact pin with `scripts/verify-apple-toolchain.sh`.

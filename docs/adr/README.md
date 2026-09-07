@@ -25,5 +25,9 @@ Use ADRs for important, costly, risky, or hard-to-reverse technical decisions.
 - `0006-relay-experiment-production-gate.md` — relay POC and production gates
 - `0007-approved-xcode-27-beta-toolchain.md` — pinned Xcode 27 beta build and CI boundary
 - `0008-real-voip-pushkit-callkit.md` — real incoming-call wake and CallKit lifecycle
-- `0009-native-communications-surface.md` — native E2EE chat and native call presentation with a staged WebRTC migration
+- `0009-native-communications-surface.md` — native E2EE chat and the superseded staged call design
 - `0010-dedicated-webkit-runtime.md` — dedicated persistent WebKit profile without a browser service worker or blocking startup cleanup
+- `0011-standalone-owned-communication-kit.md` — COP Mobile-owned local communication package without a legacy application dependency
+- `0012-server-owned-direct-voice-calls.md` — direct native CallKit/PushKit/LiveKit calls with COP API as state authority
+- `0013-bounded-native-chat-state.md` — screen-owned stores, one reducer, paged timeline, persistent outbox and measurable performance gates
+- `0014-communication-only-native-domain.md` — communication-only native runtime; map, reports and business workflow remain in web COP

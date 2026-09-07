@@ -139,7 +139,6 @@ použít deterministický mock. Web se nesmí větvit podle `isIOS` nebo
 | `shares` | `list`, `claim`, `discard` | inbox naplněný Share Extension |
 | `notifications` | `getStatus`, `requestAuthorization`, `scheduleLocal`, `cancelLocal`, `registerRemote` | APNs token zůstává native-only |
 | `communications` | `openChat` | prázdný request pouze otevře nativní SwiftUI chat; nevrací obsah ani auth stav |
-| `calls` | `updatePresentation`, `acknowledgeAction` | přechodné zrcadlení bounded webového call state do SwiftUI/CallKit a potvrzení uživatelského CallKit povelu; žádná signalizace nebo média |
 | `relay` | `getStatus`, `start`, `stop`, `enqueue`, `listQueue` | budoucí, opt-in, feature flag, iOS foreground-oriented |
 
 `location.startUpdates` není background tracking. Reload WebView ukončí
@@ -301,7 +300,7 @@ První kontrakt počítá minimálně s těmito skupinami:
 Notifikační/deep-link event nese pouze validovanou interní route nebo opaque ID.
 Nesmí nařídit navigaci na libovolnou URL.
 
-### Native communications a call presentation
+### Native communications a direct voice calls
 
 `communications.openChat` přijímá `{}` nebo přesně
 `{ "subjectId": "<opaque-oidc-sub>" }` (po trimu nejvýše 160 znaků) a vrací
@@ -310,56 +309,37 @@ fail-closed porovnání s nezávisle přihlášeným nativním actorem. Metoda
 nevytváří session, nepřijímá room ID, token, profil ani obsah zprávy a neposílá
 do webu chatový stav.
 
-`calls.updatePresentation` přijímá jen:
+Device bridge neposkytuje namespace `calls`. Voice-call state, CallKit povely,
+media credentials ani media data nepřecházejí mezi webem a native.
 
-- bounded opaque `callId` a `roomId`;
-- volitelný bounded display `title`;
-- `direction`: `incoming` nebo `outgoing`;
-- `phase`: `ringing`, `connecting`, `connected`, `ended` nebo `failed`;
-- volitelný `kind`: `direct` nebo `group`;
-- pro skupinový hovor nejvýše 20 bounded presentation záznamů v
-  `participants`/`eligibleParticipants`, každý pouze s `userId`, display name a
-  boolean `connected`.
+COP Mobile používá přímo autoritativní COP REST kontrakt
+`cop-voice-call-v1`:
 
-Neterminální update je povolen jen aktivní aplikaci, pro nejvýše jednu call
-identity a po validním stavovém přechodu. `ended`/`failed` může pouze uklidit
-již známý hovor. Při zániku bridge session se známý web-owned hovor označí jako
-failed a CallKit presentation se odstraní. Procesní kvóta je 40 update requestů
-za 60 sekund a nejvýše čtyři nové call identity v klouzavém pětiminutovém
-okně; překročení vrací `RATE_LIMITED`.
+- `POST /api/v1/messaging/calls` vytvoří direct hovor v místnosti, použije
+  idempotency key a vrátí serverový call záznam + krátkodobé LiveKit
+  credentials. Native posílá autoritativní `roomId`; `participantSubjectIds`
+  je volitelné a server protistranu standardně odvodí z kanonického
+  `directPeer`, nikoli z Matrix aliasů;
+- `GET /api/v1/messaging/calls?roomId=...` vrátí omezenou historii včetně
+  nepřijatých a ukončených hovorů;
+- `GET /api/v1/messaging/calls/{callId}` načte autoritativní stav a vydá media
+  credentials jen oprávněnému účastníkovi aktivního hovoru;
+- `POST /api/v1/messaging/calls/{callId}/actions` provede idempotentní
+  `accept`, `decline`, `cancel`, `end`, `mediaConnected` nebo `mediaFailed`
+  proti očekávané revizi.
 
-`calls.acknowledgeAction` přijímá přesně `actionId`, `callId`, `roomId` a
-`outcome` (`succeeded` nebo `failed`). Identita musí odpovídat čekajícímu
-nativnímu povelu. CallKit `reject`, `end` ani `mute` se neoznačí jako splněný
-před kladným potvrzením, které COP Chat odešle až po dokončení příslušné operace
-Matrix call enginu. `CXAnswerCallAction` se po konfiguraci audia splní předem,
-aby CallKit aktivoval session; Matrix answer přesto čeká na stejné ACK a při
-selhání hovor fail-closed ukončí. Native opakuje event se stejným `actionId`;
-answer má 35sekundový cold-start limit, ostatní akce 12 sekund. COP Chat drží
-před provedením nejvýše 30 sekund bounded pending command, takže cold-start
-command nezmizí jen proto, že Matrix call snapshot ještě není připravený.
-Neznámé nebo pozdní ACK vrací
-`{ "acknowledged": false }` a nemění CallKit stav.
-Záporný ACK, nativní timeout i CallKit `timedOutPerforming` vynutí process-wide
-invalidaci a reload webového media enginu, ukončení presentation a deaktivaci
-audio session. Matrix answer/mute v této větvi selžou; `end`/`reject` lze fulfillnout
-až po tomto nuceném lokálním uzavření. Remote `ended` zruší všechny čekající
-akce stejného call UUID, aby pozdější retry nemohl hovor obnovit.
+Server povolí hovor jen v direct místnosti s právě jedním protějškem. UI
+telefon nezobrazuje pro skupinu nebo AI. Stav `connected` vyžaduje přijatý
+serverový hovor a skutečné LiveKit media spojení; CallKit prezentace sama stav
+nemění.
 
-Nativní detail konverzace může vyslat `calls.startRequested` s opaque call/room
-ID a `kind`. Start používá stabilní `actionId`, bounded retry a identity-bound
-ACK stejně jako ostatní call povely; opakování stejného ID není nový hovor.
-Aktivní skupinový call view může vyslat
-`calls.addParticipantsRequested` s nejvýše pěti unikátními Matrix user ID z
-aktuálního `eligibleParticipants`. Obě akce používají stabilní `actionId` a
-bounded ACK/retry delivery. Seznam v UI není autorizační rozhodnutí: web a COP API musí členství
-znovu ověřit před odesláním cíleného VoIP wake.
+CSM Messaging doručuje přes PushKit pouze `chat.voice_call.incoming` a
+`chat.voice_call.ended`. Payload je minimální a native po probuzení vždy dočte
+aktuální stav z COP API. Missed call je serverová terminální fáze a pro úklid
+používá standardní `ended` wake.
 
-Metoda řídí pouze nativní presentation state. SDP, ICE candidates, TURN
-credentials, media tracks, Matrix access token ani celý Matrix event jsou
-zakázané. Native nesmí vytvořit stav `connected` odhadem; přebírá jej až po
-potvrzení současného webového Matrix/WebRTC enginu. Plně nativní media contract
-neexistuje a vyžaduje samostatný ADR/gate.
+LiveKit token je krátkodobý a room-scoped. Nesmí být uložen, zalogován, vložen
+do push payloadu nebo předán Device bridgem.
 
 ## Push registrační ticket
 
@@ -369,6 +349,13 @@ Implementovaný kontrakt zachovává tyto hranice:
   `voipDeviceToken`; veřejná odpověď ani následné čtení zařízení nevrací žádný;
 - `voipDeviceToken` se smí použít pouze pro `chat.voice_call.incoming` a
   `chat.voice_call.ended` podle ADR 0008;
+- samostatný COP Mobile používá svou nativní OIDC session pouze k získání
+  krátkodobého jednorázového registračního ticketu z COP API; s tímto ticketem
+  předá APNs a PushKit token přímo CSM Messaging a registraci zopakuje při
+  změně kteréhokoli tokenu;
+- registrační tok nesmí záviset na otevření skrytého webového chatu ani na OIDC
+  introspekci v CSM Messaging; vlastníkem životního cyklu VoIP registrace je
+  výhradně nativní proces COP Mobile;
 
 - COP `POST /api/v1/mobile/devices` neukládá APNs token;
 - CSM Messaging `POST /api/v1/devices` dnes očekává uživatelský access token
@@ -392,9 +379,10 @@ Vrací 120 sekund platný jednorázový bearer ticket omezený na:
 - platformu iOS, bundle ID a app-instance ID;
 - krátkou expiraci a unikátní `jti`.
 
-Web po explicitním zapnutí oznámení předá ticket metodě
-`notifications.registerRemote`. Native připojí APNs
-token až do přímého požadavku na CSM Messaging. Ticket nesmí autorizovat běžné
+Webový thin-host tok po explicitním zapnutí oznámení předá ticket metodě
+`notifications.registerRemote`. Čistě nativní chat si ticket vyžádá sám při
+startu přihlášené relace a při rotaci APNs/PushKit tokenu. Native připojí tokeny
+až do přímého požadavku na CSM Messaging. Ticket nesmí autorizovat běžné
 COP/Matrix API a CSM Messaging musí zabránit opakovanému použití `jti`.
 CSM Messaging ověřuje HMAC podpis, audience, účel, subject, platformu, bundle,
 app-instance binding, expiraci a jednorázové `jti`. Sdílený signing secret je

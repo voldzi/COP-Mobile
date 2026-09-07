@@ -8,6 +8,10 @@ Accepted — 2026-07-11
 autentizace pro chat a prezentace hlasového hovoru. Ostatní rozhodnutí těchto
 ADR zůstávají platná.
 
+Část rozhodnutí týkající se hlasových hovorů, webového media enginu,
+call bridge a skupinových hovorů byla 2026-07-19 nahrazena ADR 0012. Aktivní
+částí tohoto ADR zůstává nativní chat, OIDC/PKCE, Keychain a Matrix E2EE.
+
 ## Context
 
 Hybridní COP host spolehlivě zpřístupňuje mapu, hlášení a ostatní business

@@ -27,8 +27,10 @@ settings:
 
 packages:
   CSMCommunicationKit:
-    url: https://github.com/voldzi/CSM-messenger.git
-    revision: 7fc3d3004c30865235f6cd6c075c6a764369b5a0
+    path: ../../packages/CSMCommunicationKit
+  LiveKit:
+    url: https://github.com/livekit/client-sdk-swift.git
+    exactVersion: 2.16.0
 
 targets:
   COPMobile:
@@ -47,10 +49,12 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
     dependencies:
       - package: CSMCommunicationKit
+      - package: LiveKit
     scheme:
       gatherCoverageData: true
       testTargets:
         - COPMobileTests
+        - COPMobileUITests
 
   COPMobileTests:
     type: bundle.unit-test
@@ -69,12 +73,27 @@ targets:
         INFOPLIST_FILE: ""
         PRODUCT_BUNDLE_IDENTIFIER: cz.zeleznalady.cop-mobile.tests
 
+  COPMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: UITests
+    dependencies:
+      - target: COPMobile
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: ""
+        PRODUCT_BUNDLE_IDENTIFIER: cz.zeleznalady.cop-mobile.uitests
+
 schemes:
   COPMobile-Staging:
     build:
       targets:
         COPMobile: all
         COPMobileTests: [test]
+        COPMobileUITests: [test]
     run:
       config: Staging
     test:
@@ -82,5 +101,6 @@ schemes:
       gatherCoverageData: true
       targets:
         - COPMobileTests
+        - COPMobileUITests
     archive:
       config: Staging

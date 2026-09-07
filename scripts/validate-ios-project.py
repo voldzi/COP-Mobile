@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 IOS = ROOT / "apps" / "ios"
+COMMUNICATION_KIT = ROOT / "packages" / "CSMCommunicationKit"
 
 
 def read_plist(name: str):
@@ -23,8 +24,8 @@ def main() -> int:
     staging = read_plist("Info-Staging.plist")
     release = read_plist("Info-Release.plist")
 
-    if project.count('iOS: "26.0"') != 1 or project.count('deploymentTarget: "26.0"') != 2:
-        failures.append("project.yml must pin project and both targets to iOS 26.0")
+    if project.count('iOS: "26.0"') != 1 or project.count('deploymentTarget: "26.0"') != 3:
+        failures.append("project.yml must pin project, host and both test targets to iOS 26.0")
     if "IPHONEOS_DEPLOYMENT_TARGET = 26.0" not in base:
         failures.append("Base.xcconfig must pin IPHONEOS_DEPLOYMENT_TARGET to 26.0")
     if "SWIFT_VERSION = 6.0" not in base:
@@ -33,16 +34,148 @@ def main() -> int:
         failures.append("Base.xcconfig must use the approved legacy bundle ID")
     if "DEVELOPMENT_TEAM: LM6W548X36" not in project:
         failures.append("project.yml must use the approved Apple Development Team")
-    if "url: https://github.com/voldzi/CSM-messenger.git" not in project:
-        failures.append("project.yml must consume CSMCommunicationKit from the published GitHub repository")
-    if "revision: a1b8928a1f5d18fc2c664e24bdc8a2f844c40fa9" not in project:
-        failures.append("project.yml must pin the reviewed CSMCommunicationKit Git revision")
-    if 'path: "../../../04 CSM messenger"' in project:
-        failures.append("release project must not depend on a local sibling CSM checkout")
+    if "path: ../../packages/CSMCommunicationKit" not in project:
+        failures.append("project.yml must consume the COP Mobile-owned local CSMCommunicationKit package")
+    if "CSM-messenger.git" in project or "04 CSM messenger" in project:
+        failures.append("release project must not depend on the legacy app repository or its Git package")
+    communication_package = COMMUNICATION_KIT / "Package.swift"
+    if not communication_package.is_file():
+        failures.append("packages/CSMCommunicationKit/Package.swift must exist")
+    else:
+        package_text = communication_package.read_text(encoding="utf-8")
+        required_chat_sources = {
+            "ConversationListView.swift",
+            "ConversationWorkspace.swift",
+            "LoginView.swift",
+            "MessageComposerView.swift",
+            "MessageTimelineViews.swift",
+            "Sources/CSMCommunicationKit",
+        }
+        for filename in required_chat_sources:
+            if filename not in package_text:
+                failures.append(f"local CSMCommunicationKit must explicitly compile {filename}")
+        forbidden_application_sources = {
+            "MapWorkspaceView.swift",
+            "ReportDraftView.swift",
+            "SettingsView.swift",
+            "RootView.swift",
+            "RelayView.swift",
+        }
+        for filename in forbidden_application_sources:
+            if filename in package_text:
+                failures.append(f"local CSMCommunicationKit must not compile legacy application UI {filename}")
+        if '.testTarget(' not in package_text or 'name: "CSMCommunicationKitTests"' not in package_text:
+            failures.append("local CSMCommunicationKit must retain its communication test target")
+
+    communication_model = COMMUNICATION_KIT / "Sources" / "CSMCore" / "CommunicationModel.swift"
+    legacy_app_model = COMMUNICATION_KIT / "Sources" / "CSMCore" / "AppModel.swift"
+    if legacy_app_model.exists():
+        failures.append("local CSMCommunicationKit must not contain the legacy cross-domain AppModel.swift")
+    if not communication_model.is_file():
+        failures.append("local CSMCommunicationKit must contain CommunicationModel.swift")
+    else:
+        communication_model_text = communication_model.read_text(encoding="utf-8")
+        forbidden_domain_ownership = {
+            "communityReports": "community-report state",
+            "mapDisplayProfile": "map display state",
+            "offlineMapPacks": "offline map state",
+            "weatherRadarOverlay": "weather-radar state",
+            "CrisisRelayServing": "relay runtime ownership",
+            "WatchBridgeSyncing": "watch synchronization ownership",
+        }
+        for token, description in forbidden_domain_ownership.items():
+            if token in communication_model_text:
+                failures.append(
+                    f"CommunicationModel.swift must not restore {description}"
+                )
+
+    removed_native_domains = {
+        "CSMMeshProtocol.swift",
+        "CrisisRelayGatewayClient.swift",
+        "CrisisRelayService.swift",
+        "CrisisRelayTransportPolicy.swift",
+        "FieldReadinessSnapshot.swift",
+        "MapDensityProfile.swift",
+        "MapSearchIndex.swift",
+        "RadioPlanningModels.swift",
+        "WatchBridgeService.swift",
+    }
+    for filename in removed_native_domains:
+        if (COMMUNICATION_KIT / "Sources" / "CSMCore" / filename).exists():
+            failures.append(
+                f"local CSMCommunicationKit must not contain removed cross-domain source {filename}"
+            )
+
+    chat_architecture = COMMUNICATION_KIT / "Sources" / "CSMCore" / "ChatArchitecture.swift"
+    if not chat_architecture.is_file():
+        failures.append("local CSMCommunicationKit must contain ChatArchitecture.swift")
+    else:
+        architecture_text = chat_architecture.read_text(encoding="utf-8")
+        required_architecture_symbols = {
+            "final class ChatSessionStore",
+            "final class ConversationListStore",
+            "final class TimelineStore",
+            "enum TimelineReducer",
+            "final class TimelineSynchronizationController",
+            "actor OutboxActor",
+            "actor MediaPipelineActor",
+            "actor SearchIndex",
+            "enum ChatPerformanceBudget",
+        }
+        for symbol in required_architecture_symbols:
+            if symbol not in architecture_text:
+                failures.append(f"native chat architecture must retain {symbol}")
+
+    chat_architecture_tests = (
+        COMMUNICATION_KIT
+        / "Tests"
+        / "CSMCommunicationKitTests"
+        / "ChatArchitectureTests.swift"
+    )
+    if not chat_architecture_tests.is_file():
+        failures.append("local CSMCommunicationKit must contain ChatArchitectureTests.swift")
+    else:
+        architecture_test_text = chat_architecture_tests.read_text(encoding="utf-8")
+        required_release_fixtures = {
+            "testTimelineFixturesStayBoundedAtAllReleaseSizes",
+            "testEarlierPagingShiftsBoundedWindowAndCanReturnToLatest",
+            "testBurstOfOneHundredEventsLosesNothingAndCreatesNoDuplicates",
+            "testEncryptedOutboxSurvivesRestartAndDeduplicatesStableTransaction",
+            "testOfflineClientReturnsBoundedCacheWithoutWaitingForLiveTransport",
+            "testTimelinePresentationP95StaysWithinInteractionBudget",
+        }
+        for test_name in required_release_fixtures:
+            if test_name not in architecture_test_text:
+                failures.append(f"native chat release gate must retain {test_name}")
+
+    communication_sources = COMMUNICATION_KIT / "Sources"
+    forbidden_chat_regressions = {
+        "activeMessageStreamTask": "parallel timeline stream ownership",
+        "activeMessageRefreshTask": "parallel timeline polling ownership",
+        "maximumLoadedTimelineItems = 5_000": "an unbounded 5,000-message in-memory timeline",
+        "maximumLoadedTimelineItems = 5000": "an unbounded 5,000-message in-memory timeline",
+    }
+    for source_file in communication_sources.rglob("*.swift"):
+        source_text = source_file.read_text(encoding="utf-8")
+        for pattern, description in forbidden_chat_regressions.items():
+            if pattern in source_text:
+                failures.append(
+                    f"{source_file.relative_to(ROOT)} must not restore {description}"
+                )
+    nested_projects = list(COMMUNICATION_KIT.rglob("*.xcodeproj"))
+    if nested_projects:
+        failures.append("local CSMCommunicationKit must not embed a legacy Xcode application project")
     if "- path: Resources" not in project:
         failures.append("application target must compile the Resources asset catalog")
     if "ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon" not in project:
         failures.append("application target must compile AppIcon as its launcher icon")
+    if "COPMobileUITests:" not in project or "type: bundle.ui-testing" not in project:
+        failures.append("application target must retain the native UI smoke-test target")
+    if "- COPMobileUITests" not in project:
+        failures.append("COPMobile scheme must run the native UI smoke-test target")
+    ui_smoke_test = ROOT / "apps" / "ios" / "UITests" / "COPMobileLaunchUITests.swift"
+    if not ui_smoke_test.is_file():
+        failures.append("native UI smoke-test source must be present")
 
     if release.get("COPWebOrigin") != "https://cop.zeleznalady.cz":
         failures.append("release COP origin must be exact production HTTPS origin")
@@ -62,16 +195,16 @@ def main() -> int:
         "NSLocationAlwaysAndWhenInUseUsageDescription",
     }
     location_purpose = (
-        "CSM používá polohu při práci s COP k zobrazení vaší pozice, směru a "
-        "k připojení polohy pouze k akci, kterou spustíte."
+        "COP Mobile používá polohu k zobrazení vaší pozice a směru; polohu "
+        "připojí jen k akci, kterou sami spustíte."
     )
     microphone_purpose = (
-        "CSM používá mikrofon pouze během hovoru nebo při nahrávání hlasové "
-        "zprávy, které sami spustíte v COP Chatu."
+        "COP Mobile používá mikrofon jen během hovoru nebo nahrávání hlasové "
+        "zprávy, které sami spustíte."
     )
     face_id_purpose = (
-        "CSM používá Face ID pouze tehdy, když bezpečnostní politika COP vyžaduje "
-        "místní biometrické odemknutí před zobrazením krizových dat."
+        "COP Mobile použije Face ID jen tehdy, když bezpečnostní politika COP "
+        "vyžaduje místní odemknutí chráněných dat."
     )
     required_phone_orientations = {
         "UIInterfaceOrientationPortrait",
@@ -177,8 +310,8 @@ def main() -> int:
             print(f"FAIL: {failure}", file=sys.stderr)
         return 1
     print(
-        "iOS project configuration is fail-closed, APNs-enabled, location-When-In-Use and voice-call microphone enabled, and pinned "
-        "to iOS 26.0 / Swift 6 / approved signing identity."
+        "iOS project configuration is standalone, fail-closed, APNs-enabled, location-When-In-Use and voice-call microphone enabled, "
+        "and pinned to the COP Mobile-owned communication package, iOS 26.0 / Swift 6 / approved signing identity."
     )
     return 0
 

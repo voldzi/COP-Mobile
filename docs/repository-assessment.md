@@ -285,8 +285,9 @@ rovněž musí být navržena znovu pro thin host.
 - 3D attitude je foreground-only;
 - background tracking začíná pouze explicitní uživatelskou akcí;
 - relay není MVP a je defaultně vypnutý;
-- `04 CSM messenger` se nemaže, ale dále se nerozšiřuje jako paralelní COP
-  klient.
+- `04 CSM messenger` je pouze historická reference. COP Mobile vlastní lokální
+  komunikační snapshot podle ADR 0011 a musí fungovat i po úplném odstranění
+  původní aplikace.
 
 ## Blokující otázky podle milníku
 

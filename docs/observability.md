@@ -2,9 +2,11 @@
 
 ## Stav
 
-Ve fázi 0 neexistuje runtime. Níže uvedené názvy jsou závazný návrh pro první
-iOS 26 implementaci, nikoli tvrzení o aktuálně emitovaných datech. Mobilní
-aplikace neposkytuje `/health`, `/ready`, metrics endpoint ani vlastní backend.
+COP Mobile má samostatný iOS 26 runtime a lokální komunikační balíček.
+Mobilní aplikace neposkytuje `/health`, `/ready`, metrics endpoint ani vlastní
+backend. Běžící verze používá redigovaný `OSLog`; kritické operace nativního
+chatu mají navíc Instruments signposty. Centrální telemetry backend zatím není
+schválený, proto se detailní provozní data neodesílají mimo zařízení.
 
 ## Principy
 
@@ -43,7 +45,34 @@ ne oprávnění hodnotu zaznamenat.
 - Asset, outbox a pozdější relay korelace používají opaque ID a nikdy se
   neinterpretují jako serverové doručení.
 
-## Navržené metriky
+## Aktuální nativní chat signposty
+
+Kategorie `ChatPerformance` používá Points of Interest signposty bez obsahu
+zpráv, identit nebo názvů souborů. Release profiling sleduje minimálně:
+
+```text
+conversation-list-local
+cached-conversation-open
+chat.local-echo
+timeline-presentation
+```
+
+Signpost zaznamenává pouze začátek, konec a dobu operace. Překročení rozpočtu
+vytvoří redigované lokální warning hlášení. Rozpočty jsou release gate:
+
+| Operace | p95 cíl |
+|---|---:|
+| lokálně uložený seznam konverzací | 700 ms |
+| otevření cached konverzace | 200 ms |
+| lokální echo | 100 ms |
+| tap/context menu a přepočet prezentace | 100 ms |
+| dlouhé blokování hlavního vlákna | žádné ≥ 250 ms |
+
+XCTest měří deterministickou část reduceru a prezentace. Instruments ověřuje
+scroll, otevření klávesnice a main-thread hangs na sestavení pro skutečné
+zařízení; samotný unit test nenahrazuje renderovací měření 60 fps.
+
+## Navržené agregované metriky
 
 Bez high-cardinality labels:
 
@@ -68,6 +97,14 @@ share_inbox_bytes
 notification_event_total{type,result}
 offline_boot_total{mode,result}
 web_cache_recovery_total{result}
+chat_cached_open_duration_ms
+chat_local_echo_duration_ms
+chat_timeline_presentation_duration_ms
+chat_outbox_replay_total{result}
+chat_timeline_duplicate_total
+chat_offline_message_loss_total
+chat_history_page_load_duration_ms
+chat_media_prepare_duration_ms{kind}
 ```
 
 Relay metriky se do produkčního MVP nepřidávají. Laboratorní build později
@@ -100,6 +137,9 @@ Po zavedení schválené telemetry mají alertovat zejména:
 - nárůst `ORIGIN_NOT_ALLOWED`, schema/protocol mismatch nebo crash/hang;
 - APNs registration/delivery degradation v CSM Messaging;
 - cached-start/fallback regression;
+- překročení p95 rozpočtu seznamu, cached open, local echo nebo prezentace;
+- jakákoli duplicita po reconnectu nebo ztracená offline zpráva;
+- hang hlavního vlákna ≥ 250 ms nebo regrese 60fps scrollu;
 - tracking session končící bez user Stop nebo rostoucí store/quota;
 - Share inbox cleanup failure nebo storage exhaustion;
 - privacy redaction/secret scan failure — vždy release blocker.

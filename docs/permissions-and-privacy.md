@@ -9,7 +9,7 @@ tohoto dokumentu před začleněním do release buildu.
 
 Závazné principy:
 
-- CSM nežádá žádné chráněné oprávnění při prvním startu.
+- COP Mobile nežádá žádné chráněné oprávnění při prvním startu.
 - Systémový dialog následuje až po konkrétní akci uživatele a stručném
   kontextovém vysvětlení účelu.
 - Oprávnění se žádá v nejnižším rozsahu potřebném pro danou funkci.
@@ -94,11 +94,11 @@ review. Význam nesmí být širší než implementace. Doporučený český bas
 
 | Key | Český významový baseline |
 | --- | --- |
-| `NSLocationWhenInUseUsageDescription` | „CSM používá polohu při práci s COP k zobrazení vaší pozice, směru a k připojení polohy pouze k akci, kterou spustíte.“ |
+| `NSLocationWhenInUseUsageDescription` | „COP Mobile používá polohu k zobrazení vaší pozice a směru; polohu připojí jen k akci, kterou sami spustíte.“ |
 | `NSMotionUsageDescription` | „CSM používá údaje o natočení telefonu při aktivní práci s orientací v COP.“ |
-| `NSFaceIDUsageDescription` | „CSM používá Face ID pouze tehdy, když bezpečnostní politika COP vyžaduje místní biometrické odemknutí před zobrazením krizových dat.“ |
+| `NSFaceIDUsageDescription` | „COP Mobile použije Face ID jen tehdy, když bezpečnostní politika COP vyžaduje místní odemknutí chráněných dat.“ |
 | `NSCameraUsageDescription` | „CSM použije fotoaparát pouze tehdy, když pořídíte fotografii jako přílohu ve workflow COP.“ |
-| `NSMicrophoneUsageDescription` | „CSM používá mikrofon pouze během hlasového hovoru, který zahájíte nebo přijmete v COP Chatu.“ |
+| `NSMicrophoneUsageDescription` | „COP Mobile používá mikrofon jen během hovoru nebo nahrávání hlasové zprávy, které sami spustíte.“ |
 
 `NSLocationAlwaysAndWhenInUseUsageDescription`, `NSPhotoLibraryUsageDescription`,
 `NSFaceIDUsageDescription` a `NSUserTrackingUsageDescription` se do MVP

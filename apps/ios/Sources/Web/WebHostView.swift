@@ -93,11 +93,6 @@ struct WebHostView: UIViewRepresentable {
     #endif
 
     handler.webView = webView
-    let tapHaptics = UITapGestureRecognizer(
-      target: context.coordinator, action: #selector(Coordinator.webContentTapped))
-    tapHaptics.cancelsTouchesInView = false
-    tapHaptics.delegate = context.coordinator
-    webView.addGestureRecognizer(tapHaptics)
     let coordinator = context.coordinator
     bridge.eventSink = { [weak webView, weak bridge, weak coordinator] event in
       guard let webView else {
@@ -126,7 +121,6 @@ struct WebHostView: UIViewRepresentable {
       contentController: contentController,
       contentWorld: contentWorld
     )
-    context.coordinator.tapHaptics = tapHaptics
     context.coordinator.loadInitialPage()
     return webView
   }
@@ -142,7 +136,7 @@ struct WebHostView: UIViewRepresentable {
   }
 
   @MainActor
-  final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, UIGestureRecognizerDelegate
+  final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate
   {
     private let appConfiguration: AppConfiguration
     private let model: AppModel
@@ -156,7 +150,6 @@ struct WebHostView: UIViewRepresentable {
     private var bridgeEventRecoveryAttempted = false
     private var webRuntimeRecoveryAttempted = false
     private var loadGeneration = 0
-    fileprivate weak var tapHaptics: UITapGestureRecognizer?
 
     private static let initialLoadDeadline: TimeInterval = 8
     init(configuration: AppConfiguration, model: AppModel) {
@@ -242,7 +235,10 @@ struct WebHostView: UIViewRepresentable {
     func recoverFromBridgeEventDeliveryFailure() {
       guard !bridgeEventRecoveryAttempted else { return }
       bridgeEventRecoveryAttempted = true
-      model.invalidateWebMedia()
+      // The bridge keeps the undelivered event and replays it after the next
+      // handshake. Reloading the entire COP shell here used to throw users
+      // back to a loading screen (or even the web chat) for a transient JS
+      // readiness race.
     }
 
     func webView(
@@ -260,7 +256,9 @@ struct WebHostView: UIViewRepresentable {
       }
 
       bridge?.invalidateSession()
-      if navigationAction.navigationType == .linkActivated || navigationAction.targetFrame == nil {
+      if (navigationAction.navigationType == .linkActivated || navigationAction.targetFrame == nil),
+        originPolicy.allowsExternalOpen(url)
+      {
         _ = await UIApplication.shared.open(url)
       } else {
         model.webWasBlocked()
@@ -357,31 +355,15 @@ struct WebHostView: UIViewRepresentable {
         decisionHandler(.deny)
         return
       }
-      VoiceCallService.shared.requestMicrophoneAndPrepare { granted in
-        decisionHandler(granted ? .grant : .deny)
-      }
-    }
-
-    @objc func webContentTapped() {
-      let feedback = UISelectionFeedbackGenerator()
-      feedback.prepare()
-      feedback.selectionChanged()
-    }
-
-    func gestureRecognizer(
-      _ gestureRecognizer: UIGestureRecognizer,
-      shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-    ) -> Bool {
-      true
+      // Voice communication is native. The map WebView never owns the
+      // microphone or a second media stack.
+      decisionHandler(.deny)
     }
 
     func teardown() {
       finishNavigationAttempt()
       bridge?.invalidateSession()
       bridge?.detachEventReceiver()
-      if let tapHaptics {
-        webView?.removeGestureRecognizer(tapHaptics)
-      }
       if let contentWorld {
         contentController?.removeScriptMessageHandler(
           forName: BridgeScripts.handlerName, contentWorld: contentWorld)

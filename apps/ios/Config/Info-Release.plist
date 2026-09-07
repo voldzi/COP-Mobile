@@ -33,8 +33,10 @@
   <string>https://cop.zeleznalady.cz</string>
   <key>CSMessagingBaseURL</key>
   <string>https://msg.zeleznalady.cz</string>
-  <key>CSMBuildConfiguration</key>
-  <string>$(CONFIGURATION)</string>
+	<key>CSMBuildConfiguration</key>
+	<string>$(CONFIGURATION)</string>
+	<key>CSMAPNSEnvironment</key>
+	<string>$(APS_ENVIRONMENT)</string>
   <key>CSMUsePreviewServices</key>
   <false/>
   <key>CSMOIDCIssuer</key>
@@ -52,11 +54,13 @@
   <key>COPOIDCOrigin</key>
   <string>https://login.zeleznalady.cz</string>
   <key>NSLocationWhenInUseUsageDescription</key>
-  <string>CSM používá polohu při práci s COP k zobrazení vaší pozice, směru a k připojení polohy pouze k akci, kterou spustíte.</string>
+  <string>COP Mobile používá polohu k zobrazení vaší pozice a směru; polohu připojí jen k akci, kterou sami spustíte.</string>
   <key>NSFaceIDUsageDescription</key>
-  <string>CSM používá Face ID pouze tehdy, když bezpečnostní politika COP vyžaduje místní biometrické odemknutí před zobrazením krizových dat.</string>
+  <string>COP Mobile použije Face ID jen tehdy, když bezpečnostní politika COP vyžaduje místní odemknutí chráněných dat.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>CSM používá mikrofon pouze během hovoru nebo při nahrávání hlasové zprávy, které sami spustíte v COP Chatu.</string>
+  <string>COP Mobile používá mikrofon jen během hovoru nebo nahrávání hlasové zprávy, které sami spustíte.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>COP Mobile používá fotoaparát jen k pořízení fotografie, kterou se rozhodnete odeslat do chatu.</string>
   <key>WKAppBoundDomains</key>
   <array>
     <string>cop.zeleznalady.cz</string>

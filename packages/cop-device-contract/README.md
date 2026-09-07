@@ -9,14 +9,14 @@ Refresh from a local COP checkout:
 
 ```bash
 bash scripts/sync-cop-device-contract.sh \
-  "/Users/voldzi/Documents/Development/18 2026/DELTA_ACR/01 COP"
+  "/Users/voldzi/Developer/18 2026/DELTA_ACR/01 COP"
 ```
 
 Verify that the checked-in artifact exactly matches the pinned commit:
 
 ```bash
 bash scripts/sync-cop-device-contract.sh --check \
-  "/Users/voldzi/Documents/Development/18 2026/DELTA_ACR/01 COP"
+  "/Users/voldzi/Developer/18 2026/DELTA_ACR/01 COP"
 ```
 
 Changing the lock requires an intentional contract review in the owning COP

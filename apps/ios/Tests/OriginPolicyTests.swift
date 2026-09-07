@@ -41,6 +41,17 @@ final class OriginPolicyTests: XCTestCase {
     )
   }
 
+  func testExternalOpeningAllowsOnlyCredentialFreeHTTPSURLs() throws {
+    let production = try WebOrigin(configurationValue: "https://cop.zeleznalady.cz")
+    let policy = OriginPolicy(bridgeOrigins: [production], navigationOrigins: [production])
+
+    XCTAssertTrue(policy.allowsExternalOpen(try url("https://chmi.cz/vystrahy")))
+    XCTAssertFalse(policy.allowsExternalOpen(try url("http://chmi.cz/vystrahy")))
+    XCTAssertFalse(policy.allowsExternalOpen(try url("https://user@chmi.cz/vystrahy")))
+    XCTAssertFalse(policy.allowsExternalOpen(try url("tel:+420112")))
+    XCTAssertFalse(policy.allowsExternalOpen(try url("javascript:alert(1)")))
+  }
+
   func testMicrophoneCaptureAllowsSameOriginChatFrameAndRejectsVideo() throws {
     let allowed = try WebOrigin(configurationValue: "https://cop.zeleznalady.cz")
     let policy = OriginPolicy(bridgeOrigins: [allowed], navigationOrigins: [allowed])

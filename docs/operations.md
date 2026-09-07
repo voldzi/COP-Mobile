@@ -20,7 +20,7 @@ archive ani upload zatím definován není.
 Aktuálně ověřeno na workstation:
 
 - Node.js 24 a pnpm 10 jsou dostupné pro související COP práci;
-- schválený toolchain je Xcode 27.0 beta build `27A5218g` s iOS SDK 27.0;
+- schválený toolchain je Xcode 27.0 beta build `27A5228h` s iOS SDK 27.0;
 - Java/Android SDK/adb/Gradle nejsou nainstalované;
 - XcodeGen 2.44.1 je dostupný;
 - produkční COP origin je `https://cop.zeleznalady.cz`;
@@ -50,7 +50,7 @@ přidělení, ale neodstraňuje se nutnost dostupnosti GitHub Actions control pl
 ```bash
 git status --short --branch
 bash scripts/check.sh
-"/Users/voldzi/Documents/Development/18 2026/chromadb/tools/chroma-dev.sh" reindex --root .
+"/Users/voldzi/Developer/18 2026/chromadb/tools/chroma-dev.sh" reindex --root .
 ```
 
 Reindex není build gate; slouží retrieval-first práci. Secret ani produkční
@@ -92,23 +92,26 @@ Critical flagu bez odpovídajícího entitlement/policy důkazu.
 Staging origin není možné vymyslet; do jeho schválení nevznikne staging release
 allowlist.
 
-## Budoucí CI a release flow
+## Aktuální validační a release flow
 
-S prvními targety se doplní a v `AGENTS.md` přesně zopakují tyto kroky:
+Nativní targety, jednotkové testy a izolovaný UI smoke target jsou již součástí
+projektu. Každý release kandidát prochází těmito kroky:
 
 1. generace projektu z verzovaného XcodeGen manifestu;
 2. ověření připnutého Device contract artifactu a shared fixtures;
-3. Swift build, unit, integration a UI testy pro iOS 26;
+3. Swift build, unit a UI smoke testy pro iOS 26 pomocí `bash scripts/test-ios.sh`;
 4. lint/static analysis, secret a dependency/SDK scan;
 5. skeleton, docs, privacy manifest, entitlement a release-config audit;
-6. podepsaný archive a export pro interní TestFlight;
+6. čistý release preflight `bash scripts/verify-release-candidate.sh`, pak podepsaný archive a export pro interní TestFlight;
 7. oddělený real-device test report před promotion stejného buildu.
 
 Produkční app se nebuildí z `04 CSM messenger`. Tento projekt používá potvrzený
-Team `LM6W548X36` a legacy bundle ID, ale má vlastní build a release historii;
-komunikační kód spotřebovává jen jako Swift Package připnutý na přesnou
-publikovanou Git revision. Lokální sibling cesta nesmí být součástí release
-projektu.
+Team `LM6W548X36` a záměrně zachovaný bundle ID
+`cz.zeleznalady.csm.messenger`, ale má vlastní build a release historii.
+Komunikační kód vlastní lokálně v `packages/CSMCommunicationKit`; release
+projekt nesmí obsahovat sibling cestu ani Git dependency původní aplikace.
+Původní velkou iOS aplikaci lze odstranit bez dopadu na build nebo runtime
+COP Mobile.
 
 ## Rollout
 

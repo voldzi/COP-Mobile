@@ -65,6 +65,15 @@ struct OriginPolicy: Sendable {
     return navigationOrigins.contains(origin)
   }
 
+  func allowsExternalOpen(_ url: URL) -> Bool {
+    guard url.scheme?.lowercased() == "https",
+      url.user == nil,
+      url.password == nil,
+      url.host?.isEmpty == false
+    else { return false }
+    return true
+  }
+
   func allowsMicrophoneCapture(
     frameURL: URL?,
     mainFrameURL: URL?,

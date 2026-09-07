@@ -132,6 +132,24 @@ krok.
 5. Neoznačujte Time Sensitive jako guaranteed audible. Critical testujte pouze
    se skutečným entitlementem; CallKit/PushKit nepoužívejte pro výstrahu.
 6. Při kritické provozní potřebě aktivujte schválený redundantní serverový kanál.
+7. U samostatného COP Mobile ověřte, že aktivní záznam zařízení byl obnoven po
+   posledním spuštění aplikace a nese současně capabilities `voip: true`,
+   běžný APNs token a PushKit token. APNs `200` pro starý token nedokazuje
+   prezentaci hovoru na aktuální instalaci.
+8. COP Mobile uchovává poslední PushKit token v Keychainu pouze jako recovery
+   hint. Registraci zařízení smí obnovit až po potvrzení tokenu
+   `PKPushRegistry` v aktuálním procesu, a to i při shodě s cache.
+   Pokud příchozí PushKit wake chybí, foreground návrat navíc porovná aktivní
+   serverové hovory a právě jeden chybějící příchozí hovor oznámí CallKitu.
+   Při diagnostice ověřte tuto obnovu dříve, než začnete měnit LiveKit nebo TURN.
+9. Pokud `PKPushRegistry` po aktualizaci aktuální token nepotvrdí, klient provede
+   právě jeden unregister/register cyklus v daném procesu bez ohledu na starou
+   Keychain cache. Opakované cykly ani periodická invalidace funkčního tokenu
+   nejsou dovoleny.
+10. HangRisk na `AVAudioSession.setCategory` během aktivního hovoru znamená
+    chybnou rekonfiguraci CallKit-owned session. Kategorie se připravuje před
+    start/answer akcí; v `provider(_:didActivate:)` se pouze povolí LiveKit audio
+    engine a publikuje mikrofon.
 
 ## Device registration ticket selže
 

@@ -3,10 +3,9 @@
 ## Stav a účel
 
 Repozitář obsahuje buildovatelný hybridní iOS host, Location + Heading slice,
-nativní chat přes `CSMCommunicationKit` a nativní call presentation podle
-ADR 0009. Dokument pravdivě odděluje existující SwiftUI/CallKit povrch od
-přechodného webového Matrix/WebRTC media enginu a od budoucího plně nativního
-WebRTC gate.
+nativní chat přes `CSMCommunicationKit` a nativní direct-call engine podle
+ADR 0012. COP API vlastní call state, CallKit/PushKit systémový lifecycle a
+LiveKit audio. WebView není součástí call cesty.
 
 Minimální platforma je **iOS 26**. Úspěšný build nebo simulátor sám o sobě není
 důkaz funkčního kompasu, motion, APNs, E2EE interoperability, CallKit audio,
@@ -35,6 +34,19 @@ transportu.
 
 ## Vrstvy testů
 
+### Nativní UI smoke test
+
+Target `COPMobileUITests` spouští host v izolovaném preview režimu. Ověřuje, že
+nativní chat otevře bez WebKitu a bez systémového permission dialogu, a že
+odhlášený stav nabízí jen explicitní přihlášení. Je to rychlá regresní brána
+pro start, přístupnost a základní navigaci; nepředstírá ověření OIDC, Matrix,
+push, E2EE ani hovoru na skutečném zařízení.
+
+Release kandidát se připravuje pouze z čisté commitnuté kopie pomocí
+`bash scripts/verify-release-candidate.sh`. Skript spouští standardní kontrolu
+repozitáře, testy a kontrolu nepopsaných změn. Fyzický smoke test zůstává
+samostatnou povinnou bránou podle níže uvedené matice.
+
 Aktuální automatizované pokrytí ověřuje, že handshake pravdivě hlásí foreground
 location/heading bez background supportu, `location.getCurrent` nevyvolá
 permission request, location event nese monotónní sequence a invalidace session
@@ -44,6 +56,12 @@ string a současně zakazuje Always/background deklarace.
 WebView smoke test na fyzickém zařízení navíc ověřuje, že selection haptika
 nastane po tapnutí, ale nevzniká při scrollu a neblokuje aktivaci webového
 ovládacího prvku.
+
+Chatové regresní testy ověřují, že systémový back není nahrazen vlastním
+tlačítkem, swipe-to-reply přijímá pouze záměrný vodorovný tah doprava a
+nepřebírá opačný směr ani svislé scrollování. Prezentační model timeline
+deterministicky třídí, filtruje a seskupuje zprávy před jediným průchodem
+`LazyVStack`; shodný timestamp má stabilní pořadí podle identifikátoru.
 
 Fyzický smoke test musí navíc potvrdit systémový dialog až po explicitní akci,
 Full/Reduced Accuracy stav, GPS accuracy a reakci headingu při rotaci zařízení.
@@ -109,49 +127,36 @@ V COP repozitáři se ověří:
 - route z push/share vstupu projde stejnou autentizací a autorizací jako běžná
   navigace;
 - žádný webový kód nedostane APNs token ani filesystem cestu.
-- hlasový hovor v hlavním rámci přesného COP originu vyžádá systémové oprávnění
-  mikrofonu a lze jej přijmout; iframe, jiný origin a kamera jsou odmítnuty.
 - otevření nativního chatu nepřenáší room content ani user token; volitelný
   očekávaný OIDC subject se používá pouze pro fail-closed kontrolu shody účtu;
-- webový call engine posílá nativní prezentaci `connected` až po skutečném media
-  spojení a po `ended`/`failed` call overlay i proximity stav zaniknou;
-- APNs callbacky mají jediného host delegate, Matrix facade obdrží token i
-  foreground/background/action události a cold-start call action přežije do
-  prvního platného bridge handshake; push před mountem se claimne právě jednou
-  a otevře vybranou konverzaci;
-- malformed/stale call update nemůže vytvořit CallKit transakci nebo aktivovat
-  audio session.
-- foreground aktivace a ukončení audio session nezablokují hlavní vlákno;
-  souběžné activate/deactivate požadavky se provedou v pořadí a poslední
-  potvrzený stav odpovídá lifecycle hovoru;
-- CallKit reject/end/mute zůstane pending do ACK Matrix commandu. Answer
-  fulfillne systémovou akci po audio konfiguraci, vyvolá CallKit `didActivate`
-  a ponechá Matrix answer samostatně pending. Obě větve opakují stejné
-  `actionId`, deduplikují command i ACK a při timeoutu nebo záporném ACK
-  fail-closed uzavřou media call. Cold-start answer má 35 sekund a command
-  doručený před Matrix call snapshotem se provede po jeho vzniku nejpozději
-  v 30sekundovém webovém pending okně; ostatní nativní akce mají 12 sekund;
-- odchozí `calls.startRequested` se stabilním `actionId` se opakuje do ACK,
-  přežije start před přihlášením web listeneru a po ACK již není znovu emitován;
-- persistentní webový Matrix/WebRTC host je render-active off-screen už před
-  prvním call snapshotem a dokáže zpracovat cold-start start/answer;
-- JavaScript delivery error invaliduje bridge, zachová jediný pending event se
-  stejným `actionId` a po novém handshake jej doručí znovu. `CXProvider` reset
-  vyvolá webový hangup a opožděný `CXStartCallAction` nesníží `connected` na
-  `connecting`.
-- záporný ACK, bounded nativní timeout a CallKit `timedOutPerforming` vyvolají reload
-  web media enginu, report/remove call a deaktivaci audia; `end`/`reject` se po
-  forced close fulfillne, Matrix answer/mute selže a remote ended odstraní pending
-  akce stejného call UUID;
-- odchozí call snapshot vznikne před jediným WebKit microphone capture vlastněným
-  Matrix SDK; foreground permission delegate během CallKit hovoru neaktivuje
-  session ručně ani nečeká s permission callbackem na `provider(_:didActivate:)`.
-  Test ověří, že se nepoužije samostatný probe-and-stop stream a Matrix
-  start/answer proto nemůže uvíznout v audio/CallKit kruhovém čekání;
-- pokud po fulfilled CallKit start/answer nepřijde do deseti sekund
-  `provider(_:didActivate:)`, activation watchdog označí hovor jako failed,
-  invaliduje webová média a uvolní stav tak, aby další hovor šel zahájit bez
-  restartu aplikace;
+- PushKit parser přijímá přesně top-level CSM Messaging payload pro
+  `chat.voice_call.incoming` a `chat.voice_call.ended` a odmítá neznámý nebo
+  neúplný typ;
+- incoming push se okamžitě hlásí CallKitu a autoritativní detail se následně
+  načte z COP API; tento tok nečeká na bridge ani WebView;
+- PushKit token může přežít restart v Keychainu pouze jako recovery hint;
+  serverová registrace jej nesmí použít, dokud jej v aktuálním procesu
+  nepotvrdí `PKPushRegistry`; potvrzení vyvolá registraci i tehdy, když se
+  hodnota shoduje s Keychain cache;
+- migrace ze starší instalace bez Keychain tokenu provede nanejvýš jeden
+  unregister/register recovery cyklus a po získání tokenu jej už neopakuje;
+- návrat aplikace do foregroundu bez přijatého PushKit wake načte aktivní
+  serverové hovory a oznámí právě jeden dosud neprezentovaný příchozí hovor;
+- serverové vytvoření a `accept`/`decline`/`cancel`/`end`/`mediaConnected`/
+  `mediaFailed` jsou idempotentní, revizované a direct-room autorizované;
+- UI ani API nenabídne hovor skupině, AI agentovi nebo místnosti bez právě
+  jednoho protějšku;
+- LiveKit token je krátkodobý, room-scoped a dostupný pouze účastníkovi
+  aktivního hovoru; neobjeví se v push, bridge, diagnostice ani store;
+- CallKit aktivuje `AVAudioSession`; mikrofon se publikuje až po `didActivate`
+  a teardown vždy odstraní LiveKit room, audio, proximity a CallKit stav;
+- kategorie `.playAndRecord/.voiceChat` se připravuje před splněním
+  start/answer akce; `didActivate` již aktivní CallKit session nikdy
+  nerekonfiguruje;
+- `connected` vznikne až po přítomnosti vzdáleného LiveKit účastníka;
+- serverová expirace vytvoří přesně jednu položku „Nepřijatý hovor“ a terminal
+  `ended` wake uklidí příchozí CallKit UI;
+- refresh nebo crash WebView nemění aktivní hovor;
 
 ### Bezpečnost bridge
 
@@ -212,9 +217,11 @@ být injektovatelné, aby byly expiry a lifecycle scénáře deterministické.
 - tracking status po reloadu WebView a dostupné Stop;
 - příjem pending Share Extension položky a otevření správného webového importu;
 - tap na lokální/push notifikaci za foreground, background a terminated stavu;
+- fresh start bez otevření chatu: později doručený APNs i PushKit token vyvolá
+  právě jednu aktuální CSM Messaging registraci a nenechá aktivní starý token;
 - nepřihlášený deep link projde loginem a až poté otevře autorizovanou route;
 - otevření/zavření `CSMCommunicationHost` nezruší WebView route ani aktivní
-  webový call engine;
+  nativní hovor;
 - stav `.checking` při otevření embedded chatu ukáže pouze neutrální průběh;
   platná Keychain session otevře chat přímo, `.signedOut` po explicitním tapu
   spustí nativní OIDC/PKCE a po zrušení nabídne tlačítko Přihlásit;
@@ -312,9 +319,22 @@ Každý kandidát na release projde:
 Záznam trasy používá syntetickou testovací identitu a schválený testovací
 prostor. Export důkazů obsahuje pouze agregované metriky nebo redigovanou trasu.
 
+Nativní chat navíc ověřuje samostatnou jednorázovou location zprávu: první
+souhlas, již udělené oprávnění, denied/restricted, timeout, reduced accuracy,
+zobrazení stejné E2EE zprávy ve webovém chatu a jistotu, že po odeslání neběží
+žádný kontinuální location subscription.
+
+Živá poloha se testuje samostatně pro délky 15 minut, 1 hodinu a 8 hodin,
+nahrazení aktivní délky, ruční ukončení, automatické vypršení, update throttling
+15 sekund, návrat z detailu do timeline, background/foreground přechod a
+interoperabilitu stejné Matrix relace mezi webem a dvěma fyzickými telefony.
+
 ### Share Extension a soubory na fyzickém zařízení
 
 - share jedné fotografie z Photos, jednoho PDF a podporovaného dokumentu z Files;
+- v nativním composeru otevření systémového výběru Fotek, odeslání fotografie
+  i videa, pořízení nové fotografie skutečnou kamerou a srozumitelný stav při
+  zamítnutém oprávnění nebo nečitelném či nadlimitním médiu;
 - HEIC/JPEG/PNG, velký soubor těsně pod a nad limitem, nulový/poškozený soubor;
 - více položek, nepodporovaný UTType, cloudová položka čekající na stažení a
   zrušení extension uprostřed kopie;
@@ -379,8 +399,8 @@ prostor. Export důkazů obsahuje pouze agregované metriky nebo redigovanou tra
 - logout/login jiného uživatele s pending assetem nebo tracking daty;
 - logout/login jiného uživatele s Matrix crypto storem, cached timeline a
   pending message; data předchozího subjectu se nikdy nezobrazí;
-- WebView crash/reload během prezentovaného hovoru, stale call snapshot,
-  duplicitní PushKit invite, audio interruption a proximity notification po end;
+- WebView crash/reload během hovoru, stale server revision, duplicitní PushKit
+  invite, audio interruption a proximity notification po end;
 - starý web build proti novému hostu a nový web build proti staršímu
   podporovanému hostu v rámci deklarovaného compatibility okna.
 
@@ -394,7 +414,14 @@ nebo upraví v ADR; nesmějí být vykázány bez měření.
 | Cached shell interactive | p95 do 3 s | 20 cold startů v airplane mode po validním online seed |
 | Bridge request bez I/O | p95 do 100 ms | Signpost od validovaného requestu po response, min. 1 000 opakování |
 | Heading event → web UI | p95 do 250 ms | Signpost s aktivní foreground subscription |
-| Native cached chat interactive | Počáteční cíl p95 do 1 s po odemčení dostupného store | 20 cold startů s dříve synchronizovanou testovací identitou |
+| Lokálně uložený seznam konverzací | p95 do 700 ms | 20 cold/warm otevření s připraveným encrypted store |
+| Otevření cached konverzace | p95 do 200 ms | Fixtures 1, 100, 1 000 a 10 000 zpráv; UI dostane jen omezené okno |
+| Lokální echo po odeslání | p95 do 100 ms | Signpost od potvrzení composeru po zobrazení pending bubliny |
+| Tap / context menu / reakce | p95 do 100 ms | XCTest measure + fyzický signpost bez I/O na MainActor |
+| Textová timeline | stabilních 60 fps | Instruments Core Animation při souvislém scrollu 500řádkového okna |
+| Main-thread hang | žádný hang ≥ 250 ms | Instruments Hangs + MetricKit v pilotním buildu |
+| Duplicita po reconnectu | 0 | 100-event burst, opakované eventy, restart a webová souběžná reakce |
+| Ztracená offline zpráva | 0 | enqueue, process kill, restart, reconnect a serverové potvrzení |
 | Call invite → CallKit report | Vždy uvnitř systémového PushKit deadline | Signpost bez obsahu payloadu na fyzickém zařízení |
 | Crash-free pilot sessions | Bez známého reprodukovatelného crash v kritické cestě | TestFlight/crash report + interní evidence |
 | Background tracking baterie | Změřená spotřeba za 30 min pro každý režim | Stejná trasa, jas, síť a battery baseline; výsledek bez marketingové interpretace |
@@ -404,6 +431,12 @@ Na MainActor nesmí běžet blokující souborové, databázové, hashovací ani
 I/O. Instruments kontroluje hangs, memory growth, energy a file activity. Test
 zahrnuje alespoň 30 reloadů WebView, 100 start/stop subscription cyklů a cleanup
 po simulované dlouhé offline periodě.
+
+Nativní chat navíc povinně prochází maticí 1/100/1 000/10 000 zpráv, nárazem
+100 událostí, offline/online přechodem, restartem aplikace, otevřením klávesnice,
+velkou přílohou, E2EE recovery a reakcí provedenou současně ve webu. Výkonnostní
+XCTest gate ověřuje čistý reducer a tvorbu prezentačních řádků; scroll, GPU,
+memory pressure a hang se uzavírají na referenčním fyzickém iPhonu.
 
 ## Security, privacy a artifact review
 
@@ -419,8 +452,9 @@ soubory:
 - App Transport Security, App-Bound/allowlist politika a production originy jsou
   přesné; debug originy a Web Inspector chybějí;
 - privacy manifest a App Store privacy answers odpovídají binárce a všem SDK;
-- `CSMCommunicationKit` a Matrix Rust dependency jsou reprodukovatelně
-  připnuté, povolené pro iOS 26 a archive neobsahuje nepoužitý legacy target;
+- lokální COP Mobile-owned `CSMCommunicationKit` má evidovanou provenance,
+  Matrix Rust dependency je reprodukovatelně připnutá a archive neobsahuje
+  nepoužitý legacy target ani build závislost na původní aplikaci;
 - foreground, background a notification-action callback awaitují headless
   zpracování `CSMCommunicationKit` před completion; reply/mark-read fungují i
   bez připojeného chat view, zatímco signed-out/loading payload zůstává v
@@ -488,3 +522,18 @@ python3 scripts/validate-ios-project.py
 Tyto kontroly nenahrazují staging OIDC/Matrix/E2EE ani fyzické PushKit,
 CallKit, proximity, audio-route a WebRTC/TURN důkazy. Každý neprovedený gate se
 vykáže jako `Blocked` nebo `Not run`, nikdy jako Pass.
+
+## Regrese vstupu do komunikace bez načtené mapy
+
+`COPMobileLaunchUITests` pokrývají otevření komunikace z načítací obrazovky
+a fallbacku po chybě mapy, bez nového systémového dialogu oprávnění.
+`COP_UI_TEST_INITIAL_PHASE=offline` aktivuje fallback pouze při již povoleném
+UI test režimu vývojové konfigurace. Testy používají preview služby a
+vynechávají WebKit: ověřují cestu v UI, nikoli reálné síťové selhání, OIDC
+nebo offline E2EE úložiště.
+
+Před vydáním je nutný fyzický test: pomalá síť / selhání webu → otevření
+komunikace → práce s uloženými zprávami → opětovné připojení → návrat do mapy.
+Ověřit také VoiceOver, největší velikost textu, Omezit pohyb a rozdílnou
+identitu webu/nativního přihlášení. Výsledek preview testu není důkazem
+průchodu této fyzické brány.

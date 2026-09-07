@@ -18,7 +18,7 @@ pinned Xcode 27 beta toolchain and capability-gate newer APIs.
 - Use Chroma MCP `search_code`, `search_docs`, `search_all`, then
   `get_file_context` when available.
 - CLI fallback:
-  `"/Users/voldzi/Documents/Development/18 2026/chromadb/tools/chroma-dev.sh" search-all "<query>" --root . --limit 5`.
+  `"/Users/voldzi/Developer/18 2026/chromadb/tools/chroma-dev.sh" search-all "<query>" --root . --limit 5`.
 - If retrieval is unavailable or insufficient, use targeted direct inspection
   and state that once.
 - Read the COP contract and nearby implementation before changing bridge,
@@ -34,8 +34,12 @@ pinned Xcode 27 beta toolchain and capability-gate newer APIs.
 - `docs/api.md` for consumed APIs and the COP Device API boundary.
 - `docs/security.md` for bridge, storage, permission, push, and relay controls.
 - `docs/test-strategy.md` for verification and real-device acceptance.
-- `docs/adr/0009-native-communications-surface.md` for the current chat, auth
-  and staged native-call boundary.
+- `docs/adr/0009-native-communications-surface.md` for the current native chat
+  and authentication boundary.
+- `docs/adr/0011-standalone-owned-communication-kit.md` for the owned local
+  communications source and legacy-app independence boundary.
+- `docs/adr/0012-server-owned-direct-voice-calls.md` for the native direct-call,
+  COP API and LiveKit boundary.
 - `docs/adr/` for architecture decisions.
 - `apps/ios/` and `apps/android/` once platform targets exist.
 - COP `openapi/openapi.json` remains authoritative for COP REST APIs.
@@ -48,17 +52,21 @@ pinned Xcode 27 beta toolchain and capability-gate newer APIs.
 
 - Web = map, reporting, layers, business logic, domain outbox and authorization
   for non-communication COP workflows.
-- `CSMCommunicationKit` = native SwiftUI chat, native OIDC/PKCE, Keychain,
+- local `packages/CSMCommunicationKit` = native SwiftUI chat, native OIDC/PKCE, Keychain,
   Matrix Rust E2EE session/store, encrypted timeline and communication outbox.
+- COP Mobile must build without the historical `04 CSM messenger` checkout or
+  its Git repository. Do not reintroduce either dependency.
 - Native host = secure shell, permissions, sensors, notifications, protected
   technical storage, Share Extension, background tracking and transports.
 - Web and native OIDC/Matrix sessions are separate. Never copy tokens, recovery
   material or decrypted chat content through the Device bridge.
-- The bridge may open native chat and mirror a bounded call presentation state;
-  it must not carry message content, credentials, SDP or ICE candidates.
-- CallKit, SwiftUI call UI, audio routing and proximity are native. Matrix call
-  signaling and WebRTC media remain in the web engine until the separate native
-  WebRTC ADR and interoperability gate pass.
+- The bridge may open native chat. Voice-call signaling, state or media never
+  traverse the WebView bridge.
+- CallKit, PushKit, SwiftUI call UI, audio routing, proximity and LiveKit media
+  are native. COP API is the authority for one-to-one call state; CSM Messaging
+  delivers only minimal incoming/ended VoIP wakes.
+- Voice calls are direct only. Group-call UI, Matrix call signaling and a hidden
+  web media engine are not supported.
 - The bridge is versioned, schema-validated, main-frame only, origin-restricted,
   capability-based, rate-limited, and reset on navigation or WebView reload.
 - Never expose a generic filesystem, arbitrary network request, reflection, or
@@ -70,16 +78,17 @@ pinned Xcode 27 beta toolchain and capability-gate newer APIs.
 - iOS relay is foreground/opportunistic. Production relay and sensitive relay
   payloads remain disabled until explicit security and interoperability gates
   pass.
-- Do not use CallKit/PushKit for anything other than a real VoIP call, and do
-  not describe native call presentation as a native media engine.
+- Do not use CallKit/PushKit for anything other than a real VoIP call.
+- Do not report a call as connected until both COP API state and LiveKit media
+  confirm the connection.
 - Do not claim guaranteed ringing, exact sensor accuracy, continuous iOS mesh,
   or successful delivery without platform/server acknowledgement.
 
 ## Related Repositories
 
-- COP: `/Users/voldzi/Documents/Development/18 2026/DELTA_ACR/01 COP`
-- Legacy native reference: `/Users/voldzi/Documents/Development/18 2026/DELTA_ACR/04 CSM messenger`
-- CSM Messaging: `/Users/voldzi/Documents/Development/18 2026/DELTA_ACR/05 Messaging`
+- COP: `/Users/voldzi/Developer/18 2026/DELTA_ACR/01 COP`
+- Historical native reference: `04 CSM messenger` (not a build/runtime dependency)
+- CSM Messaging: `/Users/voldzi/Developer/18 2026/DELTA_ACR/05 Messaging`
 
 Do not modify a related repository merely for convenience. Contract changes
 must be intentionally scoped, compatibility-safe, documented, and validated in
@@ -88,9 +97,9 @@ the owning repository.
 ## Environment
 
 - Current phase: hybrid iOS host with the COP WebView, native
-  `CSMCommunicationKit` chat and native call presentation. Native WebRTC,
+  `CSMCommunicationKit` chat and native direct CallKit/PushKit/LiveKit calls.
   Xcode 27 beta CI and the complete physical-device acceptance matrix remain
-  explicit gates.
+  explicit release gates.
 - Minimum target: iOS/iPadOS 26.
 - Planned iOS baseline: Swift 6, SwiftUI, Observation, Swift Concurrency,
   WebKit, Core Location, Core Motion, UserNotifications, Keychain, and XcodeGen.
@@ -118,7 +127,7 @@ simulator success is insufficient.
 If retrieval scope changes, run:
 
 ```bash
-"/Users/voldzi/Documents/Development/18 2026/chromadb/tools/chroma-dev.sh" reindex --root .
+"/Users/voldzi/Developer/18 2026/chromadb/tools/chroma-dev.sh" reindex --root .
 ```
 
 ## Security and Privacy

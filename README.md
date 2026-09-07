@@ -8,17 +8,21 @@ experimentální device-to-device relay. Vlastníkem produktu je tým COP.
 
 ## Stav
 
-Repozitář je ve fázi 2 — iOS feasibility host. Obsahuje XcodeGen/Swift 6 target
-pro iOS/iPadOS 26, bezpečný `WKWebView` baseline, handshake Device API `1.0.0`,
-lokální fallback a unit/contract testy. Fáze ještě není přijata: chybí Xcode 27
-beta CI důkaz, fyzické iPad ověření a úplné iPhone auth/offline scénáře.
+Repozitář obsahuje samostatnou iOS aplikaci pro iOS/iPadOS 26, bezpečný
+`WKWebView` host mapy a hlášení, nativní komunikační povrch, handshake Device
+API `1.0.0`, lokální fallback a unit/contract testy. Komunikační kód je vlastněn
+přímo tímto repozitářem v `packages/CSMCommunicationKit`; sestavení nepotřebuje
+původní velkou iOS aplikaci ani její Git repozitář.
 
 Závazný baseline:
 
 - minimum iOS/iPadOS 26;
 - schválený a přesně připnutý Xcode 27 beta / iOS SDK 27 toolchain;
-- existující COP web zůstává jediným UI a zdrojem business logiky;
-- nativní vrstva neimplementuje vlastní chat, mapu, report workflow ani AI;
+- existující COP web zůstává zdrojem mapy, hlášení a business logiky;
+- nativní vrstva vlastní chat a systémové chování komunikace, ale
+  neimplementuje vlastní mapu, report workflow ani AI;
+- `CommunicationModel` je komunikační runtime; původní víceúčelový
+  `AppModel` a nativní map/relay/watch zdroje nejsou součástí aplikace;
 - relay je mimo MVP, v produkci vypnutý a označený jako experiment;
 - Android bude používat stejný verzovaný device kontrakt v pozdější fázi.
 
@@ -35,9 +39,9 @@ Závazný baseline:
 ## Struktura
 
 ```text
-apps/ios/       budoucí SwiftUI host a Share Extension
+apps/ios/       samostatný SwiftUI host COP Mobile
 apps/android/   rezervovaná hranice pro pozdější Android host
-packages/       pouze mobilní utility; autoritativní device kontrakt zůstává v COP
+packages/       lokální komunikace a mobilní utility; Device kontrakt zůstává v COP
 tests/          contract, integration a real-device testovací podklady
 docs/           aktivní dokumentace a ADR
 config/         bezpečné, verzované konfigurační šablony
@@ -45,9 +49,9 @@ config/         bezpečné, verzované konfigurační šablony
 
 ## Integrace
 
-- COP web/API: `/Users/voldzi/Documents/Development/18 2026/DELTA_ACR/01 COP`
-- referenční starý nativní klient: `/Users/voldzi/Documents/Development/18 2026/DELTA_ACR/04 CSM messenger`
-- CSM Messaging/APNs: `/Users/voldzi/Documents/Development/18 2026/DELTA_ACR/05 Messaging`
+- COP web/API: `/Users/voldzi/Developer/18 2026/DELTA_ACR/01 COP`
+- historický referenční klient: `04 CSM messenger` (není build ani runtime závislost)
+- CSM Messaging/APNs: `/Users/voldzi/Developer/18 2026/DELTA_ACR/05 Messaging`
 - autoritativní COP API: `01 COP/openapi/openapi.json`
 
 Projekt neposkytuje vlastní REST API. Popis konzumovaných kontraktů je v
@@ -61,7 +65,7 @@ Projekt neposkytuje vlastní REST API. Popis konzumovaných kontraktů je v
 bash scripts/check.sh
 ```
 
-Závazný toolchain je Xcode 27.0 beta build `27A5218g` s iOS SDK 27.0. Kontroluje
+Závazný toolchain je Xcode 27.0 beta build `27A5228h` s iOS SDK 27.0. Kontroluje
 jej `scripts/verify-apple-toolchain.sh`; minimum aplikace zůstává iOS/iPadOS
 26.0.
 
@@ -84,5 +88,5 @@ Po změně dokumentace nebo budoucího zdrojového kódu obnovte lokální Chrom
 index:
 
 ```bash
-"/Users/voldzi/Documents/Development/18 2026/chromadb/tools/chroma-dev.sh" reindex --root .
+"/Users/voldzi/Developer/18 2026/chromadb/tools/chroma-dev.sh" reindex --root .
 ```

@@ -103,13 +103,11 @@ autentizované kontrakty a vlastní svůj oddělený nativní OIDC/Matrix lifecy
 8. **Oddělené identity a secrets.** Webová a nativní OIDC/Matrix session jsou
    samostatné; žádný token, recovery material, decrypted event, SDP ani ICE
    candidate nepřechází Device bridgem.
-9. **Staged call ownership.** Native vlastní CallKit, SwiftUI prezentaci,
-   proximity a audio routing. Dokud neprojde native-WebRTC gate, web vlastní
-   Matrix call signalizaci a WebRTC média.
-10. **Bounded group calls.** Nativní chat může spustit a aktivní call view
-    rozšířit Matrix skupinový hovor, ale přes bridge teče jen bounded participant
-    metadata a opaque action. Web vlastní encrypted peer mesh s limitem šesti
-    účastníků a server je autoritou pro členství cílových identit.
+9. **Jedno vlastnictví hovoru.** COP API vlastní autoritativní stav přímého
+   hovoru. Native vlastní CallKit, PushKit, SwiftUI prezentaci, proximity,
+   audio routing a LiveKit média. Hovor není závislý na WebView.
+10. **Pouze přímé hovory.** Telefon je dostupný jen v direct chatu s jediným
+    protějškem. Skupinové a AI hovory nejsou součástí kontraktu.
 
 ## Hlavní komponenty
 
@@ -118,7 +116,7 @@ autentizované kontrakty a vlastní svůj oddělený nativní OIDC/Matrix lifecy
 | App shell | SwiftUI lifecycle, volbu COP/chat povrchu, deep link routing, call overlay, globální fallback a diagnostika | mapovou a report business logiku |
 | Web container | `WKWebView`, persistentní website data store, navigation policy a načtení COP HTTPS originu | doménová cache a autorizaci |
 | `CSMCommunicationKit` | nativní SwiftUI chat, OIDC/PKCE, Keychain, Matrix Rust E2EE, timeline a offline outbox | mapu, hlášení a COP business workflow |
-| Native call presentation | CallKit/PushKit, SwiftUI call view, `AVAudioSession`, mute/route a proximity | přechodnou Matrix signalizaci, SDP/ICE a WebRTC média |
+| Native voice call | CallKit/PushKit, SwiftUI call view, COP API lifecycle, LiveKit room, `AVAudioSession`, mute/route a proximity | Matrix call signaling, skupinové hovory a WebView média |
 | Bridge coordinator | handshake, vyjednání verze, session, dispatch, timeout, cancel a event sequencing | schema authority |
 | Origin policy a validator | přesný allowlist, main-frame kontrola, JSON Schema a limity | důvěru v obsah povolené stránky |
 | Native services | `system`, `permissions`, `location`, `heading`, `attitude`, `tracking`, `connectivity`, `media`, `shares`, `notifications` | mapu a reporty |
@@ -126,13 +124,59 @@ autentizované kontrakty a vlastní svůj oddělený nativní OIDC/Matrix lifecy
 | Share Extension | import `NSItemProvider` položek do chráněného App Group inboxu | upload a report workflow |
 | Relay adapter | pozdější foreground-oriented experiment s opaque obálkou | význam payloadu, vlastní kryptografický protokol |
 
-Komponenty jsou cílové; ve fázi 0 nejsou implementovány.
+Tabulka popisuje vlastnické hranice. Základ hostu, nativního chatu a direct-call
+cesty je implementovaný; senzory, Share Extension a relay zůstávají vázané na
+své samostatné fáze a release gates.
+
+### Vnitřní architektura nativního chatu
+
+`CSMCommunicationHost` je jediný veřejný vstup. Uvnitř používá výhradně
+komunikační `CommunicationModel`; původní víceúčelový `AppModel` byl odstraněn.
+Balíček nekompiluje mapu, hlášení, relay, radio plánování ani watch
+synchronizaci. `CommunicationModel` koordinuje pouze nativní přihlášení,
+Matrix/E2EE, chat, push a hovory a deleguje obrazovkový stav do menších částí:
+
+| Část | Vlastnictví |
+| --- | --- |
+| `ChatSessionStore` | nativní přihlášení, aktivní actor, device ID a bezpečnostní zámek |
+| `ConversationListStore` | immutable snapshot seznamu, výběr a revision |
+| `TimelineStore` | právě jedna otevřená místnost a omezené okno zpráv |
+| `TimelineReducer` | jediná deterministická cesta pro replace/upsert/reaction/edit/delete a deduplikaci |
+| `TimelineSynchronizationController` | právě jeden live stream; polling jen po nedostupném/ukončeném streamu |
+| `OutboxActor` | serializovaná šifrovaná offline fronta se stabilním `transactionId` |
+| `MediaPipelineActor` | file-backed příprava přílohy, thumbnail a upload mimo hlavní actor |
+| `SearchIndex` | inkrementální lokální index načteného okna |
+| `ChatTimelinePresentationStore` | obrazovková cache prezentačních řádků podle timeline revision a dotazu |
+
+Nativní senzory a oprávnění jsou služby hostitelské aplikace. Přes verzovaný
+Device bridge je používá COP web, který zůstává vlastníkem mapy, hlášení,
+vrstev, workflow a doménových dat. Chat může vyvolat akci „Otevřít COP“, ale
+nevytváří paralelní nativní formulář ani mapový stav.
+
+Lokální historie je šifrovaná po stránkách. V paměti se drží nejvýše 500
+zpráv otevřené místnosti; výchozí stránka má 200 zpráv a starší stránka se
+načte explicitně se zachováním scroll anchoru. Celková délka místnosti proto
+nezvětšuje observable SwiftUI stav.
+
+Timeline reducer je jediný deduplikační bod. Serverové potvrzení, lokální echo,
+reakce, editace a smazání nesmí modifikovat pole zpráv jinou cestou. Odeslání
+nejprve uloží stable transaction do šifrovaného outboxu a zobrazí lokální echo;
+restart nebo reconnect používá stejný identifikátor a nesmí vytvořit druhý
+event.
+
+SwiftUI používá standardní `NavigationStack`, toolbary, sheets a systémová
+context menu. iOS 26 Liquid Glass patří navigaci a ovládacím prvkům, nikoli
+obsahovým bublinám. Celá bublina je jedna VoiceOver skupina a reply/reaction
+jsou accessibility actions. Prezentační seskupení a hledání se připraví mimo
+hlavní actor pouze při změně revision nebo dotazu.
 
 Při startu hovoru z nativního chatu zůstává `CSMCommunicationKit` SwiftUI
-povrch namountovaný pod nativním call overlayem. Webový engine může dál
-obsloužit dočasnou Matrix signalizaci a WebRTC média, ale host nesmí kvůli
-čekání na webový call snapshot odhalit webový chat nebo webový E2EE recovery
-flow.
+povrch namountovaný pod nativním call overlayem. `VoiceCallService` vytvoří
+nebo načte serverový hovor přímo přes COP API a připojí se do krátkodobě
+autorizovaného LiveKit roomu. WebView se hovoru neúčastní a jeho reload ani
+nedostupnost nesmí call lifecycle změnit. Vložený webový chat dostává režim
+`voiceMedia=native`, nepožaduje mikrofon a nepřipojuje se do LiveKit roomu;
+jinak by stejná OIDC identita odpojila nativní účast jako duplicitu.
 
 ## Datové toky
 
@@ -170,6 +214,28 @@ událost a web položku převezme přes `shares.list`/`shares.claim`. Kamera a
 pickery používají stejný `NativeAssetRef`. Upload, oprávnění k reportu a
 doménový lifecycle zůstávají ve webu a COP API.
 
+Nativní chat používá pro knihovnu systémový SwiftUI `PhotosPicker`, který se
+prezentuje mimo composer menu a nevyžaduje plošný přístup k celé knihovně.
+Pořízení nové fotografie používá systémovou celoobrazovkovou kameru po
+explicitním tapu uživatele a oprávnění `NSCameraUsageDescription`. Vybrané
+médium je ihned zkopírováno do file-backed `MediaPipelineActor`, zkontrolováno
+limity chatu a teprve poté předáno Matrix E2EE uploadu; selhání se nesmí tiše
+zahodit a zobrazí stručnou uživatelskou chybu.
+
+Jednorázové sdílení polohy v nativním composeru vyžádá čerstvý Core Location
+vzorek pouze po explicitním tapu uživatele. Při prvním použití smí host požádat
+o oprávnění `When In Use`; odmítnutí nebo nedostupná poloha nesmí zablokovat
+ostatní chat. Souřadnice a dostupná přesnost se odešlou jako standardní Matrix
+`m.location` uvnitř E2EE místnosti, takže stejnou zprávu zobrazí web i nativní
+klient. Jednorázová akce nezapíná průběžné ani background sledování.
+
+Živá poloha navazuje na detail vlastní location zprávy a používá Matrix Rust SDK
+live-location relaci MSC3489. Aktivní session vlastní `CommunicationModel`, ne
+sheet ani jednotlivá timeline buňka, takže zavření detailu sdílení nepřeruší.
+Host zůstává jediným vlastníkem Core Location oprávnění a dodává jen explicitně
+vyžádané krátkodobé vzorky. Aktualizace jsou omezené na interval 15 sekund a
+session se ukončí ručně nebo po 15 minutách, 1 hodině či 8 hodinách.
+
 ### Autentizace, nativní komunikace a registrace push zařízení
 
 COP web vlastní svou OIDC relaci v odděleném WebKit origin storage.
@@ -189,6 +255,19 @@ Při otevření chatu komunikační modul nejprve tiše obnoví svou nativní Ke
 session; pokud neexistuje, explicitní tap na Chat smí otevřít nativní
 Authorization Code + PKCE tok uvnitř aplikace. WebKit bearer token se
 nekopíruje do nativního Keychainu a oba OIDC klienty zůstávají oddělené.
+
+Stejná nativní session vlastní také registraci zařízení u CSM Messaging.
+Registrace je platná teprve tehdy, když obsahuje aktuální běžný APNs token i
+oddělený PushKit VoIP token. Obnovuje se při startu, návratu aplikace do
+popředí a při změně kteréhokoli tokenu. Příchozí hovor proto nesmí záviset na
+tom, zda je připojen nebo přihlášen skrytý webový most.
+PushKit token uložený v Keychainu je pouze recovery hint. Klient jej nikdy
+neodešle serveru, dokud jej v aktuálním procesu nepotvrdí `PKPushRegistry`.
+To brání jednostranně nedoručitelným hovorům po aktualizaci iOS nebo instalaci
+nového vývojového buildu, kdy v Keychainu zůstane již neplatná APNs adresa.
+Změnu tokenu zpracovává procesní `CSMCommunicationRuntime` a sloučí případné
+souběžné APNs/PushKit callbacky do jedné následné registrace. SwiftUI obrazovka
+chatu není posluchačem ani podmínkou této synchronizace.
 
 Pokud je webová mapa přihlášená, předá přes exact-origin bridge pouze bounded
 opaque očekávaný OIDC `subjectId`. Nativní chat jej porovná s actor subjectem
@@ -254,55 +333,25 @@ CSM Messaging posílá minimální APNs payload. Host zpracuje kategorii a opaqu
 identifikátor a podle typu otevře autorizovaný nativní chat nebo validovanou COP
 web route.
 Citlivý obsah není součástí systémové notifikace bez explicitní serverové
-politiky. Critical Alerts vyžadují Apple entitlement. Podle ADR 0009 PushKit
-probudí host, CallKit a SwiftUI převezmou systémovou prezentaci a proximity;
-Matrix `matrix-js-sdk` ve WebView přechodně vlastní signalizaci a WebRTC média.
-Bridge zrcadlí pouze bounded presentation state, nikdy SDP/ICE nebo credentials.
-U skupinového hovoru obsahuje presentation pouze typ hovoru a jméno/user ID/
-connected flag členů. `start` a `addParticipants` se vracejí jako spolehlivé
-opaque akce; cílové členství ověřuje web a COP API, nikoli SwiftUI seznam.
-Call action vzniklá před bridge handshake se drží v omezené paměťové frontě.
-Nativní start používá stejný stabilní `actionId` a retry/ACK cestu jako ostatní
-call akce, takže se neztratí ani v okně mezi vytvořením webového receiveru a
-přihlášením JavaScript listeneru. Každý povel native do bounded timeoutu opakuje a
-CallKit end/reject/mute action splní až po Matrix ACK vedeném zpět přes chat,
-host a Device bridge. `CXAnswerCallAction` je po nativní konfiguraci zvuku
-splněna okamžitě, aby CallKit mohl aktivovat `AVAudioSession`; vlastní Matrix
-answer zůstává samostatnou spolehlivou fail-closed akcí. Chat drží povel až
-30 sekund do vzniku odpovídajícího Matrix call snapshotu; retry se
-stejným `actionId` znovu nespustí Matrix operaci, pouze zopakuje uložené ACK.
-Chyba při předání eventu do JavaScriptu invaliduje bridge session a vrátí event
-do bounded fronty. Zánik webového procesu nebo aktivní bridge session ukončí
-webem vlastněnou call presentation jako failed, aby nezůstal ghost CallKit
-hovor. PushKit call, který ještě čeká na připojení webového media enginu, zůstává
-od této invalidace oddělený. Reset `CXProvider` navíc vyšle spolehlivý hangup pro
-každý webem vlastněný media call; callback `CXStartCallAction` nesmí vrátit již
-connected hovor zpět do connecting.
-Záporný ACK nebo timeout vyvolá process-wide invalidaci webových médií přes
-`AppModel`, reload WebView, report/remove CallKit call a deaktivaci audio session.
-Tím může `end`/`reject` skončit jako splněný až po prokazatelném forced close;
-Matrix `answer` a `mute` zůstávají fail-closed. Pro answer platí delší
-35sekundové cold-start okno, ostatní akce mají 12 sekund. Stejná větev se spouští z CallKit
-`timedOutPerforming`, protože běžný retry `Task` nemusí při suspendovaném procesu
-běžet.
-Aktivace a deaktivace `AVAudioSession` jsou serializované mimo hlavní vlákno:
-na iOS 27 používají nativní asynchronní API a kompatibilní iOS 26 větev přesouvá
-starší blokující volání na pracovní executor. Rychlé ukončení a navazující hovor
-se proto nemohou předběhnout ani zablokovat SwiftUI.
-WebKit při CallKit-owned hovoru pouze nakonfiguruje audio kategorii; permission
-callback však nesmí blokovat na `provider(_:didActivate:)`, protože SDK nemůže
-dokončit `placeVoiceCall`/`answer` a CallKit lifecycle by se vzájemně zablokoval.
-CallKit zůstává jediným vlastníkem aktivace session. Odchozí Matrix call identity
-je publikována ještě před jediným `getUserMedia` požadavkem vlastněným SDK, aby
-měl native čas CallKit vlastnictví převzít. Samostatný probe-and-stop stream se
-nepoužívá, protože může deaktivovat živý track právě během CallKit přechodu.
-Po splnění CallKit start/answer transakce běží desetisekundový activation
-watchdog. Když systém nedoručí `didActivate`, aplikace deterministicky ukončí
-CallKit i webová média jako failed; nesmí zůstat ghost hovor, který blokuje další
-odchozí pokus až do restartu aplikace.
-Persistentní Matrix/WebRTC iframe zůstává v
-nativním hostu render-active off-screen už od mountu, nikoli až od existence
-call snapshotu, aby mohl první start/answer zpracovat i při cold startu.
+politiky. Critical Alerts vyžadují Apple entitlement. Podle ADR 0012 doručí CSM
+Messaging minimální PushKit payload `incoming` nebo `ended`. Native oznámí
+incoming CallKitu bez čekání, potom načte autoritativní detail z COP API.
+
+Odchozí start vytvoří serverový call záznam s idempotency key. Přijetí,
+odmítnutí, zrušení, spojení, ukončení a media failure jsou revizované
+idempotentní serverové přechody. Stale revize ani opakovaný tap nemohou vytvořit
+druhý hovor.
+
+COP API vydá krátkodobý LiveKit token pouze účastníkovi aktivního hovoru.
+CallKit zůstává jediným vlastníkem aktivace `AVAudioSession`; mikrofon se do
+LiveKit publikuje až po `provider(_:didActivate:)`. Stav `connected` se
+prezentuje až po skutečném připojení vzdáleného LiveKit účastníka. Ukončení vždy
+odpojí room, vyčistí CallKit, proximity a audio a zapíše terminální stav do
+serverové historie.
+
+Serverová expirace změní nevyzvednutý ringing hovor na `missed` a odešle běžný
+terminal `ended` wake. Klient dočte detail a zobrazí „Nepřijatý hovor“ v
+konverzaci. Device bridge se na žádné části tohoto toku nepodílí.
 
 ## Úložiště a vlastnictví dat
 
@@ -333,11 +382,12 @@ milníku před implementací příslušné služby.
 
 | Systém | Úloha | Autorita kontraktu |
 | --- | --- | --- |
-| COP web/PWA | mapa, hlášení, vrstvy a business workflow; přechodný Matrix/WebRTC call engine | repozitář `01 COP` |
-| COP API | doménová data, pairing, device audit, snapshot, attachments, mesh gateway | `01 COP/openapi/openapi.json` |
-| `CSMCommunicationKit` | nativní chat UI, OIDC/Keychain, Matrix Rust E2EE, offline communication state a metadata-only voice-call launch callback | GitHub Swift Package `voldzi/CSM-messenger`, exact revision `cda92ee27bdbe5378d5f456a7461c0788eeefe3a` + ADR 0009 |
+| COP web/PWA | mapa, hlášení, vrstvy, business workflow a webový klient stejného serverového direct-call kontraktu | repozitář `01 COP` |
+| COP API | doménová data a autoritativní direct-call lifecycle + krátkodobé LiveKit credentials | `01 COP/openapi/openapi.json` |
+| `CSMCommunicationKit` | nativní chat UI, OIDC/Keychain, Matrix Rust E2EE, offline communication state a call timeline | lokální COP Mobile-owned Swift Package `packages/CSMCommunicationKit` + ADR 0009/0011/0012 |
 | Keycloak | oddělené OIDC relace pro web a veřejný nativní PKCE klient | konfigurace a runbooky `01 COP` |
-| CSM Messaging / Matrix | APNs registry, push, conversation metadata, Matrix bootstrap a E2EE transport | kontrakt služby CSM Messaging/Matrix |
+| CSM Messaging / Matrix | APNs/PushKit registry, minimální call wakes, conversation metadata, Matrix bootstrap a E2EE message transport | kontrakt služby CSM Messaging/Matrix |
+| LiveKit | nativní a webová audio média jednoho serverově autorizovaného roomu | COP runtime konfigurace a ADR 0012 |
 | APNs | systémové doručení notifikací | Apple capability/provisioning |
 | iOS Share Sheet | příjem fotek a dokumentů | App Extension kontrakt |
 | Budoucí Android host | parita Device API | stejná JSON Schema z `01 COP` |

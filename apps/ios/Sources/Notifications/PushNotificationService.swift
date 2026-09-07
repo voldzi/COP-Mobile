@@ -56,6 +56,7 @@ final class PushNotificationService: NSObject, PushNotificationProviding,
   private(set) var deviceToken: String?
   private var registrationFailure: String?
   private var tokenContinuation: CheckedContinuation<String, any Error>?
+  private var tokenTimeoutTask: Task<Void, Never>?
   private var pendingBridgeEvents: [(String, [String: Any])] = []
   private var eventReceiverOwnerID: UUID?
   private var eventReceiver: ((String, [String: Any]) -> Void)?
@@ -64,9 +65,16 @@ final class PushNotificationService: NSObject, PushNotificationProviding,
     super.init()
     CSMCommunicationNotifications.prepareHostApplication()
     center.delegate = self
-    VoiceCallService.shared.eventReceiver = { [weak self] type, payload in
-      self?.emitBridgeEvent(type: type, payload: payload)
-    }
+  }
+
+  func prepareForApplicationLaunch() {
+    VoiceCallService.shared.prepareForApplicationLaunch()
+    // APNs issues a process-valid device token only after the application asks
+    // to register. Do this independently of the protected chat bootstrap:
+    // incoming calls must remain reachable before the user opens or unlocks
+    // the native chat surface.
+    UIApplication.shared.registerForRemoteNotifications()
+    CallDiagnosticStore.record("apns.registration.requested", result: "launch")
   }
 
   func status() async -> [String: Any] {
@@ -90,7 +98,10 @@ final class PushNotificationService: NSObject, PushNotificationProviding,
   }
 
   func registrationContext() -> [String: Any] {
-    ["appInstanceId": appInstanceID, "bundleId": "cz.zeleznalady.csm.messenger"]
+    [
+      "appInstanceId": appInstanceID,
+      "bundleId": Bundle.main.bundleIdentifier ?? "cz.zeleznalady.csm.messenger",
+    ]
   }
 
   func registerRemote(ticket: String, messagingBaseURL: String) async throws -> [String: Any] {
@@ -107,7 +118,8 @@ final class PushNotificationService: NSObject, PushNotificationProviding,
     request.setValue("Bearer \(ticket)", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = try JSONSerialization.data(withJSONObject: [
-      "appBundleId": "cz.zeleznalady.csm.messenger",
+      "apnsEnvironment": Self.apnsEnvironment,
+      "appBundleId": Bundle.main.bundleIdentifier ?? "cz.zeleznalady.csm.messenger",
       "appInstanceId": appInstanceID,
       "capabilities": [
         "e2ee": true, "criticalAlerts": false, "liveActivities": false, "voip": true,
@@ -128,10 +140,17 @@ final class PushNotificationService: NSObject, PushNotificationProviding,
     return ["registered": true, "deviceId": deviceID]
   }
 
+  private static var apnsEnvironment: String {
+    CSMAPNSEnvironmentResolver.current
+  }
+
   func recordDeviceToken(_ data: Data) {
     deviceToken = data.map { String(format: "%02x", $0) }.joined()
     registrationFailure = nil
+    CallDiagnosticStore.record("apns.token.confirmed")
     CSMCommunicationNotifications.recordDeviceToken(data)
+    tokenTimeoutTask?.cancel()
+    tokenTimeoutTask = nil
     tokenContinuation?.resume(returning: deviceToken!)
     tokenContinuation = nil
   }
@@ -139,7 +158,10 @@ final class PushNotificationService: NSObject, PushNotificationProviding,
   func recordRegistrationFailure(_ error: any Error) {
     deviceToken = nil
     registrationFailure = "registration"
+    CallDiagnosticStore.record("apns.registration.failed")
     CSMCommunicationNotifications.recordRegistrationFailure(error)
+    tokenTimeoutTask?.cancel()
+    tokenTimeoutTask = nil
     tokenContinuation?.resume(throwing: PushRegistrationError.registrationFailed)
     tokenContinuation = nil
   }
@@ -252,6 +274,16 @@ final class PushNotificationService: NSObject, PushNotificationProviding,
     UIApplication.shared.registerForRemoteNotifications()
     return try await withCheckedThrowingContinuation { continuation in
       tokenContinuation = continuation
+      tokenTimeoutTask?.cancel()
+      tokenTimeoutTask = Task { @MainActor [weak self] in
+        try? await Task.sleep(for: .seconds(12))
+        guard !Task.isCancelled, let self, let continuation = self.tokenContinuation else {
+          return
+        }
+        self.tokenContinuation = nil
+        self.tokenTimeoutTask = nil
+        continuation.resume(throwing: PushRegistrationError.registrationFailed)
+      }
     }
   }
 
@@ -316,8 +348,14 @@ final class COPMobileAppDelegate: NSObject, UIApplicationDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    _ = PushNotificationService.shared
+    PushNotificationService.shared.prepareForApplicationLaunch()
     return true
+  }
+
+  func applicationDidBecomeActive(_ application: UIApplication) {
+    Task { @MainActor in
+      VoiceCallService.shared.applicationDidBecomeActive()
+    }
   }
 
   func application(

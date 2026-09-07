@@ -23,6 +23,12 @@ překonané analýzy patří do `archive/`.
 | [adr/](adr/) | Architektonická rozhodnutí |
 | [archive/](archive/) | Historické a superseded materiály |
 
+Aktuální komunikační hranice určují ADR 0009 (nativní chat a autentizace),
+ADR 0011 (samostatný vlastněný Swift package) a ADR 0012 (serverem vlastněné
+přímé CallKit/PushKit/LiveKit hovory bez webového media enginu). Vnitřní stav,
+stránkování, outbox, média, hledání a výkonnostní gate nativního chatu určuje
+ADR 0013.
+
 ## Kontraktová autorita
 
 COP Mobile neposkytuje REST API, a proto nemá vlastní `openapi/openapi.json`.

@@ -1,4 +1,5 @@
 import XCTest
+import CSMCommunicationKit
 
 @testable import COPMobile
 
@@ -11,107 +12,17 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     XCTAssertNotNil(PersistentWebRuntime.websiteDataStore.identifier)
   }
 
-  func testStartingVoiceCallFromNativeChatKeepsChatSurfaceMounted() {
-    let model = AppModel()
-    var startRequests: [(String, String, Bool)] = []
+  func testChatOnlyStartupDefersLocationServiceUntilItIsNeeded() {
+    var createdProviders = 0
+    let model = AppModel(
+      makeDeviceLocationProvider: {
+        createdProviders += 1
+        return FakeLocationProvider()
+      })
 
-    model.openNativeChat()
-    model.startNativeVoiceCall(
-      roomID: "!ops:example.cz",
-      title: "COP Operator",
-      isGroup: false
-    ) { roomID, title, isGroup in
-      startRequests.append((roomID, title, isGroup))
-    }
-
-    XCTAssertEqual(model.surface, .chat)
-    XCTAssertEqual(startRequests.count, 1)
-    XCTAssertEqual(startRequests.first?.0, "!ops:example.cz")
-    XCTAssertEqual(startRequests.first?.1, "COP Operator")
-    XCTAssertEqual(startRequests.first?.2, false)
-  }
-
-  func testNativeStartVoiceCallRetriesStableActionUntilWebAcknowledgesIt() async throws {
-    let service = VoiceCallService.shared
-    let previousReceiver = service.eventReceiver
-    defer { service.eventReceiver = previousReceiver }
-    var events: [(String, [String: Any])] = []
-    service.eventReceiver = { type, payload in
-      events.append((type, payload))
-    }
-
-    service.startVoiceCall(
-      roomID: "!retry-start:example.cz",
-      title: "Jiřina Volková",
-      isGroup: false,
-      registerWithSystemCallUI: false
-    )
-    XCTAssertEqual(service.presentation.activeCall?.roomID, "!retry-start:example.cz")
-    XCTAssertEqual(service.presentation.activeCall?.title, "Jiřina Volková")
-    XCTAssertEqual(service.presentation.activeCall?.phase, .connecting)
-    XCTAssertEqual(service.presentation.activeCall?.direction, .outgoing)
-    let first = try XCTUnwrap(events.first)
-    let actionID = try XCTUnwrap(first.1["actionId"] as? String)
-    let callID = try XCTUnwrap(first.1["callId"] as? String)
-    let roomID = try XCTUnwrap(first.1["roomId"] as? String)
-    XCTAssertEqual(first.0, "calls.startRequested")
-    XCTAssertEqual(first.1["kind"] as? String, "direct")
-
-    try await Task.sleep(for: .milliseconds(1_100))
-    XCTAssertGreaterThanOrEqual(events.count, 2)
-    XCTAssertTrue(events.allSatisfy { $0.1["actionId"] as? String == actionID })
-
-    XCTAssertTrue(
-      service.acknowledgeAction(
-        actionID: actionID,
-        callID: callID,
-        roomID: roomID,
-        outcome: "succeeded"
-      )
-    )
-    let acknowledgedCount = events.count
-    try await Task.sleep(for: .milliseconds(1_100))
-    XCTAssertEqual(events.count, acknowledgedCount)
-    XCTAssertTrue(
-      service.updateFromWeb(
-        callID: callID,
-        roomID: roomID,
-        title: "Jiřina Volková",
-        direction: "outgoing",
-        phase: "failed"
-      )
-    )
-    XCTAssertNil(service.presentation.activeCall)
-  }
-
-  func testNativeStartVoiceCallIsVisibleWhileWebBridgeReconnects() throws {
-    let service = VoiceCallService.shared
-    let previousReceiver = service.eventReceiver
-    service.eventReceiver = nil
-    defer { service.eventReceiver = previousReceiver }
-
-    service.startVoiceCall(
-      roomID: "!cold-web-engine:example.cz",
-      title: "COP Operator",
-      isGroup: false,
-      registerWithSystemCallUI: false
-    )
-
-    let activeCall = try XCTUnwrap(service.presentation.activeCall)
-    XCTAssertEqual(activeCall.roomID, "!cold-web-engine:example.cz")
-    XCTAssertEqual(activeCall.title, "COP Operator")
-    XCTAssertEqual(activeCall.phase, .connecting)
-
-    XCTAssertTrue(
-      service.updateFromWeb(
-        callID: activeCall.callID,
-        roomID: activeCall.roomID,
-        title: activeCall.title,
-        direction: "outgoing",
-        phase: "failed"
-      )
-    )
-    XCTAssertNil(service.presentation.activeCall)
+    XCTAssertEqual(createdProviders, 0)
+    _ = model.deviceLocationProvider
+    XCTAssertEqual(createdProviders, 1)
   }
 
   func testAIChatUsesAlreadyAuthorizedLocationWithoutPrompting() async throws {
@@ -123,6 +34,7 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
 
     XCTAssertEqual(location.latitude, 50.0755)
     XCTAssertEqual(location.longitude, 14.4378)
+    XCTAssertEqual(location.accuracyMeters, 4.2)
     XCTAssertEqual(location.radiusKilometers, 15)
     XCTAssertEqual(location.label, "Aktuální poloha")
     XCTAssertEqual(provider.authorizationRequestCount, 0)
@@ -136,6 +48,40 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     let location = await model.currentCommunicationLocation()
 
     XCTAssertNil(location)
+    XCTAssertEqual(provider.authorizationRequestCount, 0)
+  }
+
+  func testExplicitChatLocationShareRequestsPermissionAndReturnsFreshSample() async throws {
+    let provider = FakeLocationProvider()
+    provider.permission = "notDetermined"
+    provider.permissionAfterAuthorizationRequest = "granted"
+    let model = AppModel(deviceLocationProvider: provider)
+
+    let location = try await model.requestCommunicationLocationShare()
+
+    XCTAssertEqual(provider.authorizationRequestCount, 1)
+    XCTAssertEqual(location.latitude, 50.0755)
+    XCTAssertEqual(location.longitude, 14.4378)
+    XCTAssertEqual(location.accuracyMeters, 4.2)
+    XCTAssertEqual(location.label, "Moje poloha")
+  }
+
+  func testExplicitChatLocationShareReportsDeniedPermission() async {
+    let provider = FakeLocationProvider()
+    provider.permission = "denied"
+    let model = AppModel(deviceLocationProvider: provider)
+
+    do {
+      _ = try await model.requestCommunicationLocationShare()
+      XCTFail("Odmítnuté oprávnění nesmí vrátit polohu.")
+    } catch let error as CSMCommunicationLocationShareError {
+      guard case .permissionDenied = error else {
+        return XCTFail("Očekávána chyba permissionDenied.")
+      }
+    } catch {
+      XCTFail("Neočekávaná chyba: \(error)")
+    }
+
     XCTAssertEqual(provider.authorizationRequestCount, 0)
   }
 
@@ -166,6 +112,37 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
         "system.delivery",
       ]))
     XCTAssertFalse(PushNotificationService.registrationCategories.contains("system"))
+  }
+
+  func testIncomingVoiceCallPushMatchesCSMMessagingContract() throws {
+    let payload = try XCTUnwrap(
+      VoiceCallPushPayload(dictionary: [
+        "aps": ["content-available": 1],
+        "callId": "b5ea7309-7f53-4e87-9225-fd38e9737540",
+        "roomId": "!direct:msg.zeleznalady.cz",
+        "senderDisplayName": "Jiřina Volková",
+        "type": "chat.voice_call.incoming",
+      ]))
+
+    XCTAssertEqual(payload.event, .incoming)
+    XCTAssertEqual(payload.callID, "b5ea7309-7f53-4e87-9225-fd38e9737540")
+    XCTAssertEqual(payload.roomID, "!direct:msg.zeleznalady.cz")
+    XCTAssertEqual(payload.callerDisplayName, "Jiřina Volková")
+  }
+
+  func testVoiceCallPushRejectsUnknownAndIncompletePayloads() {
+    XCTAssertNil(
+      VoiceCallPushPayload(dictionary: [
+        "callId": "b5ea7309-7f53-4e87-9225-fd38e9737540",
+        "roomId": "!direct:msg.zeleznalady.cz",
+        "type": "chat.voice_call.progress",
+      ]))
+    XCTAssertNil(
+      VoiceCallPushPayload(dictionary: [
+        "callId": "not-a-uuid",
+        "roomId": "!direct:msg.zeleznalady.cz",
+        "type": "chat.voice_call.incoming",
+      ]))
   }
 
   func testCompatibleHandshakeReturnsLocationAndHeadingCapabilities() async throws {
@@ -293,114 +270,6 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     XCTAssertEqual(provider.stopAllCount, 1)
   }
 
-  func testCallActionQueuedBeforeHandshakeIsDeliveredAfterBridgeReady() async throws {
-    let notifications = FakeNotificationProvider()
-    let bridge = try makeBridge(notifications: notifications)
-    var events: [[String: Any]] = []
-    bridge.eventSink = { events.append($0) }
-    notifications.emit(
-      type: "calls.answerRequested",
-      payload: [
-        "actionId": "10000000-0000-4000-8000-000000000001",
-        "callId": "call-1",
-        "roomId": "!ops:example.cz",
-      ])
-    bridge.navigationDidCommit(url: productionURL)
-
-    _ = await bridge.handle(message: hello(), context: allowedContext())
-    await Task.yield()
-    await Task.yield()
-
-    XCTAssertEqual(events.first?["type"] as? String, "calls.answerRequested")
-    XCTAssertEqual((events.first?["payload"] as? [String: Any])?["callId"] as? String, "call-1")
-  }
-
-  func testOlderBridgeCannotDetachNewerCallEventReceiver() async throws {
-    let notifications = FakeNotificationProvider()
-    let olderBridge = try makeBridge(notifications: notifications)
-    let currentBridge = try makeBridge(notifications: notifications)
-    var events: [[String: Any]] = []
-    currentBridge.eventSink = { events.append($0) }
-    currentBridge.navigationDidCommit(url: productionURL)
-    _ = await currentBridge.handle(message: hello(), context: allowedContext())
-
-    olderBridge.detachEventReceiver()
-    notifications.emit(
-      type: "calls.startRequested",
-      payload: [
-        "actionId": "10000000-0000-4000-8000-000000000002",
-        "callId": "call-new",
-        "roomId": "!ops:example.cz",
-      ])
-
-    XCTAssertEqual(events.count, 1)
-    XCTAssertEqual(events.first?["type"] as? String, "calls.startRequested")
-    XCTAssertEqual(
-      (events.first?["payload"] as? [String: Any])?["callId"] as? String,
-      "call-new"
-    )
-  }
-
-  func testCallActionAcknowledgementIsIdentityBoundAndDeliveredToCallService() async throws {
-    var acknowledgements: [(String, String, String, String)] = []
-    let bridge = try makeBridge(acknowledgeCallAction: {
-      acknowledgements.append(($0, $1, $2, $3))
-      return true
-    })
-    bridge.navigationDidCommit(url: productionURL)
-    let ready = await bridge.handle(message: hello(), context: allowedContext())
-    let sessionID = try XCTUnwrap(ready["sessionId"] as? String)
-
-    let response = await bridge.handle(
-      message: request(
-        method: "calls.acknowledgeAction",
-        sessionID: sessionID,
-        params: [
-          "actionId": "10000000-0000-4000-8000-000000000001",
-          "callId": "call-1",
-          "outcome": "succeeded",
-          "roomId": "!ops:example.cz",
-        ]),
-      context: allowedContext())
-
-    XCTAssertEqual(response["ok"] as? Bool, true)
-    XCTAssertEqual((response["result"] as? [String: Any])?["acknowledged"] as? Bool, true)
-    XCTAssertEqual(acknowledgements.first?.0, "10000000-0000-4000-8000-000000000001")
-    XCTAssertEqual(acknowledgements.first?.3, "succeeded")
-  }
-
-  func testFailedJavaScriptEventDeliveryInvalidatesAndRequeuesStableAction() async throws {
-    let notifications = FakeNotificationProvider()
-    var invalidations = 0
-    let bridge = try makeBridge(
-      notifications: notifications,
-      invalidateCallPresentation: { invalidations += 1 }
-    )
-    var events: [[String: Any]] = []
-    bridge.eventSink = { events.append($0) }
-    bridge.navigationDidCommit(url: productionURL)
-    _ = await bridge.handle(message: hello(), context: allowedContext())
-    notifications.emit(
-      type: "calls.answerRequested",
-      payload: [
-        "actionId": "10000000-0000-4000-8000-000000000001",
-        "callId": "call-1",
-        "roomId": "!ops:example.cz",
-      ])
-    let failedEvent = try XCTUnwrap(events.first)
-
-    bridge.eventDeliveryDidFail(failedEvent)
-    XCTAssertEqual(invalidations, 1)
-    events.removeAll()
-    bridge.navigationDidCommit(url: productionURL)
-    _ = await bridge.handle(message: hello(), context: allowedContext())
-
-    XCTAssertEqual(events.count, 1)
-    XCTAssertEqual(
-      (events.first?["payload"] as? [String: Any])?["actionId"] as? String,
-      "10000000-0000-4000-8000-000000000001")
-  }
-
   func testAuthenticatedMainFrameCanOpenNativeChat() async throws {
     var openedSubjects: [String?] = []
     let bridge = try makeBridge(openNativeChat: { openedSubjects.append($0) })
@@ -462,137 +331,11 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     XCTAssertEqual(opened, 0)
   }
 
-  func testCallPresentationAcceptsOnlyBoundedStateWithoutMediaPayload() async throws {
-    var updates: [(
-      String, String, String?, String, String, VoiceCallKind, [VoiceCallParticipant],
-      [VoiceCallParticipant]
-    )] = []
-    let bridge = try makeBridge(updateCallPresentation: {
-      updates.append(($0, $1, $2, $3, $4, $5, $6, $7))
-      return true
-    })
-    bridge.navigationDidCommit(url: productionURL)
-    let ready = await bridge.handle(message: hello(), context: allowedContext())
-    let sessionID = try XCTUnwrap(ready["sessionId"] as? String)
-
-    let response = await bridge.handle(
-      message: request(
-        method: "calls.updatePresentation",
-        sessionID: sessionID,
-        params: [
-          "callId": "call-1", "roomId": "!ops:example.cz", "title": "COP Operator",
-          "direction": "incoming", "phase": "connected", "kind": "group",
-          "participants": [
-            ["userId": "@alice:example.cz", "displayName": "Alice", "connected": true]
-          ],
-          "eligibleParticipants": [
-            ["userId": "@bob:example.cz", "displayName": "Bob", "connected": false]
-          ],
-        ]),
-      context: allowedContext())
-
-    XCTAssertEqual(response["ok"] as? Bool, true)
-    XCTAssertEqual(updates.count, 1)
-    XCTAssertEqual(updates.first?.0, "call-1")
-    XCTAssertEqual(updates.first?.4, "connected")
-    XCTAssertEqual(updates.first?.5, .group)
-    XCTAssertEqual(updates.first?.6.first?.userID, "@alice:example.cz")
-    XCTAssertEqual(updates.first?.7.first?.userID, "@bob:example.cz")
-
-    let rejected = await bridge.handle(
-      message: request(
-        method: "calls.updatePresentation",
-        sessionID: sessionID,
-        params: [
-          "callId": "call-2", "roomId": "!ops:example.cz", "direction": "incoming",
-          "phase": "ringing", "sdp": "forbidden",
-        ]),
-      context: allowedContext())
-    XCTAssertEqual((rejected["error"] as? [String: Any])?["code"] as? String, "INVALID_REQUEST")
-    XCTAssertEqual(updates.count, 1)
-  }
-
-  func testCallPresentationRequiresForegroundAndInvalidatesWithBridgeSession() async throws {
-    var updates = 0
-    var invalidations = 0
-    let bridge = try makeBridge(
-      isForeground: { false },
-      updateCallPresentation: { _, _, _, _, _, _, _, _ in
-        updates += 1
-        return true
-      },
-      invalidateCallPresentation: { invalidations += 1 }
-    )
-    bridge.navigationDidCommit(url: productionURL)
-    let ready = await bridge.handle(message: hello(), context: allowedContext())
-    let sessionID = try XCTUnwrap(ready["sessionId"] as? String)
-
-    let rejected = await bridge.handle(
-      message: request(
-        method: "calls.updatePresentation",
-        sessionID: sessionID,
-        params: [
-          "callId": "call-1", "roomId": "!ops:example.cz", "direction": "incoming",
-          "phase": "ringing",
-        ]),
-      context: allowedContext())
-
-    XCTAssertEqual((rejected["error"] as? [String: Any])?["code"] as? String, "NOT_FOREGROUND")
-    XCTAssertEqual(updates, 0)
-    bridge.invalidateSession()
-    XCTAssertEqual(invalidations, 1)
-  }
-
-  func testCallPresentationRateLimitSurvivesBridgeRehandshake() async throws {
-    let bridge = try makeBridge(updateCallPresentation: { _, _, _, _, _, _, _, _ in true })
-    bridge.navigationDidCommit(url: productionURL)
-    var ready = await bridge.handle(message: hello(), context: allowedContext())
-    var sessionID = try XCTUnwrap(ready["sessionId"] as? String)
-
-    for index in 0..<40 {
-      if index == 20 {
-        ready = await bridge.handle(message: hello(), context: allowedContext())
-        sessionID = try XCTUnwrap(ready["sessionId"] as? String)
-      }
-      let response = await bridge.handle(
-        message: request(
-          method: "calls.updatePresentation",
-          sessionID: sessionID,
-          params: [
-            "callId": "call-1", "roomId": "!ops:example.cz", "direction": "incoming",
-            "phase": "ringing",
-          ]),
-        context: allowedContext())
-      XCTAssertEqual(response["ok"] as? Bool, true)
-    }
-
-    let rejected = await bridge.handle(
-      message: request(
-        method: "calls.updatePresentation",
-        sessionID: sessionID,
-        params: [
-          "callId": "call-1", "roomId": "!ops:example.cz", "direction": "incoming",
-          "phase": "ringing",
-        ]),
-      context: allowedContext())
-    XCTAssertEqual((rejected["error"] as? [String: Any])?["code"] as? String, "RATE_LIMITED")
-  }
-
   private func makeBridge(
     location: DeviceLocationProviding? = nil,
     notifications: PushNotificationProviding? = nil,
     isForeground: @escaping () -> Bool = { true },
-    openNativeChat: @escaping (String?) -> Void = { _ in },
-    updateCallPresentation: @escaping (
-      String, String, String?, String, String, VoiceCallKind, [VoiceCallParticipant],
-      [VoiceCallParticipant]
-    ) -> Bool = {
-      _, _, _, _, _, _, _, _ in true
-    },
-    acknowledgeCallAction: @escaping (String, String, String, String) -> Bool = {
-      _, _, _, _ in false
-    },
-    invalidateCallPresentation: @escaping () -> Void = {}
+    openNativeChat: @escaping (String?) -> Void = { _ in }
   ) throws -> DeviceBridgeCoordinator {
     let origin = try WebOrigin(configurationValue: "https://cop.zeleznalady.cz")
     let policy = OriginPolicy(bridgeOrigins: [origin], navigationOrigins: [origin])
@@ -601,10 +344,7 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
       location: location ?? FakeLocationProvider(),
       notifications: notifications ?? FakeNotificationProvider(),
       isForeground: isForeground,
-      openNativeChat: openNativeChat,
-      updateCallPresentation: updateCallPresentation,
-      acknowledgeCallAction: acknowledgeCallAction,
-      invalidateCallPresentation: invalidateCallPresentation)
+      openNativeChat: openNativeChat)
   }
 
   private func hello() -> [String: Any] {
@@ -668,6 +408,7 @@ private final class FakeNotificationProvider: PushNotificationProviding {
 @MainActor
 private final class FakeLocationProvider: DeviceLocationProviding {
   var permission = "granted"
+  var permissionAfterAuthorizationRequest: String?
   var reducedAccuracy = false
   var locationAvailable = true
   var headingAvailable = true
@@ -677,6 +418,9 @@ private final class FakeLocationProvider: DeviceLocationProviding {
 
   func requestWhenInUseAuthorization() async -> String {
     authorizationRequestCount += 1
+    if let permissionAfterAuthorizationRequest {
+      permission = permissionAfterAuthorizationRequest
+    }
     return permission
   }
 

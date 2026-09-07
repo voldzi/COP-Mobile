@@ -144,42 +144,26 @@ XSS ochrany.
   žádný plaintext E2EE obsah, chráněná URL, token ani přesná poloha.
 - Ordinary, Time Sensitive a Critical jsou samostatné capability. Critical
   vyžaduje skutečný Apple entitlement a user authorization.
-- PushKit/CallKit se podle ADR 0008 používá pouze pro skutečný Matrix VoIP hovor
-  a nesmí se použít pro safety alarm, běžnou notifikaci ani background keepalive.
-- ADR 0009 přidává nativní SwiftUI call presentation, proximity blackout a
-  audio routing, ale signalizace, SDP/ICE a média zůstávají do dalšího gate ve
-  webovém Matrix/WebRTC enginu. Bridge přijímá jen bounded presentation state a
-  opaque ID; aktivní update vyžaduje foreground, jednu stabilní call identity a
-  povolený přechod stavového automatu. Stav `connected` musí pocházet z
-  potvrzeného media enginu a `ended`/`failed` musí vždy vyčistit CallKit. Bridge
-  povolí nejvýše 40 presentation aktualizací za minutu a čtyři nové call
-  identity za pět minut v jednom procesu.
-- Skupinový call bridge přijímá pouze bounded `direct`/`group` kind a participant
-  presentation bez SDP, ICE, tokenů nebo Matrix eventů. `addParticipants` nese
-  nejvýše pět unikátních user ID, která pocházejí z aktuálního eligible seznamu;
-  COP API přesto každou identitu znovu ověřuje vůči aktivnímu členství v místnosti.
-  Webový E2EE peer mesh je omezen na šest osob.
-- CallKit user action používá náhodné stabilní `actionId`, bounded retry a
-  identity-bound ACK. End/reject/mute se nefulfillují na základě pouhého doručení
-  do JavaScriptu; vyžadují úspěšné dokončení Matrix commandu.
-  `calls.startRequested` používá stejný retry/ACK kanál, takže emit před
-  přihlášením web listeneru není považován za dokončené doručení.
-  `CXAnswerCallAction` se po nativní audio konfiguraci fulfillne, aby CallKit
-  mohl aktivovat `AVAudioSession`, ale Matrix answer zůstává bounded a při
-  timeoutu nebo záporném ACK hovor fail-closed ukončí. Opakovaný event je
-  idempotentní a pozdní/cizí ACK nesmí
-  ovlivnit jiný hovor. Chyba WebKit JavaScript delivery invaliduje session a
-  povel bezpečně requeueuje; reset CallKit provideru vynutí ukončení webového
-  media enginu.
-- Timeout/záporný ACK nikdy nenechá běžet neřízený webový track: host vyvolá
-  process-wide reload WebView, reportuje a odstraní call a deaktivuje audio.
-  `end`/`reject` smí fulfillnout až po tomto forced close, zatímco Matrix answer
-  a mute selžou. CallKit `timedOutPerforming` používá stejnou větev i při suspendu.
-- CallKit-owned audio session smí aktivovat pouze CallKit. WebKit permission
-  delegate po ověření mikrofonu a konfiguraci kategorie rozhodne bez čekání na
-  `didActivate`, aby nevytvořil kruhové čekání mezi CallKit a Matrix/WebRTC.
-  Samotné WebRTC audio se řídí CallKit aktivací; ruční aktivace je povolena jen
-  když se v krátkém claim okně neobjeví žádný CallKit hovor.
+- PushKit/CallKit se podle ADR 0008 a 0012 používá pouze pro skutečný direct
+  VoIP hovor a nesmí se použít pro safety alarm, běžnou notifikaci ani
+  background keepalive.
+- COP API autorizuje vytvoření i každý přechod podle OIDC subjektu, direct-room
+  účastenství, očekávané revize a idempotency key. Opožděný nebo opakovaný
+  povel nesmí změnit jiný ani novější hovor.
+- CSM Messaging smí poslat jen minimální `chat.voice_call.incoming` nebo
+  `chat.voice_call.ended` wake. Missed call je serverová terminální fáze a
+  používá `ended`; klient po push vždy dočte autoritativní detail z COP API.
+- LiveKit credential je krátkodobý, room-scoped a vydá se pouze oprávněnému
+  účastníkovi aktivního hovoru. Nesmí být uložen, zalogován, vložen do push
+  payloadu ani předán Device bridgem.
+- Device bridge nemá call namespace. JavaScript nesmí ovládat CallKit, číst
+  call state nebo získat media credential. Reload WebView nesmí hovor změnit.
+- CallKit-owned audio session smí aktivovat pouze CallKit. LiveKit mikrofon se
+  publikuje až po `provider(_:didActivate:)`; disconnect, interruption a end
+  vždy odstraní audio track, room, CallKit a proximity stav.
+- Stav `connected` vyžaduje serverový accept a přítomnost vzdáleného LiveKit
+  účastníka. Systémová CallKit obrazovka, timer nebo lokální spinner nejsou
+  důkaz média.
 - Host zůstává jediným `UNUserNotificationCenterDelegate`; komunikační kit
   přijímá APNs token a delivery/action callbacky pouze přes typovanou nativní
   facade a nesmí delegate hostitele přepsat. Před mountem drží nejvýše 16

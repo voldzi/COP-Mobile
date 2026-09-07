@@ -3,25 +3,33 @@ import SwiftUI
 
 struct RootView: View {
   let model: AppModel
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     switch model.configuration {
     case .success(let configuration):
       ZStack {
-        WebHostView(configuration: configuration, model: model)
+        if !model.isUITesting {
+          WebHostView(configuration: configuration, model: model)
+        }
 
         switch model.phase {
         case .loading:
-          LoadingView(environment: configuration.environment)
+          LoadingView(environment: configuration.environment) {
+            model.openNativeChat(expectedSubjectID: model.nativeChatExpectedSubjectID)
+          }
         case .webContent:
           EmptyView()
         case .offlineFallback(let code):
           TechnicalFallbackView(
-            title: "COP zatím není dostupný",
+            title: "Mapa se nenačetla",
             message:
-              "Zkontrolujte připojení. Pokud byl COP na tomto zařízení dříve načten, WebKit se při dalším pokusu pokusí použít bezpečně uložený webový shell.",
+              "Zkuste mapu načíst znovu nebo otevřete komunikaci. Dříve uložené zprávy mohou být dostupné i bez připojení.",
             diagnosticCode: code,
-            retry: model.retry
+            retry: model.retry,
+            openChat: {
+              model.openNativeChat(expectedSubjectID: model.nativeChatExpectedSubjectID)
+            }
           )
         case .blocked(let code):
           TechnicalFallbackView(
@@ -36,13 +44,16 @@ struct RootView: View {
         if model.surface == .chat {
           CSMCommunicationHost(
             currentLocationProvider: model.currentCommunicationLocation,
+            locationShareProvider: model.requestCommunicationLocationShare,
+            voipDeviceTokenProvider: VoiceCallService.shared.currentPushTokenIfAvailable,
             expectedSubjectID: model.nativeChatExpectedSubjectID,
             onClose: model.closeNativeChat,
-            onStartVoiceCall: { roomID, title, isGroup in
+            onOpenCOP: model.closeNativeChat,
+            onStartVoiceCall: { roomID, title, participantSubjectIDs in
               model.startNativeVoiceCall(
                 roomID: roomID,
                 title: title,
-                isGroup: isGroup
+                participantSubjectIDs: participantSubjectIDs
               )
             }
           )
@@ -57,12 +68,35 @@ struct RootView: View {
             .zIndex(100)
         }
       }
-      .animation(.easeInOut(duration: 0.22), value: model.surface)
+      .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: model.surface)
+      .alert(
+        "Hovor není dostupný",
+        isPresented: Binding(
+          get: { VoiceCallService.shared.presentation.lastErrorMessage != nil },
+          set: { isPresented in
+            if !isPresented {
+              VoiceCallService.shared.presentation.clearError()
+            }
+          }
+        )
+      ) {
+        Button("OK", role: .cancel) {
+          VoiceCallService.shared.presentation.clearError()
+        }
+      } message: {
+        Text(
+          VoiceCallService.shared.presentation.lastErrorMessage
+            ?? "Hovor se nepodařilo připravit."
+        )
+      }
+      .task {
+        guard !model.isUITesting else { return }
+        await CSMCommunicationNotifications.prepareDeviceRegistration(
+          voipDeviceTokenProvider: VoiceCallService.shared.currentPushTokenIfAvailable
+        )
+      }
       .onReceive(NotificationCenter.default.publisher(for: .copNativeChatRequested)) { _ in
         model.openNativeChat(expectedSubjectID: nil)
-      }
-      .onReceive(NotificationCenter.default.publisher(for: .copWebMediaInvalidationRequired)) { _ in
-        model.invalidateWebMedia()
       }
     case .failure(let error):
       TechnicalFallbackView(
@@ -77,6 +111,7 @@ struct RootView: View {
 
 private struct LoadingView: View {
   let environment: String
+  let openChat: () -> Void
 
   var body: some View {
     ZStack {
@@ -84,15 +119,19 @@ private struct LoadingView: View {
       VStack(spacing: 16) {
         ProgressView()
           .controlSize(.large)
-        Text("Načítám COP")
+        Text("Načítám mapu COP")
           .font(.headline)
+        Button("Otevřít komunikaci", action: openChat)
+          .buttonStyle(.bordered)
+          .accessibilityIdentifier("app.openNativeChat")
         if environment != "production" {
           Text(environment)
             .font(.caption.monospaced())
             .foregroundStyle(.secondary)
         }
       }
-      .accessibilityElement(children: .combine)
+      .accessibilityElement(children: .contain)
+      .accessibilityIdentifier("app.loading")
     }
   }
 }
@@ -102,6 +141,7 @@ private struct TechnicalFallbackView: View {
   let message: String
   let diagnosticCode: String
   let retry: (() -> Void)?
+  var openChat: (() -> Void)? = nil
 
   var body: some View {
     ZStack {
@@ -111,16 +151,18 @@ private struct TechnicalFallbackView: View {
       } description: {
         Text(message)
       } actions: {
+        if let openChat {
+          Button("Otevřít komunikaci", action: openChat)
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("app.openNativeChat")
+        }
         if let retry {
           Button("Zkusit znovu", action: retry)
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.bordered)
         }
-        Text("Diagnostika \(diagnosticCode)")
-          .font(.caption.monospaced())
-          .foregroundStyle(.secondary)
-          .textSelection(.enabled)
       }
       .padding()
+      .accessibilityIdentifier("app.technicalFallback")
     }
   }
 }
