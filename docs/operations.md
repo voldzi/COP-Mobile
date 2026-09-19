@@ -20,7 +20,7 @@ archive ani upload zatím definován není.
 Aktuálně ověřeno na workstation:
 
 - Node.js 24 a pnpm 10 jsou dostupné pro související COP práci;
-- schválený toolchain je Xcode 27.0 beta build `27A5228h` s iOS SDK 27.0;
+- schválený toolchain je Xcode 27.0 build `27A266a` s iOS SDK 27.0;
 - Java/Android SDK/adb/Gradle nejsou nainstalované;
 - XcodeGen 2.44.1 je dostupný;
 - produkční COP origin je `https://cop.zeleznalady.cz`;

@@ -42,8 +42,14 @@ final class COPMobileLaunchUITests: XCTestCase {
     app.launchEnvironment["COP_UI_TEST_INITIAL_PHASE"] = "offline"
     app.launch()
 
-    XCTAssertTrue(app.otherElements["app.technicalFallback"].waitForExistence(timeout: 8))
-    app.buttons["app.openNativeChat"].tap()
+    let fallback = app.descendants(matching: .any)["app.technicalFallback"]
+    XCTAssertTrue(
+      fallback.waitForExistence(timeout: 8),
+      "Offline start must expose the technical fallback regardless of the accessibility role assigned by the current iOS runtime."
+    )
+    let openChat = app.buttons["Otevřít komunikaci"]
+    XCTAssertTrue(openChat.waitForExistence(timeout: 4))
+    openChat.tap()
     XCTAssertTrue(app.otherElements["chat.workspace"].waitForExistence(timeout: 8))
     XCTAssertFalse(app.alerts.firstMatch.exists)
   }

@@ -50,7 +50,7 @@ Vlastník: tento repozitář.
 
 Výstupy:
 
-- XcodeGen projekt, Swift 6, SwiftUI app target a připnutý Xcode 27 beta CI;
+- XcodeGen projekt, Swift 6, SwiftUI app target a připnutý Xcode 27 CI;
 - `WKWebView` s persistent data store, přesným release/staging/debug allowlistem,
   main-frame bridge a lokálním fresh-install fallbackem;
 - protocol handshake a pouze read-only `system.getCapabilities()` spike;

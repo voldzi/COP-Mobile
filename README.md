@@ -17,7 +17,7 @@ původní velkou iOS aplikaci ani její Git repozitář.
 Závazný baseline:
 
 - minimum iOS/iPadOS 26;
-- schválený a přesně připnutý Xcode 27 beta / iOS SDK 27 toolchain;
+- schválený a přesně připnutý Xcode 27 / iOS SDK 27 toolchain;
 - existující COP web zůstává zdrojem mapy, hlášení a business logiky;
 - nativní vrstva vlastní chat a systémové chování komunikace, ale
   neimplementuje vlastní mapu, report workflow ani AI;
@@ -65,7 +65,7 @@ Projekt neposkytuje vlastní REST API. Popis konzumovaných kontraktů je v
 bash scripts/check.sh
 ```
 
-Závazný toolchain je Xcode 27.0 beta build `27A5228h` s iOS SDK 27.0. Kontroluje
+Závazný toolchain je Xcode 27.0 build `27A266a` s iOS SDK 27.0. Kontroluje
 jej `scripts/verify-apple-toolchain.sh`; minimum aplikace zůstává iOS/iPadOS
 26.0.
 

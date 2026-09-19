@@ -10,7 +10,7 @@ call presentation boundary from ADR 0009; it must not duplicate COP map,
 reporting, domain workflow, authorization decisions or AI orchestration.
 
 The deployment target is iOS/iPadOS 26 or newer. Use the approved, exactly
-pinned Xcode 27 beta toolchain and capability-gate newer APIs.
+pinned Xcode 27 toolchain and capability-gate newer APIs.
 
 ## Working Style
 
@@ -98,14 +98,14 @@ the owning repository.
 
 - Current phase: hybrid iOS host with the COP WebView, native
   `CSMCommunicationKit` chat and native direct CallKit/PushKit/LiveKit calls.
-  Xcode 27 beta CI and the complete physical-device acceptance matrix remain
+  Xcode 27 CI and the complete physical-device acceptance matrix remain
   explicit release gates.
 - Minimum target: iOS/iPadOS 26.
 - Planned iOS baseline: Swift 6, SwiftUI, Observation, Swift Concurrency,
   WebKit, Core Location, Core Motion, UserNotifications, Keychain, and XcodeGen.
 - Planned Android baseline: Kotlin, Compose, Coroutines, AndroidX WebKit, and
   the same device contract after iOS stabilization.
-- Production builds must use the approved exact Xcode 27 beta / iOS SDK 27
+- Production builds must use the approved exact Xcode 27 / iOS SDK 27
   build recorded in ADR 0007 and enforced by the toolchain verifier.
 - No REST server is provided by this repository, so it has no OpenAPI document.
 

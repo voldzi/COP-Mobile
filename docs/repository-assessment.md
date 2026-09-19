@@ -231,7 +231,7 @@ rovněž musí být navržena znovu pro thin host.
 
 ### 2. iOS host — 06 COP Mobile
 
-- Swift 6, schválený Xcode 27 beta toolchain, minimum iOS/iPadOS 26.0;
+- Swift 6, schválený Xcode 27 toolchain, minimum iOS/iPadOS 26.0;
 - SwiftUI shell, `WKWebView`, persistentní website store, exact-origin
   navigation policy a secure bridge;
 - lokální fallback a diagnostika;

@@ -9,7 +9,7 @@ TestFlight/App Store akceptaci.
 
 ## Implementovaný baseline
 
-- XcodeGen projekt, Swift 6, minimum iOS/iPadOS 26 a schválený Xcode 27 beta;
+- XcodeGen projekt, Swift 6, minimum iOS/iPadOS 26 a schválený finální Xcode 27;
 - záměrně zachovaný bundle ID `cz.zeleznalady.csm.messenger`;
 - dedikovaný persistentní WebKit profil, přesný origin allowlist, bounded
   loading/retry/fallback a verzovaný Device bridge `1.0.0`;
@@ -28,17 +28,18 @@ TestFlight/App Store akceptaci.
   destruktivního reloadu celé webové aplikace;
 - bounded čekání na APNs/PushKit token místo nekonečného startu.
 
-## Ověření 2026-07-19
+## Ověření 2026-09-19
 
 | Kontrola | Výsledek | Hranice důkazu |
 | --- | --- | --- |
 | Skeleton a dokumentace | Pass | lokální validátor |
 | Device contract `1.0.0` | Pass, 19 fixtures | lokální validátor |
 | Samostatnost iOS projektu | Pass | lokální package, žádný legacy project/Git source |
-| Toolchain | Pass | Xcode 27.0 beta `27A5228h`, iOS SDK 27.0 |
-| Swift build a unit/contract testy | Pass, 27 testů na každé verzi | iOS 26 a iOS 27 simulátor |
+| Toolchain | Pass | finální Xcode 27.0 `27A266a`, iOS SDK 27.0 |
+| Swift build a unit/contract testy | Pass, 37 testů | iOS 27.0 simulátor; minimum projektu zůstává iOS 26.0 |
+| Kritické UI toky | Pass, 4 testy | chat za běhu a po chybě mapy, přihlášení a start nativního chatu |
 | CSM VoIP push parser | Pass | exact incoming/ended payload + odmítnutí neznámého typu |
-| Fresh uninstall/install/launch | Pass | iOS 26.5 simulátor, produkční COP shell |
+| Fresh uninstall/install/launch | Pass z předchozího běhu | iOS 26.5 simulátor, produkční COP shell |
 | Fyzická zařízení a hovory | Vyžaduje opakování | simulátor neověří PushKit/audio/radio |
 | TestFlight/produkční distribuce | Neprovedeno v této změně | samostatný release krok |
 

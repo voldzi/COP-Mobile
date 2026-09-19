@@ -21,14 +21,24 @@ import json, sys
 data = json.load(sys.stdin)
 candidates = []
 for runtime, devices in data.get("devices", {}).items():
-    if "iOS-26" not in runtime:
+    marker = "iOS-"
+    if marker not in runtime:
+        continue
+    version = runtime.split(marker, 1)[1].replace("-", ".")
+    try:
+        major = int(version.split(".", 1)[0])
+    except ValueError:
+        continue
+    if major < 26:
         continue
     for device in devices:
         if device.get("isAvailable") and "iPhone" in device.get("name", ""):
             candidates.append((runtime, device.get("name", ""), device.get("udid", "")))
 if not candidates:
-    raise SystemExit("no available iOS 26 iPhone simulator")
-print(sorted(candidates, reverse=True)[0][2])
+    raise SystemExit("no available iOS 26 or newer iPhone simulator")
+# Prefer the oldest supported runtime so the minimum deployment target gets
+# exercised whenever it is installed; otherwise use the nearest newer runtime.
+print(sorted(candidates)[0][2])
 ')"
 fi
 

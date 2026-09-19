@@ -2,7 +2,7 @@
 
 Standalone SwiftUI/WKWebView host for iOS and iPadOS 26. The generated Xcode
 project is intentionally not committed; `project.yml` is its source of truth.
-The approved build environment is Xcode 27.0 beta build `27A5228h` with iOS SDK
+The approved build environment is Xcode 27.0 build `27A266a` with iOS SDK
 27.0. The deployment target remains iOS/iPadOS 26.0. Automatic signing uses
 Team `LM6W548X36` and bundle ID `cz.zeleznalady.csm.messenger`.
 

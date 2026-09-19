@@ -34,3 +34,4 @@ local.properties
 *.jks
 *.keystore
 captures/
+.chroma-dev.yaml
