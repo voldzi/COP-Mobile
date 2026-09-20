@@ -9,6 +9,8 @@ překonané analýzy patří do `archive/`.
 | --- | --- |
 | [repository-assessment.md](repository-assessment.md) | Ověřený stav COP, starého nativního klienta, mezery a doporučený postup |
 | [implementation-plan.md](implementation-plan.md) | Fázovaný, repository-aware postup a akceptační brány |
+| [element-x-ios-reference.md](element-x-ios-reference.md) | Licenčně bezpečné využití Element X jako upstream vzoru |
+| [adr/0013-element-x-hardening-patterns.md](adr/0013-element-x-hardening-patterns.md) | Převzaté hardening vzory: soukromé NSE a accessibility brána |
 | [architecture.md](architecture.md) | Hranice web/native, komponenty, data flow a deployment |
 | [product-design.md](product-design.md) | Uživatelé, journeys, systémové surface a UX pravidla |
 | [api.md](api.md) | Konzumovaná REST API a veřejný COP Device API/bridge kontrakt |

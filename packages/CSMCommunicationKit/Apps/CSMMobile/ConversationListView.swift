@@ -14,6 +14,7 @@ struct ConversationListView: View {
     @State private var showsAllFavorites = false
     @State private var showsFavoritePicker = false
     @State private var isOpeningAIAssistant = false
+    @State private var showsAccountProfile = false
 
     var body: some View {
         conversationList
@@ -38,6 +39,9 @@ struct ConversationListView: View {
         }
         .sheet(isPresented: $showsFavoritePicker) {
             favoritePickerSheet
+        }
+        .sheet(isPresented: $showsAccountProfile) {
+            CommunicationAccountProfileView()
         }
         .confirmationDialog(
             CSMLocalization.text("conversation.leave.confirm.title", fallback: "Opustit skupinu?"),
@@ -182,6 +186,22 @@ struct ConversationListView: View {
                 .buttonStyle(.glass)
                 .accessibilityLabel(CSMLocalization.text("conversation.close", fallback: "Zavřít chat"))
                 .accessibilityIdentifier("chat.closeToMap")
+            }
+        }
+
+        if appModel.actor != nil {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    showsAccountProfile = true
+                } label: {
+                    CommunicationAccountAvatar(profile: appModel.effectiveOperatorProfile)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(CSMLocalization.text(
+                    "conversation.account.open",
+                    fallback: "Otevřít profil účtu"
+                ))
+                .accessibilityIdentifier("chat.accountProfile")
             }
         }
 
@@ -487,6 +507,158 @@ struct ConversationListView: View {
             CSMLocalization.text("conversation.action.hide_direct", fallback: "Skrýt chat")
         case .group:
             CSMLocalization.text("conversation.action.hide_group", fallback: "Skrýt ze seznamu")
+        }
+    }
+}
+
+private struct CommunicationAccountAvatar: View {
+    let profile: OperatorProfilePreferences
+
+    var body: some View {
+        CSMAvatarImageView(
+            dataUrl: profile.avatarDataUrl,
+            remoteUrl: profile.avatarDataUrl,
+            size: 34
+        ) {
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.gradient)
+                Text(initials)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .overlay {
+            Circle()
+                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+        }
+        .contentShape(Circle())
+    }
+
+    private var initials: String {
+        let parts = (profile.displayName ?? "")
+            .split(whereSeparator: { $0.isWhitespace })
+            .prefix(2)
+        let value = parts.compactMap(\.first).map(String.init).joined()
+        return value.isEmpty ? "?" : value.uppercased()
+    }
+}
+
+private struct CommunicationAccountProfileView: View {
+    @Environment(CommunicationModel.self) private var appModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var showsSignOutConfirmation = false
+    @State private var isSigningOut = false
+
+    private var profile: OperatorProfilePreferences {
+        appModel.effectiveOperatorProfile
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    VStack(spacing: 14) {
+                        CommunicationAccountAvatar(profile: profile)
+                            .scaleEffect(2.15)
+                            .frame(height: 82)
+
+                        VStack(spacing: 4) {
+                            Text(profile.displayName ?? appModel.actor?.username ?? "Uživatel")
+                                .font(.title3.weight(.semibold))
+                                .multilineTextAlignment(.center)
+
+                            if let email = profile.email ?? appModel.actor?.email {
+                                Text(email)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                }
+
+                if profile.role != nil || profile.organization != nil || appModel.actor?.username != nil {
+                    Section(CSMLocalization.text("conversation.account.details", fallback: "Účet")) {
+                        if let username = appModel.actor?.username {
+                            LabeledContent(
+                                CSMLocalization.text("conversation.account.username", fallback: "Uživatelské jméno"),
+                                value: username
+                            )
+                        }
+                        if let role = profile.role {
+                            LabeledContent(
+                                CSMLocalization.text("conversation.account.role", fallback: "Role"),
+                                value: role
+                            )
+                        }
+                        if let organization = profile.organization {
+                            LabeledContent(
+                                CSMLocalization.text("conversation.account.organization", fallback: "Organizace"),
+                                value: organization
+                            )
+                        }
+                    }
+                }
+
+                Section {
+                    Button(role: .destructive) {
+                        showsSignOutConfirmation = true
+                    } label: {
+                        HStack {
+                            Label(
+                                CSMLocalization.text("conversation.account.sign_out", fallback: "Odhlásit z chatu"),
+                                systemImage: "rectangle.portrait.and.arrow.right"
+                            )
+                            Spacer()
+                            if isSigningOut {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isSigningOut)
+                    .accessibilityIdentifier("chat.signOut")
+                } footer: {
+                    Text(CSMLocalization.text(
+                        "conversation.account.sign_out.footer",
+                        fallback: "Odhlášení odstraní přístupovou relaci a místní šifrovaná data chatu z tohoto zařízení."
+                    ))
+                }
+            }
+            .navigationTitle(CSMLocalization.text("conversation.account.title", fallback: "Profil"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(CSMLocalization.text("common.done", fallback: "Hotovo")) {
+                        dismiss()
+                    }
+                    .disabled(isSigningOut)
+                }
+            }
+            .confirmationDialog(
+                CSMLocalization.text("conversation.account.sign_out.confirm", fallback: "Odhlásit z chatu?"),
+                isPresented: $showsSignOutConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button(
+                    CSMLocalization.text("conversation.account.sign_out", fallback: "Odhlásit z chatu"),
+                    role: .destructive
+                ) {
+                    isSigningOut = true
+                    Task {
+                        await appModel.signOut()
+                        dismiss()
+                    }
+                }
+                Button(CSMLocalization.text("common.cancel", fallback: "Zrušit"), role: .cancel) {}
+            } message: {
+                Text(CSMLocalization.text(
+                    "conversation.account.sign_out.confirm_message",
+                    fallback: "Pro další použití zpráv se budete muset znovu přihlásit."
+                ))
+            }
         }
     }
 }

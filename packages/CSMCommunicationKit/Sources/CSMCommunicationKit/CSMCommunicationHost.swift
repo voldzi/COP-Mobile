@@ -38,7 +38,7 @@ public enum CSMCommunicationLocationShareError: LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .permissionDenied:
-            "Přístup k poloze je vypnutý. Povolte jej pro COP Mobile v Nastavení."
+            "Přístup k poloze je vypnutý. Povolte jej pro tuto aplikaci v Nastavení."
         case .permissionRestricted:
             "Poloha je na tomto telefonu omezena systémovým nastavením."
         case .unavailable:
@@ -212,18 +212,16 @@ private struct EmbeddedChatDeviceUnlockRequiredView: View {
     let onUnlock: () -> Void
 
     var body: some View {
-        ContentUnavailableView {
-            Label("Odemknout chat", systemImage: "lock.shield")
-        } description: {
-            Text("Přihlášení zůstalo v telefonu uložené. Pro zobrazení chráněných zpráv potvrďte svou identitu.")
-        } actions: {
-            Button("Odemknout", action: onUnlock)
-                .buttonStyle(.borderedProminent)
-            if let onClose {
-                Button("Zavřít", action: onClose)
-                    .buttonStyle(.bordered)
-            }
-        }
+        EmbeddedChatStatusView(
+            title: "Odemknout chat",
+            message: "Přihlášení zůstalo v telefonu uložené. Pro zobrazení chráněných zpráv potvrďte svou identitu.",
+            systemImage: "lock.shield",
+            primaryTitle: "Odemknout",
+            primaryAction: onUnlock,
+            secondaryTitle: onClose == nil ? nil : "Zavřít",
+            secondaryAction: onClose,
+            accessibilityIdentifier: "chat.deviceUnlockRequired"
+        )
     }
 }
 
@@ -232,23 +230,16 @@ private struct EmbeddedChatSignInRequiredView: View {
     let onSignIn: () -> Void
 
     var body: some View {
-        ZStack {
-            Color(uiColor: .systemBackground)
-                .ignoresSafeArea()
-            ContentUnavailableView {
-                Label("Přihlaste se do COP Mobile", systemImage: "person.crop.circle.badge.checkmark")
-            } description: {
-                Text("Přihlášení otevře zabezpečenou stránku vaší organizace. Pro mapu i chat použijte stejný účet.")
-            } actions: {
-                Button("Přihlásit", action: onSignIn)
-                    .buttonStyle(.borderedProminent)
-                if let onClose {
-                    Button("Zpět", action: onClose)
-                        .buttonStyle(.bordered)
-                }
-            }
-        }
-        .accessibilityIdentifier("chat.signInRequired")
+        EmbeddedChatStatusView(
+            title: "Přihlaste se do COP Mobile",
+            message: "Přihlášení otevře zabezpečenou stránku vaší organizace. Pro mapu i chat použijte stejný účet.",
+            systemImage: "person.crop.circle.badge.checkmark",
+            primaryTitle: "Přihlásit",
+            primaryAction: onSignIn,
+            secondaryTitle: onClose == nil ? nil : "Zpět",
+            secondaryAction: onClose,
+            accessibilityIdentifier: "chat.signInRequired"
+        )
     }
 }
 
@@ -257,23 +248,16 @@ private struct EmbeddedChatAccountMismatchView: View {
     let onSwitchAccount: () -> Void
 
     var body: some View {
-        ZStack {
-            Color(uiColor: .systemBackground)
-                .ignoresSafeArea()
-            ContentUnavailableView {
-                Label("Chat používá jiný účet", systemImage: "person.crop.circle.badge.exclamationmark")
-            } description: {
-                Text("Kvůli ochraně zpráv otevřete chat stejným účtem, který je přihlášený v COP.")
-            } actions: {
-                Button("Přihlásit správný účet", action: onSwitchAccount)
-                    .buttonStyle(.borderedProminent)
-                if let onClose {
-                    Button("Zpět", action: onClose)
-                        .buttonStyle(.bordered)
-                }
-            }
-        }
-        .accessibilityIdentifier("chat.accountMismatch")
+        EmbeddedChatStatusView(
+            title: "Chat používá jiný účet",
+            message: "Kvůli ochraně zpráv otevřete chat stejným účtem, který je přihlášený v COP.",
+            systemImage: "person.crop.circle.badge.exclamationmark",
+            primaryTitle: "Přihlásit správný účet",
+            primaryAction: onSwitchAccount,
+            secondaryTitle: onClose == nil ? nil : "Zpět",
+            secondaryAction: onClose,
+            accessibilityIdentifier: "chat.accountMismatch"
+        )
     }
 }
 
@@ -282,23 +266,72 @@ private struct EmbeddedChatIdentityUnavailableView: View {
     let onRetry: () -> Void
 
     var body: some View {
-        ZStack {
-            Color(uiColor: .systemBackground)
-                .ignoresSafeArea()
-            ContentUnavailableView {
-                Label("Účet chatu se nepodařilo ověřit", systemImage: "person.crop.circle.badge.questionmark")
-            } description: {
-                Text("Zkontrolujte připojení a zkuste chat otevřít znovu.")
-            } actions: {
-                Button("Zkusit znovu", action: onRetry)
-                    .buttonStyle(.borderedProminent)
-                if let onClose {
-                    Button("Zpět", action: onClose)
-                        .buttonStyle(.bordered)
+        EmbeddedChatStatusView(
+            title: "Účet chatu se nepodařilo ověřit",
+            message: "Zkontrolujte připojení a zkuste chat otevřít znovu.",
+            systemImage: "person.crop.circle.badge.questionmark",
+            primaryTitle: "Zkusit znovu",
+            primaryAction: onRetry,
+            secondaryTitle: onClose == nil ? nil : "Zpět",
+            secondaryAction: onClose,
+            accessibilityIdentifier: "chat.identityUnavailable"
+        )
+    }
+}
+
+private struct EmbeddedChatStatusView: View {
+    let title: String
+    let message: String
+    let systemImage: String
+    let primaryTitle: String
+    let primaryAction: () -> Void
+    var secondaryTitle: String?
+    var secondaryAction: (() -> Void)?
+    let accessibilityIdentifier: String
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 48, weight: .regular))
+                    .foregroundStyle(CSMTheme.signalBlue)
+                    .accessibilityHidden(true)
+
+                Text(title)
+                    .font(.title2.bold())
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(message)
+                    .font(.body)
+                    .foregroundStyle(Color(uiColor: .label))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(spacing: 12) {
+                    Button(primaryTitle, action: primaryAction)
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color(red: 0.03, green: 0.28, blue: 0.58))
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+
+                    if let secondaryTitle, let secondaryAction {
+                        Button(secondaryTitle, action: secondaryAction)
+                            .buttonStyle(.bordered)
+                            .tint(Color(uiColor: .label))
+                            .controlSize(.large)
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                    }
                 }
+                .frame(maxWidth: 360)
             }
+            .frame(maxWidth: 520)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 40)
+            .frame(maxWidth: .infinity)
         }
-        .accessibilityIdentifier("chat.identityUnavailable")
+        .background(Color(uiColor: .systemBackground).ignoresSafeArea())
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 }
 

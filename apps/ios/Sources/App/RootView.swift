@@ -1,4 +1,5 @@
 import CSMCommunicationKit
+import CSMVoiceCallKit
 import SwiftUI
 
 struct RootView: View {
@@ -62,7 +63,7 @@ struct RootView: View {
             .zIndex(50)
         }
 
-        if VoiceCallService.shared.presentation.activeCall != nil {
+        if VoiceCallService.shared.hasActiveCall {
           ActiveCallView(service: VoiceCallService.shared)
             .transition(.opacity)
             .zIndex(100)
@@ -72,20 +73,20 @@ struct RootView: View {
       .alert(
         "Hovor není dostupný",
         isPresented: Binding(
-          get: { VoiceCallService.shared.presentation.lastErrorMessage != nil },
+          get: { VoiceCallService.shared.lastErrorMessage != nil },
           set: { isPresented in
             if !isPresented {
-              VoiceCallService.shared.presentation.clearError()
+              VoiceCallService.shared.clearCallError()
             }
           }
         )
       ) {
         Button("OK", role: .cancel) {
-          VoiceCallService.shared.presentation.clearError()
+          VoiceCallService.shared.clearCallError()
         }
       } message: {
         Text(
-          VoiceCallService.shared.presentation.lastErrorMessage
+          VoiceCallService.shared.lastErrorMessage
             ?? "Hovor se nepodařilo připravit."
         )
       }

@@ -9,4 +9,5 @@ bash scripts/verify-apple-toolchain.sh
 python3 scripts/validate-device-contract.py
 python3 scripts/validate-ios-project.py
 bash scripts/test-ios.sh
+bash scripts/test-ios-accessibility.sh
 git diff --check

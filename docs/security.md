@@ -142,6 +142,9 @@ XSS ochrany.
 - APNs token vlastní native + CSM Messaging, nikdy web JavaScript ani COP store.
 - Push payload obsahuje minimální ID, typ, expiraci a allowlisted deep link;
   žádný plaintext E2EE obsah, chráněná URL, token ani přesná poloha.
+- Notification Service Extension používá samostatný `CSMNotificationCore`, ignoruje
+  serverový title/body, zahazuje neznámá metadata a vytváří pouze opaque thread ID.
+  Bez schváleného sdíleného crypto store zobrazuje bezpečný obecný text.
 - Ordinary, Time Sensitive a Critical jsou samostatné capability. Critical
   vyžaduje skutečný Apple entitlement a user authorization.
 - PushKit/CallKit se podle ADR 0008 a 0012 používá pouze pro skutečný direct

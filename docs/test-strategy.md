@@ -432,6 +432,10 @@ I/O. Instruments kontroluje hangs, memory growth, energy a file activity. Test
 zahrnuje alespoň 30 reloadů WebView, 100 start/stop subscription cyklů a cleanup
 po simulované dlouhé offline periodě.
 
+Samostatný `COPMobileAccessibilityTests` target spouští Xcode accessibility audit
+pro přihlášení a hlavní komunikační workspace včetně kontrastu, Dynamic Type,
+hit targetů, popisů, ořezu textu a traits. Je součástí `scripts/check.sh`.
+
 Nativní chat navíc povinně prochází maticí 1/100/1 000/10 000 zpráv, nárazem
 100 událostí, offline/online přechodem, restartem aplikace, otevřením klávesnice,
 velkou přílohou, E2EE recovery a reakcí provedenou současně ve webu. Výkonnostní

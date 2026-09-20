@@ -1918,7 +1918,7 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLiveMessa
         let isPinned = pinnedEventIds.contains(id)
 
         guard case .msgLike(let content) = event.content else { return nil }
-        let reactions = reactions(from: content.reactions, ownUserId: ownUserId)
+        let reactions = reactions(from: event.reactions, ownUserId: ownUserId)
 
         switch content.kind {
         case .message(let message):

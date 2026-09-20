@@ -1,7 +1,40 @@
 import AVFAudio
 import XCTest
 
-@testable import COPMobile
+@testable import CSMVoiceCallKit
+
+final class VoiceCallPushPayloadTests: XCTestCase {
+  func testIncomingVoiceCallPushMatchesCSMMessagingContract() throws {
+    let payload = try XCTUnwrap(
+      VoiceCallPushPayload(dictionary: [
+        "aps": ["content-available": 1],
+        "callId": "b5ea7309-7f53-4e87-9225-fd38e9737540",
+        "roomId": "!direct:msg.zeleznalady.cz",
+        "senderDisplayName": "Jiřina Volková",
+        "type": "chat.voice_call.incoming",
+      ]))
+
+    XCTAssertEqual(payload.event, .incoming)
+    XCTAssertEqual(payload.callID, "b5ea7309-7f53-4e87-9225-fd38e9737540")
+    XCTAssertEqual(payload.roomID, "!direct:msg.zeleznalady.cz")
+    XCTAssertEqual(payload.callerDisplayName, "Jiřina Volková")
+  }
+
+  func testVoiceCallPushRejectsUnknownAndIncompletePayloads() {
+    XCTAssertNil(
+      VoiceCallPushPayload(dictionary: [
+        "callId": "b5ea7309-7f53-4e87-9225-fd38e9737540",
+        "roomId": "!direct:msg.zeleznalady.cz",
+        "type": "chat.voice_call.progress",
+      ]))
+    XCTAssertNil(
+      VoiceCallPushPayload(dictionary: [
+        "callId": "not-a-uuid",
+        "roomId": "!direct:msg.zeleznalady.cz",
+        "type": "chat.voice_call.incoming",
+      ]))
+  }
+}
 
 final class VoiceCallPushTokenStateTests: XCTestCase {
   func testCachedTokenIsNeverRegisteredBeforePushKitConfirmsIt() {

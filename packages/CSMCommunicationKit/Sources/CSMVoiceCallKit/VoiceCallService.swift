@@ -9,9 +9,16 @@ import OSLog
 import Security
 import UIKit
 
+private enum VoiceCallPushRegistrationError: Error {
+  case registrationFailed
+  case registrationPending
+}
+
 private enum VoiceCallPushTokenStore {
   private static let account = "pushkit.voip"
-  private static let service = "cz.zeleznalady.csm.messenger.push-tokens"
+  private static var service: String {
+    "\(Bundle.main.bundleIdentifier ?? "cz.zeleznalady.csm").push-tokens"
+  }
 
   static func load() -> String? {
     var query = baseQuery
@@ -311,10 +318,14 @@ private final class LiveKitCallObserver: NSObject, RoomDelegate, @unchecked Send
 }
 
 @MainActor
-final class VoiceCallService:
+public final class VoiceCallService:
   NSObject, @preconcurrency CXProviderDelegate, @preconcurrency PKPushRegistryDelegate
 {
-  static let shared = VoiceCallService()
+  public static let shared = VoiceCallService()
+
+  public static func recordDiagnostic(_ event: String, result: String? = nil) {
+    CallDiagnosticStore.record(event, result: result)
+  }
 
   private struct CallContext {
     var call: CSMVoiceCall
@@ -325,6 +336,13 @@ final class VoiceCallService:
   }
 
   let presentation = VoiceCallPresentationState()
+
+  public var hasActiveCall: Bool { presentation.activeCall != nil }
+  public var lastErrorMessage: String? { presentation.lastErrorMessage }
+
+  public func clearCallError() {
+    presentation.clearError()
+  }
 
   private let provider: CXProvider
   private let callController = CXCallController()
@@ -393,7 +411,7 @@ final class VoiceCallService:
     }
   }
 
-  func prepareForApplicationLaunch() {
+  public func prepareForApplicationLaunch() {
     registry.delegate = self
     registry.desiredPushTypes = [.voIP]
     synchronizeCurrentPushToken()
@@ -401,13 +419,13 @@ final class VoiceCallService:
     CallDiagnosticStore.record("voice.native.launch-prepared")
   }
 
-  func currentPushToken() async throws -> String {
+  public func currentPushToken() async throws -> String {
     synchronizeCurrentPushToken()
     if let pushToken = pushTokenState.tokenForServerRegistration {
       return pushToken
     }
     guard tokenContinuation == nil else {
-      throw PushRegistrationError.registrationPending
+      throw VoiceCallPushRegistrationError.registrationPending
     }
     return try await withCheckedThrowingContinuation { continuation in
       tokenContinuation = continuation
@@ -419,17 +437,17 @@ final class VoiceCallService:
         }
         self.tokenContinuation = nil
         self.tokenTimeoutTask = nil
-        continuation.resume(throwing: PushRegistrationError.registrationFailed)
+        continuation.resume(throwing: VoiceCallPushRegistrationError.registrationFailed)
       }
     }
   }
 
-  func currentPushTokenIfAvailable() async -> String? {
+  public func currentPushTokenIfAvailable() async -> String? {
     synchronizeCurrentPushToken()
     return pushTokenState.tokenForServerRegistration
   }
 
-  func applicationDidBecomeActive() {
+  public func applicationDidBecomeActive() {
     synchronizeCurrentPushToken()
     recoverPushRegistrationIfNeeded()
     foregroundReconciliationTask?.cancel()
@@ -445,7 +463,7 @@ final class VoiceCallService:
     }
   }
 
-  func startVoiceCall(
+  public func startVoiceCall(
     roomID: String,
     title: String,
     participantSubjectIDs: [String]?,
@@ -521,7 +539,7 @@ final class VoiceCallService:
     }
   }
 
-  func pushRegistry(
+  public func pushRegistry(
     _ registry: PKPushRegistry,
     didUpdate pushCredentials: PKPushCredentials,
     for type: PKPushType
@@ -531,18 +549,18 @@ final class VoiceCallService:
     acceptPushToken(token, source: "callback")
   }
 
-  func pushRegistry(_ registry: PKPushRegistry, didInvalidatePushTokenFor type: PKPushType) {
+  public func pushRegistry(_ registry: PKPushRegistry, didInvalidatePushTokenFor type: PKPushType) {
     guard type == .voIP else { return }
     pushTokenState.invalidate()
     VoiceCallPushTokenStore.remove()
     tokenTimeoutTask?.cancel()
     tokenTimeoutTask = nil
-    tokenContinuation?.resume(throwing: PushRegistrationError.registrationFailed)
+    tokenContinuation?.resume(throwing: VoiceCallPushRegistrationError.registrationFailed)
     tokenContinuation = nil
     CSMCommunicationNotifications.recordVoIPDeviceTokenUpdate()
   }
 
-  func pushRegistry(
+  public func pushRegistry(
     _ registry: PKPushRegistry,
     didReceiveIncomingPushWith payload: PKPushPayload,
     for type: PKPushType,
@@ -736,14 +754,14 @@ final class VoiceCallService:
     }
   }
 
-  func providerDidReset(_ provider: CXProvider) {
+  public func providerDidReset(_ provider: CXProvider) {
     let active = Array(calls.keys)
     for uuid in active {
       tearDown(uuid: uuid, reportServer: true, action: .end)
     }
   }
 
-  func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
+  public func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
     guard var context = calls[action.callUUID] else {
       action.fail()
       return
@@ -767,7 +785,7 @@ final class VoiceCallService:
     }
   }
 
-  func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
+  public func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
     guard var context = calls[action.callUUID],
       context.call.direction == .incoming,
       !context.answered
@@ -790,7 +808,7 @@ final class VoiceCallService:
     }
   }
 
-  func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
+  public func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
     guard var context = calls[action.callUUID] else {
       action.fail()
       return
@@ -805,7 +823,7 @@ final class VoiceCallService:
     }
   }
 
-  func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
+  public func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
     guard let context = calls[action.callUUID] else {
       action.fulfill()
       return
@@ -818,7 +836,7 @@ final class VoiceCallService:
     tearDown(uuid: action.callUUID, reportServer: true, action: serverAction)
   }
 
-  func provider(_ provider: CXProvider, timedOutPerforming action: CXAction) {
+  public func provider(_ provider: CXProvider, timedOutPerforming action: CXAction) {
     action.fail()
     if let callAction = action as? CXCallAction {
       fail(
@@ -828,7 +846,7 @@ final class VoiceCallService:
     }
   }
 
-  func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+  public func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
     do {
       // CallKit has already activated this session. Mutating its category here
       // can synchronously block the main thread on iOS 27. The category is
@@ -848,7 +866,7 @@ final class VoiceCallService:
     }
   }
 
-  func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+  public func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
     audioActivated = false
     presentation.setAudioActive(false)
     try? AudioManager.shared.setEngineAvailability(.none)

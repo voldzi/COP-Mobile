@@ -178,7 +178,9 @@ struct ConversationRow: View {
                     Text(conversation.title)
                         .font(.body.weight(hasUnread ? .bold : .semibold))
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
                     if isMuted {
                         Image(systemName: "bell.slash.fill")
                             .font(.caption)
@@ -193,8 +195,8 @@ struct ConversationRow: View {
                     Spacer(minLength: 8)
                     if !updatedText.isEmpty {
                         Text(updatedText)
-                            .font(.caption)
-                            .foregroundStyle(hasUnread && !isMuted ? CSMTheme.signalBlue : .secondary)
+                            .font(.caption.weight(hasUnread && !isMuted ? .semibold : .regular))
+                            .foregroundStyle(.primary)
                     }
                     if hasUnread && !isMuted {
                         Circle()
@@ -207,8 +209,10 @@ struct ConversationRow: View {
                 HStack(spacing: 6) {
                     Text(subtitle)
                         .font(.subheadline.weight(hasUnread ? .semibold : .regular))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .foregroundStyle(.primary)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
 
                     Spacer(minLength: 4)
 
@@ -450,7 +454,7 @@ struct ConversationAvatar: View {
                 } else {
                     Text(initials)
                         .font(.subheadline.weight(.bold))
-                        .foregroundStyle(tint)
+                        .foregroundStyle(.primary)
                 }
             }
         }

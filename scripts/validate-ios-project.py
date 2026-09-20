@@ -24,8 +24,8 @@ def main() -> int:
     staging = read_plist("Info-Staging.plist")
     release = read_plist("Info-Release.plist")
 
-    if project.count('iOS: "26.0"') != 1 or project.count('deploymentTarget: "26.0"') != 3:
-        failures.append("project.yml must pin project, host and both test targets to iOS 26.0")
+    if project.count('iOS: "26.0"') != 1 or project.count('deploymentTarget: "26.0"') != 5:
+        failures.append("project.yml must pin project, host, extension and all test targets to iOS 26.0")
     if "IPHONEOS_DEPLOYMENT_TARGET = 26.0" not in base:
         failures.append("Base.xcconfig must pin IPHONEOS_DEPLOYMENT_TARGET to 26.0")
     if "SWIFT_VERSION = 6.0" not in base:
@@ -66,6 +66,10 @@ def main() -> int:
                 failures.append(f"local CSMCommunicationKit must not compile legacy application UI {filename}")
         if '.testTarget(' not in package_text or 'name: "CSMCommunicationKitTests"' not in package_text:
             failures.append("local CSMCommunicationKit must retain its communication test target")
+        if 'name: "CSMVoiceCallKit"' not in package_text:
+            failures.append("local CSMCommunicationKit must expose the shared CSMVoiceCallKit product")
+        if 'exact: "2.16.0"' not in package_text:
+            failures.append("shared CSMVoiceCallKit must pin the audited LiveKit 2.16.0 dependency")
 
     communication_model = COMMUNICATION_KIT / "Sources" / "CSMCore" / "CommunicationModel.swift"
     legacy_app_model = COMMUNICATION_KIT / "Sources" / "CSMCore" / "AppModel.swift"
@@ -173,6 +177,18 @@ def main() -> int:
         failures.append("application target must retain the native UI smoke-test target")
     if "- COPMobileUITests" not in project:
         failures.append("COPMobile scheme must run the native UI smoke-test target")
+    if "COPMobileNotificationService:" not in project or "type: app-extension" not in project:
+        failures.append("application target must embed the notification service extension")
+    if "product: CSMNotificationCore" not in project:
+        failures.append("notification extension must depend only on the lightweight notification core product")
+    notification_source = IOS / "Extensions" / "NotificationService" / "NotificationService.swift"
+    if not notification_source.is_file():
+        failures.append("notification service extension source must be present")
+    if "COPMobileAccessibilityTests:" not in project or "COPMobile-Accessibility:" not in project:
+        failures.append("application must retain its dedicated accessibility audit target and scheme")
+    accessibility_test = IOS / "AccessibilityTests" / "COPMobileAccessibilityTests.swift"
+    if not accessibility_test.is_file() or "performAccessibilityAudit" not in accessibility_test.read_text(encoding="utf-8"):
+        failures.append("accessibility target must run the native Xcode accessibility audit")
     ui_smoke_test = ROOT / "apps" / "ios" / "UITests" / "COPMobileLaunchUITests.swift"
     if not ui_smoke_test.is_file():
         failures.append("native UI smoke-test source must be present")

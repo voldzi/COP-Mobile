@@ -9,18 +9,29 @@ let package = Package(
         .iOS(.v26)
     ],
     products: [
-        .library(name: "CSMCommunicationKit", targets: ["CSMCommunicationKit"])
+        .library(name: "CSMCommunicationKit", type: .static, targets: ["CSMCommunicationKit"]),
+        .library(name: "CSMNotificationCore", type: .static, targets: ["CSMNotificationCore"]),
+        .library(name: "CSMVoiceCallKit", type: .static, targets: ["CSMVoiceCallKit"])
     ],
     dependencies: [
         .package(
             url: "https://github.com/element-hq/matrix-rust-components-swift.git",
-            exact: "26.09.07"
+            exact: "26.09.17"
+        ),
+        .package(
+            url: "https://github.com/livekit/client-sdk-swift.git",
+            exact: "2.16.0"
         )
     ],
     targets: [
         .target(
+            name: "CSMNotificationCore",
+            path: "Sources/CSMNotificationCore"
+        ),
+        .target(
             name: "CSMCommunicationKit",
             dependencies: [
+                "CSMNotificationCore",
                 .product(name: "MatrixRustSDK", package: "matrix-rust-components-swift")
             ],
             path: ".",
@@ -47,9 +58,17 @@ let package = Package(
                 .process("Resources/Localization")
             ]
         ),
+        .target(
+            name: "CSMVoiceCallKit",
+            dependencies: [
+                "CSMCommunicationKit",
+                .product(name: "LiveKit", package: "client-sdk-swift")
+            ],
+            path: "Sources/CSMVoiceCallKit"
+        ),
         .testTarget(
             name: "CSMCommunicationKitTests",
-            dependencies: ["CSMCommunicationKit"],
+            dependencies: ["CSMCommunicationKit", "CSMNotificationCore", "CSMVoiceCallKit"],
             path: "Tests/CSMCommunicationKitTests"
         )
     ]

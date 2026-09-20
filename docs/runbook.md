@@ -123,6 +123,9 @@ krok.
    systémovou prezentaci, tap/open a user ACK.
 2. Ověřte notification permission, sound setting, Time Sensitive setting,
    Focus/mute/Scheduled Summary, token environment/topic a expiraci payloadu.
+   Pro zpracování přes `COPMobileNotificationService` musí metadata-only APNs
+   payload obsahovat `aps.mutable-content: 1`; serverový title/body extension
+   vždy zahodí a chybějící flag znamená pouze systémovou fallback prezentaci.
 3. Potvrďte, že CSM Messaging používá live konfiguraci a odpovídající
    sandbox/production APNs environment.
 4. Debug/development token posílejte pouze přes sandbox; TestFlight/Release

@@ -28,9 +28,6 @@ settings:
 packages:
   CSMCommunicationKit:
     path: ../../packages/CSMCommunicationKit
-  LiveKit:
-    url: https://github.com/livekit/client-sdk-swift.git
-    exactVersion: 2.16.0
 
 targets:
   COPMobile:
@@ -49,12 +46,48 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
     dependencies:
       - package: CSMCommunicationKit
-      - package: LiveKit
+      - package: CSMCommunicationKit
+        product: CSMVoiceCallKit
+      - target: COPMobileNotificationService
+        embed: true
     scheme:
       gatherCoverageData: true
       testTargets:
         - COPMobileTests
         - COPMobileUITests
+
+
+  COPMobileNotificationService:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Extensions/NotificationService
+    settings:
+      base:
+        APPLICATION_EXTENSION_API_ONLY: YES
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Extensions/NotificationService/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: cz.zeleznalady.csm.messenger.notification-service
+        PRODUCT_NAME: COPMobileNotificationService
+        SKIP_INSTALL: YES
+    dependencies:
+      - package: CSMCommunicationKit
+        product: CSMNotificationCore
+
+  COPMobileAccessibilityTests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: AccessibilityTests
+    dependencies:
+      - target: COPMobile
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: ""
+        PRODUCT_BUNDLE_IDENTIFIER: cz.zeleznalady.cop-mobile.accessibility-tests
 
   COPMobileTests:
     type: bundle.unit-test
@@ -104,3 +137,16 @@ schemes:
         - COPMobileUITests
     archive:
       config: Staging
+
+
+  COPMobile-Accessibility:
+    build:
+      targets:
+        COPMobile: all
+        COPMobileAccessibilityTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - COPMobileAccessibilityTests

@@ -35,8 +35,9 @@ obrazovky, které do tenké komunikační vrstvy nepatří.
 
 - COP Mobile lze čistě sestavit, testovat, archivovat a dále vyvíjet i po
   úplném odstranění původní velké iOS aplikace.
-- Komunikační opravy mají vlastní review a release lifecycle společný s hostem,
-  takže nevzniká skrytý upgrade z cizí větve.
+- Komunikační opravy mají vlastní review a release lifecycle společný s hosty,
+  takže nevzniká skrytý upgrade z cizí větve. Změna veřejného rozhraní nebo
+  Matrix SDK vyžaduje build COP Mobile i Jizdy.
 - Bezpečnostní a licenční audit musí kontrolovat lokální snapshot i jeho přímé
   závislosti, zejména Matrix Rust SDK.
 - Současný komunikační model ještě používá část interních typů `CSMCore`.

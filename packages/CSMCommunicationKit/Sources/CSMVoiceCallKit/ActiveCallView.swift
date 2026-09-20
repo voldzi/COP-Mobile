@@ -2,12 +2,16 @@ import Foundation
 import SwiftUI
 
 @MainActor
-struct ActiveCallView: View {
+public struct ActiveCallView: View {
   let service: VoiceCallService
+
+  public init(service: VoiceCallService) {
+    self.service = service
+  }
 
   private var state: VoiceCallPresentationState { service.presentation }
 
-  var body: some View {
+  public var body: some View {
     ZStack {
       LinearGradient(
         colors: [

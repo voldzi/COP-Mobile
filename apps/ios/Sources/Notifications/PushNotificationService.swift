@@ -1,4 +1,5 @@
 import CSMCommunicationKit
+import CSMVoiceCallKit
 import Foundation
 import UIKit
 @preconcurrency import UserNotifications
@@ -74,7 +75,7 @@ final class PushNotificationService: NSObject, PushNotificationProviding,
     // incoming calls must remain reachable before the user opens or unlocks
     // the native chat surface.
     UIApplication.shared.registerForRemoteNotifications()
-    CallDiagnosticStore.record("apns.registration.requested", result: "launch")
+    VoiceCallService.recordDiagnostic("apns.registration.requested", result: "launch")
   }
 
   func status() async -> [String: Any] {
@@ -147,7 +148,7 @@ final class PushNotificationService: NSObject, PushNotificationProviding,
   func recordDeviceToken(_ data: Data) {
     deviceToken = data.map { String(format: "%02x", $0) }.joined()
     registrationFailure = nil
-    CallDiagnosticStore.record("apns.token.confirmed")
+    VoiceCallService.recordDiagnostic("apns.token.confirmed")
     CSMCommunicationNotifications.recordDeviceToken(data)
     tokenTimeoutTask?.cancel()
     tokenTimeoutTask = nil
@@ -158,7 +159,7 @@ final class PushNotificationService: NSObject, PushNotificationProviding,
   func recordRegistrationFailure(_ error: any Error) {
     deviceToken = nil
     registrationFailure = "registration"
-    CallDiagnosticStore.record("apns.registration.failed")
+    VoiceCallService.recordDiagnostic("apns.registration.failed")
     CSMCommunicationNotifications.recordRegistrationFailure(error)
     tokenTimeoutTask?.cancel()
     tokenTimeoutTask = nil
