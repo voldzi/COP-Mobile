@@ -115,7 +115,7 @@ autentizované kontrakty a vlastní svůj oddělený nativní OIDC/Matrix lifecy
 | --- | --- | --- |
 | App shell | SwiftUI lifecycle, volbu COP/chat povrchu, deep link routing, call overlay, globální fallback a diagnostika | mapovou a report business logiku |
 | Web container | `WKWebView`, persistentní website data store, navigation policy a načtení COP HTTPS originu | doménová cache a autorizaci |
-| `CSMCommunicationKit` | nativní SwiftUI chat, OIDC/PKCE, Keychain, Matrix Rust E2EE, timeline a offline outbox | mapu, hlášení a COP business workflow |
+| `CSMCommunicationKit` | nativní SwiftUI chat, OIDC/PKCE, Keychain, Matrix Rust E2EE, timeline, communication outbox a omezený Jizda driver-report transport | mapu, moderaci, incident fusion a COP business workflow |
 | Native voice call | CallKit/PushKit, SwiftUI call view, COP API lifecycle, LiveKit room, `AVAudioSession`, mute/route a proximity | Matrix call signaling, skupinové hovory a WebView média |
 | Bridge coordinator | handshake, vyjednání verze, session, dispatch, timeout, cancel a event sequencing | schema authority |
 | Origin policy a validator | přesný allowlist, main-frame kontrola, JSON Schema a limity | důvěru v obsah povolené stránky |

@@ -56,11 +56,13 @@ struct HTTPClient: Sendable {
         _ path: String,
         body: RequestBody,
         transientRetryCount: Int = 0,
-        authorizationBearerToken: String? = nil
+        authorizationBearerToken: String? = nil,
+        headers: [String: String] = [:]
     ) async throws -> Response {
         var request = try await request(path, method: "POST")
         request.httpBody = try CSMJSONCoding.encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         if let authorizationBearerToken {
             let token = authorizationBearerToken.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !token.isEmpty else {

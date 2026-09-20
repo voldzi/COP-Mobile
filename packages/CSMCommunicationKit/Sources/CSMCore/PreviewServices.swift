@@ -904,6 +904,7 @@ actor InMemoryCommunityOutbox: CommunityOutboxStoring {
 
     func enqueue(_ draft: CommunityReportDraft) async throws {
         drafts = mediaPolicy.retentionResult(for: drafts).retainedDrafts
+        drafts.removeAll { $0.id == draft.id }
         try mediaPolicy.validateDraft(draft, existingDrafts: drafts)
         drafts.append(draft)
     }

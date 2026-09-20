@@ -74,6 +74,29 @@ final class HTTPClientTests: XCTestCase {
         )
     }
 
+    func testPostForwardsStableIdempotencyHeader() async throws {
+        PressureURLProtocol.configure { _ in
+            (201, #"{"value":"created"}"#)
+        }
+        let client = HTTPClient(
+            baseURL: URL(string: "https://cop.test")!,
+            session: makeSession()
+        )
+        let key = "e5ea4b90-709a-4eb0-a1ab-0a949f12a9e1"
+
+        let response: TestResponse = try await client.post(
+            "/api/v1/community/reports",
+            body: TestRequest(value: "traffic_accident"),
+            headers: ["X-Idempotency-Key": key]
+        )
+
+        XCTAssertEqual(response.value, "created")
+        XCTAssertEqual(
+            PressureURLProtocol.lastRequest?.value(forHTTPHeaderField: "X-Idempotency-Key"),
+            key
+        )
+    }
+
     private func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [PressureURLProtocol.self]

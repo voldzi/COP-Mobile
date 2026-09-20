@@ -1480,7 +1480,11 @@ enum ReportCategory: String, Codable, CaseIterable, Identifiable, Sendable {
     case fire
     case flood
     case bridgeDamage = "bridge_damage"
+    case dangerousWeather = "dangerous_weather"
     case roadBlockage = "road_blockage"
+    case stoppedVehicle = "stopped_vehicle"
+    case trafficAccident = "traffic_accident"
+    case trafficCongestion = "traffic_congestion"
     case infrastructureDamage = "infrastructure_damage"
     case medical
     case utilityOutage = "utility_outage"
@@ -1558,7 +1562,24 @@ struct CommunityReportDraft: Codable, Identifiable, Equatable, Hashable, Sendabl
     var groupId: String?
     var groupName: String
     var createdAt: Date
+    var captureContext: CommunityReportCaptureContext? = nil
+    var roadContext: CommunityReportRoadContext? = nil
     var attachments: [CommunityReportAttachmentDraft] = []
+}
+
+struct CommunityReportCaptureContext: Codable, Equatable, Hashable, Sendable {
+    var client: String
+    var platform: String
+    var appVersion: String?
+    var offlineQueuedAt: Date?
+}
+
+struct CommunityReportRoadContext: Codable, Equatable, Hashable, Sendable {
+    var travelDirectionDeg: Double?
+    var speedMps: Double?
+    var roadName: String?
+    var roadRef: String?
+    var capturedAt: Date?
 }
 
 struct CommunityReportDraftSeed: Codable, Identifiable, Equatable, Hashable, Sendable {

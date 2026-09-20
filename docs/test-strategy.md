@@ -280,6 +280,8 @@ Modely, OS buildy a fyzická dostupnost se evidují v implementačním reportu.
   její následné zobrazení ve stejné E2EE Matrix room na webu i v iOS;
 - airplane mode s cached timeline a encrypted outboxem, reconnect, retry,
   idempotence a serverové potvrzení bez dvojité zprávy;
+- řidičské hlášení z Jizdy online i v airplane mode, reconnect a ověření, že
+  stabilní UUID vytvořilo právě jedno COP hlášení;
 - incoming i outgoing hovor přes Wi-Fi a mobilní síť, TURN relay, změna sítě,
   Bluetooth připojení/odpojení, audio interruption a zamčená obrazovka;
 - skupinový start z nativního detailu, postupné přizvání alespoň dvou dalších

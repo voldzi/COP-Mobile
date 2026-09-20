@@ -16,6 +16,7 @@ enum ServiceFactory {
 
         if configuration.usePreviewServices {
             let messageOutbox = InMemoryMessageOutbox()
+            let communityOutbox = InMemoryCommunityOutbox()
             let messageHistory = InMemoryMessageHistoryStore()
             let messagingBootstrapStore = InMemoryMessagingBootstrapStore()
             let messagingBoundary = PreviewCSMMessagingDeviceClient()
@@ -28,6 +29,7 @@ enum ServiceFactory {
                     history: messageHistory
                 ),
                 messageOutbox: messageOutbox,
+                communityOutbox: communityOutbox,
                 messageHistory: messageHistory,
                 messagingBootstrapStore: messagingBootstrapStore,
                 localAI: DeterministicLocalAIService(),
@@ -64,6 +66,7 @@ enum ServiceFactory {
             tokenLifecycle: tokenLifecycle
         )
         let messageOutbox = EncryptedMessageOutbox(keychain: keychain)
+        let communityOutbox = EncryptedCommunityOutbox(keychain: keychain)
         let messageHistory = EncryptedMessageHistoryStore(keychain: keychain)
         let messagingBootstrapStore = EncryptedMessagingBootstrapStore(keychain: keychain)
         let liveMessagingClient: any MessagingClientProtocol = {
@@ -83,6 +86,7 @@ enum ServiceFactory {
                 history: messageHistory
             ),
             messageOutbox: messageOutbox,
+            communityOutbox: communityOutbox,
             messageHistory: messageHistory,
             messagingBootstrapStore: messagingBootstrapStore,
             localAI: DeterministicLocalAIService(),

@@ -745,8 +745,16 @@ private extension ReportCategory {
             CSMLocalization.text("localai.fallback.flood", fallback: "Riziko záplavy")
         case .bridgeDamage:
             CSMLocalization.text("localai.fallback.bridge_damage", fallback: "Poškození mostu")
+        case .dangerousWeather:
+            CSMLocalization.text("localai.fallback.dangerous_weather", fallback: "Nebezpečné počasí")
         case .roadBlockage:
             CSMLocalization.text("localai.fallback.road_blockage", fallback: "Neprůjezdná komunikace")
+        case .stoppedVehicle:
+            CSMLocalization.text("localai.fallback.stopped_vehicle", fallback: "Stojící vozidlo")
+        case .trafficAccident:
+            CSMLocalization.text("localai.fallback.traffic_accident", fallback: "Dopravní nehoda")
+        case .trafficCongestion:
+            CSMLocalization.text("localai.fallback.traffic_congestion", fallback: "Dopravní kolona")
         case .infrastructureDamage:
             CSMLocalization.text("localai.fallback.infrastructure_damage", fallback: "Poškození infrastruktury")
         case .medical:

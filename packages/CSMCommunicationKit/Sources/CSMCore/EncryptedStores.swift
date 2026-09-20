@@ -362,6 +362,7 @@ actor EncryptedCommunityOutbox: CommunityOutboxStoring {
 
     func enqueue(_ draft: CommunityReportDraft) async throws {
         var drafts = try await pendingDrafts()
+        drafts.removeAll { $0.id == draft.id }
         try mediaPolicy.validateDraft(draft, existingDrafts: drafts)
         drafts.append(draft)
         try await persist(drafts)

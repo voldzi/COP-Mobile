@@ -94,6 +94,10 @@ formát. Bridge má vlastní lokální error contract popsaný níže.
 
 `CSMCommunicationKit` je klient, nikoli nový backend. Používá:
 
+- pro Jizdu omezený driver-report transport nad
+  `POST /api/v1/community/reports` a následným `/submit`; stabilní UUID se
+  posílá jako `X-Idempotency-Key` a payload odpovídá COP OpenAPI;
+
 - OIDC discovery/authorize/token/logout flow pro veřejný klient `csm-mobile`,
   Authorization Code + PKCE a redirect scheme `csm`;
 - COP messaging bootstrap a conversation metadata podle autoritativního COP
@@ -393,6 +397,8 @@ ticketu ani logů.
 
 Aktuální COP PWA ukládá read-only snapshot, ale nepovoluje manuální hlášení v
 offline fallbacku. Thin host tuto mezeru nesmí skrýt nativním formulářem.
+Jizda je samostatná řidičská aplikace a používá úzce vymezenou nativní cestu
+z ADR 0015; ta nemění report workflow COP Mobile.
 Budoucí práce v `01 COP`:
 
 1. webový report outbox nad existujícím community-report workflow;

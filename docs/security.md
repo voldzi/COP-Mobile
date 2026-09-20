@@ -14,6 +14,9 @@ Chráníme zejména:
 - webovou OIDC relaci a WebKit origin storage;
 - nativní OIDC/Matrix credentials, Matrix crypto store, recovery stav,
   decrypted timeline a communication outbox;
+- samostatný šifrovaný outbox jednotlivých řidičských pozorování z Jizdy;
+  stabilní UUID slouží jako COP idempotency key a outbox neobsahuje průběh celé
+  jízdy;
 - nativní permissions a privileged Device API metody;
 - přesnou polohu, heading/attitude a tracking samples;
 - APNs token a device registration;

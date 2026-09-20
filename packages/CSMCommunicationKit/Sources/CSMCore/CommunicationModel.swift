@@ -243,6 +243,7 @@ final class CommunicationModel {
     @ObservationIgnored private let api: any CopAPIClientProtocol
     @ObservationIgnored private let messaging: any MessagingClientProtocol
     @ObservationIgnored private let messageOutbox: (any MessageOutboxStoring)?
+    @ObservationIgnored private let communityOutbox: (any CommunityOutboxStoring)?
     @ObservationIgnored private let messageHistory: (any MessageHistoryStoring)?
     @ObservationIgnored private let messagingBootstrapStore: (any MessagingBootstrapStoring)?
     @ObservationIgnored private let localAI: any LocalAIServiceProtocol
@@ -274,6 +275,7 @@ final class CommunicationModel {
         api: any CopAPIClientProtocol,
         messaging: any MessagingClientProtocol,
         messageOutbox: (any MessageOutboxStoring)? = nil,
+        communityOutbox: (any CommunityOutboxStoring)? = nil,
         messageHistory: (any MessageHistoryStoring)? = nil,
         messagingBootstrapStore: (any MessagingBootstrapStoring)? = nil,
         localAI: any LocalAIServiceProtocol,
@@ -289,6 +291,7 @@ final class CommunicationModel {
         self.api = api
         self.messaging = messaging
         self.messageOutbox = messageOutbox
+        self.communityOutbox = communityOutbox
         self.messageHistory = messageHistory
         self.messagingBootstrapStore = messagingBootstrapStore
         self.localAI = localAI
@@ -517,6 +520,7 @@ final class CommunicationModel {
         await ensureMessagingBootstrapFreshIfNeeded(force: shouldRecoverMessagingTransport)
         await refreshMatrixEncryptionRecoveryStatus()
         await refreshPendingMessageCount()
+        await flushCommunityReportOutbox()
         if let selectedConversation {
             await automaticallySynchronizePendingMessagesIfPossible(for: selectedConversation, force: true)
         }
@@ -558,6 +562,7 @@ final class CommunicationModel {
             pendingAutoSyncAttemptedConversationIds = []
             pendingAutoSyncInFlightConversationIds = []
             await refreshConversations()
+            await flushCommunityReportOutbox()
         } catch {
             if authState == .signedOut || authState == .locked {
                 connectionMode = .offline
@@ -565,6 +570,34 @@ final class CommunicationModel {
                 connectionMode = .degraded
             }
             lastError = error.localizedDescription
+        }
+    }
+
+    func submitCommunityReport(_ draft: CommunityReportDraft) async throws -> CommunityReportSubmission? {
+        guard authState == .signedIn else {
+            throw CSMServiceError.authenticationRequired("Pro odeslání hlášení se přihlaste ke COP.")
+        }
+        try await communityOutbox?.enqueue(draft)
+        do {
+            let submission = try await api.submitCommunityReport(draft)
+            try await communityOutbox?.removeDraft(id: draft.id)
+            return submission
+        } catch {
+            return nil
+        }
+    }
+
+    private func flushCommunityReportOutbox() async {
+        guard authState == .signedIn, let communityOutbox else { return }
+        guard let pending = try? await communityOutbox.pendingDrafts() else { return }
+        for draft in pending {
+            guard !Task.isCancelled else { return }
+            do {
+                _ = try await api.submitCommunityReport(draft)
+                try await communityOutbox.removeDraft(id: draft.id)
+            } catch {
+                return
+            }
         }
     }
 

@@ -266,7 +266,11 @@ struct ProductionCopAPIClient: CopAPIClientProtocol {
 
     func submitCommunityReport(_ draft: CommunityReportDraft) async throws -> CommunityReportSubmission {
         let createRequest = CommunityReportCreateRequest(draft: draft)
-        let created: CommunityReportAPIResponse = try await http.post("/api/v1/community/reports", body: createRequest)
+        let created: CommunityReportAPIResponse = try await http.post(
+            "/api/v1/community/reports",
+            body: createRequest,
+            headers: ["X-Idempotency-Key": draft.id]
+        )
         let uploadedAttachmentCount = try await uploadAttachments(draft.attachments, reportId: created.reportId)
         try await http.post("/api/v1/community/reports/\(Self.pathSegment(created.reportId))/submit")
         return CommunityReportSubmission(
@@ -563,6 +567,8 @@ private struct CommunityReportCreateRequest: Encodable, Sendable {
     var visibility: String
     var groupId: String?
     var groupName: String
+    var captureContext: CommunityReportCaptureContext?
+    var roadContext: CommunityReportRoadContext?
 
     init(draft: CommunityReportDraft) {
         category = draft.category
@@ -574,6 +580,8 @@ private struct CommunityReportCreateRequest: Encodable, Sendable {
         visibility = "community"
         groupId = draft.groupId
         groupName = draft.groupName
+        captureContext = draft.captureContext
+        roadContext = draft.roadContext
     }
 }
 
