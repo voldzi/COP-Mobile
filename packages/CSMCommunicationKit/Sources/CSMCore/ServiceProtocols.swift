@@ -39,6 +39,7 @@ protocol CopAPIClientProtocol: Sendable {
     ) async throws -> MobileDeviceRegistrationTicketResponse
     func submitCommunityReport(_ draft: CommunityReportDraft) async throws -> CommunityReportSubmission
     func communityReports() async throws -> [CommunityReport]
+    func confirmCommunityReport(reportId: String, value: CommunityReportConfirmationValue) async throws -> CommunityReport
 }
 
 extension CopAPIClientProtocol {

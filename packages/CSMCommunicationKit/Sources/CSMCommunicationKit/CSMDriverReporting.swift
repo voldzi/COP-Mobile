@@ -57,6 +57,66 @@ public struct CSMDriverReportDraft: Sendable {
     }
 }
 
+public enum CSMDriverReportConfirmation: String, Sendable {
+    case stillThere = "still_there"
+    case notThere = "not_there"
+}
+
+public enum CSMDriverReportConfidence: String, Sendable {
+    case low
+    case medium
+    case high
+}
+
+public struct CSMNearbyDriverReport: Identifiable, Sendable {
+    public var id: String
+    public var category: CSMDriverReportCategory
+    public var title: String
+    public var detail: String?
+    public var latitude: Double
+    public var longitude: Double
+    public var distanceMeters: Double
+    public var observedAt: Date
+    public var validUntil: Date?
+    public var confidence: CSMDriverReportConfidence
+    public var confidencePercent: Int
+    public var stillThereCount: Int
+    public var notThereCount: Int
+    public var currentConfirmation: CSMDriverReportConfirmation?
+
+    public init(
+        id: String,
+        category: CSMDriverReportCategory,
+        title: String,
+        detail: String?,
+        latitude: Double,
+        longitude: Double,
+        distanceMeters: Double,
+        observedAt: Date,
+        validUntil: Date?,
+        confidence: CSMDriverReportConfidence,
+        confidencePercent: Int,
+        stillThereCount: Int,
+        notThereCount: Int,
+        currentConfirmation: CSMDriverReportConfirmation?
+    ) {
+        self.id = id
+        self.category = category
+        self.title = title
+        self.detail = detail
+        self.latitude = latitude
+        self.longitude = longitude
+        self.distanceMeters = distanceMeters
+        self.observedAt = observedAt
+        self.validUntil = validUntil
+        self.confidence = confidence
+        self.confidencePercent = confidencePercent
+        self.stillThereCount = stillThereCount
+        self.notThereCount = notThereCount
+        self.currentConfirmation = currentConfirmation
+    }
+}
+
 public enum CSMDriverReportDeliveryState: String, Sendable {
     case queued
     case submitted
@@ -89,6 +149,81 @@ public enum CSMDriverReportError: LocalizedError, Sendable {
 }
 
 public extension CSMCommunicationRuntime {
+    func nearbyDriverReports(
+        latitude: Double,
+        longitude: Double,
+        radiusMeters: Double = 10_000
+    ) async throws -> [CSMNearbyDriverReport] {
+        guard (-90 ... 90).contains(latitude), (-180 ... 180).contains(longitude), radiusMeters > 0 else {
+            throw CSMDriverReportError.invalidLocation
+        }
+        await startIfNeeded()
+        let now = Date.now
+        return try await driverReportService.reports().compactMap { report in
+            guard let category = CSMDriverReportCategory(rawValue: report.category.rawValue),
+                  ["submitted", "published"].contains(report.status),
+                  report.validUntil.map({ $0 >= now }) ?? true
+            else { return nil }
+            let distance = Self.distanceMeters(
+                fromLatitude: latitude,
+                longitude: longitude,
+                toLatitude: report.location.lat,
+                longitude: report.location.lon
+            )
+            guard distance <= radiusMeters else { return nil }
+            let confidence = CSMDriverReportConfidence(rawValue: report.confidenceSummary?.level ?? "low") ?? .low
+            return CSMNearbyDriverReport(
+                id: report.reportId,
+                category: category,
+                title: report.title,
+                detail: report.description,
+                latitude: report.location.lat,
+                longitude: report.location.lon,
+                distanceMeters: distance,
+                observedAt: report.observedAt,
+                validUntil: report.validUntil,
+                confidence: confidence,
+                confidencePercent: report.confidenceSummary?.scorePercent ?? 0,
+                stillThereCount: report.confirmations.stillThereCount,
+                notThereCount: report.confirmations.notThereCount,
+                currentConfirmation: report.confirmations.currentActorValue.flatMap {
+                    CSMDriverReportConfirmation(rawValue: $0.rawValue)
+                }
+            )
+        }
+        .sorted { $0.distanceMeters < $1.distanceMeters }
+    }
+
+    @discardableResult
+    func confirmDriverReport(
+        id: String,
+        confirmation: CSMDriverReportConfirmation
+    ) async throws -> CSMNearbyDriverReport? {
+        await startIfNeeded()
+        let value = CommunityReportConfirmationValue(rawValue: confirmation.rawValue) ?? .stillThere
+        let report = try await driverReportService.confirm(reportId: id, value: value)
+        guard let category = CSMDriverReportCategory(rawValue: report.category.rawValue) else { return nil }
+        let confidence = CSMDriverReportConfidence(rawValue: report.confidenceSummary?.level ?? "low") ?? .low
+        return CSMNearbyDriverReport(
+            id: report.reportId,
+            category: category,
+            title: report.title,
+            detail: report.description,
+            latitude: report.location.lat,
+            longitude: report.location.lon,
+            distanceMeters: 0,
+            observedAt: report.observedAt,
+            validUntil: report.validUntil,
+            confidence: confidence,
+            confidencePercent: report.confidenceSummary?.scorePercent ?? 0,
+            stillThereCount: report.confirmations.stillThereCount,
+            notThereCount: report.confirmations.notThereCount,
+            currentConfirmation: report.confirmations.currentActorValue.flatMap {
+                CSMDriverReportConfirmation(rawValue: $0.rawValue)
+            }
+        )
+    }
+
     func submitDriverReport(_ draft: CSMDriverReportDraft) async throws -> CSMDriverReportReceipt {
         guard (-90 ... 90).contains(draft.latitude), (-180 ... 180).contains(draft.longitude) else {
             throw CSMDriverReportError.invalidLocation
@@ -137,6 +272,23 @@ public extension CSMCommunicationRuntime {
             state: submission == nil ? .queued : .submitted,
             recordedAt: submission?.submittedAt ?? .now
         )
+    }
+
+    private static func distanceMeters(
+        fromLatitude: Double,
+        longitude fromLongitude: Double,
+        toLatitude: Double,
+        longitude toLongitude: Double
+    ) -> Double {
+        let earthRadius = 6_371_000.0
+        let latitudeDelta = (toLatitude - fromLatitude) * .pi / 180
+        let longitudeDelta = (toLongitude - fromLongitude) * .pi / 180
+        let fromLatitudeRadians = fromLatitude * .pi / 180
+        let toLatitudeRadians = toLatitude * .pi / 180
+        let value = sin(latitudeDelta / 2) * sin(latitudeDelta / 2)
+            + cos(fromLatitudeRadians) * cos(toLatitudeRadians)
+                * sin(longitudeDelta / 2) * sin(longitudeDelta / 2)
+        return earthRadius * 2 * atan2(sqrt(value), sqrt(1 - value))
     }
 
     private static func defaultDriverReportTitle(_ category: CSMDriverReportCategory) -> String {

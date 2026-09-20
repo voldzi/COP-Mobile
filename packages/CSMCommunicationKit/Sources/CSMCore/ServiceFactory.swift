@@ -99,6 +99,26 @@ enum ServiceFactory {
         )
     }
 
+    static func makeDriverReportService(
+        configuration: AppConfiguration = .fromBundle()
+    ) -> DriverReportService {
+        if configuration.usePreviewServices {
+            return DriverReportService(api: PreviewCopAPIClient())
+        }
+        let keychain = KeychainCredentialStore()
+        let tokenLifecycle = OIDCTokenLifecycle(
+            issuer: configuration.oidcIssuer,
+            clientId: configuration.oidcClientId,
+            credentialStore: keychain
+        )
+        let http = HTTPClient(
+            baseURL: configuration.copBaseURL,
+            tokenProvider: tokenLifecycle,
+            requiresAuthorization: true
+        )
+        return DriverReportService(api: ProductionCopAPIClient(http: http))
+    }
+
     @MainActor
     private static func makeProductionAuthSession(
         configuration: AppConfiguration,
@@ -146,4 +166,24 @@ actor MatrixMessagingClientPlaceholder: MessagingClientProtocol {
     }
 
     func registerPusher(pushKey: String, pushGatewayURL: URL) async {}
+}
+
+
+actor DriverReportService {
+    private let api: any CopAPIClientProtocol
+
+    init(api: any CopAPIClientProtocol) {
+        self.api = api
+    }
+
+    func reports() async throws -> [CommunityReport] {
+        try await api.communityReports()
+    }
+
+    func confirm(
+        reportId: String,
+        value: CommunityReportConfirmationValue
+    ) async throws -> CommunityReport {
+        try await api.confirmCommunityReport(reportId: reportId, value: value)
+    }
 }

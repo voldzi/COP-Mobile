@@ -585,6 +585,21 @@ struct PreviewCopAPIClient: CopAPIClientProtocol, Sendable {
         ]
     }
 
+    func confirmCommunityReport(
+        reportId: String,
+        value: CommunityReportConfirmationValue
+    ) async throws -> CommunityReport {
+        guard var report = try await communityReports().first(where: { $0.reportId == reportId }) else {
+            throw CSMServiceError.unavailable("Hlášení už není dostupné.")
+        }
+        report.confirmations.currentActorValue = value
+        report.confirmations.totalCount = max(1, report.confirmations.totalCount)
+        report.confirmations.stillThereCount = value == .stillThere ? 1 : 0
+        report.confirmations.notThereCount = value == .notThere ? 1 : 0
+        report.confirmations.lastConfirmedAt = .now
+        return report
+    }
+
     func submitCommunityReport(_ draft: CommunityReportDraft) async throws -> CommunityReportSubmission {
         CommunityReportSubmission(
             reportId: draft.id,

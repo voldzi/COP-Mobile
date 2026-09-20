@@ -264,6 +264,16 @@ struct ProductionCopAPIClient: CopAPIClientProtocol {
         return response.items
     }
 
+    func confirmCommunityReport(
+        reportId: String,
+        value: CommunityReportConfirmationValue
+    ) async throws -> CommunityReport {
+        try await http.put(
+            "/api/v1/community/reports/\(Self.pathSegment(reportId))/confirmation",
+            body: CommunityReportConfirmationRequest(value: value)
+        )
+    }
+
     func submitCommunityReport(_ draft: CommunityReportDraft) async throws -> CommunityReportSubmission {
         let createRequest = CommunityReportCreateRequest(draft: draft)
         let created: CommunityReportAPIResponse = try await http.post(
@@ -555,6 +565,10 @@ private struct MobileDeviceRegistrationAPIResponse: Decodable, Sendable {
         var deviceSessionId: String
         var pushTokenRegistered: Bool
     }
+}
+
+private struct CommunityReportConfirmationRequest: Encodable, Sendable {
+    var value: CommunityReportConfirmationValue
 }
 
 private struct CommunityReportCreateRequest: Encodable, Sendable {

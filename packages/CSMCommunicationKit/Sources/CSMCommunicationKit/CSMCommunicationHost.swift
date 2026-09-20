@@ -343,6 +343,7 @@ public final class CSMCommunicationRuntime {
     // The standalone native communication runtime owns its APNs + PushKit
     // record. Delivery must not depend on a hidden web session being mounted.
     let model = ServiceFactory.makeCommunicationModel(managesMessagingDeviceRegistration: true)
+    let driverReportService = ServiceFactory.makeDriverReportService()
     private(set) var accessState: NativeCommunicationAccessState = .checking
     private var started = false
     private var startTask: Task<Void, Never>?

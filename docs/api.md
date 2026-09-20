@@ -97,6 +97,10 @@ formát. Bridge má vlastní lokální error contract popsaný níže.
 - pro Jizdu omezený driver-report transport nad
   `POST /api/v1/community/reports` a následným `/submit`; stabilní UUID se
   posílá jako `X-Idempotency-Key` a payload odpovídá COP OpenAPI;
+- bezstavový feed aktivních dopravních hlášení a potvrzení přes
+  `GET /api/v1/community/reports` a
+  `PUT /api/v1/community/reports/{reportId}/confirmation`; modul uchovává jen
+  agregované počty, důvěru a vlastní volbu vrácenou autoritativním COP API;
 
 - OIDC discovery/authorize/token/logout flow pro veřejný klient `csm-mobile`,
   Authorization Code + PKCE a redirect scheme `csm`;

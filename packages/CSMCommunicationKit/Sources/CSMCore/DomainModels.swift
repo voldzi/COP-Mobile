@@ -1641,6 +1641,33 @@ struct CommunityReportSubmission: Codable, Identifiable, Equatable, Hashable, Se
     var id: String { reportId }
 }
 
+enum CommunityReportConfirmationValue: String, Codable, Sendable {
+    case stillThere = "still_there"
+    case notThere = "not_there"
+}
+
+struct CommunityReportConfirmationSummary: Decodable, Equatable, Hashable, Sendable {
+    var currentActorValue: CommunityReportConfirmationValue?
+    var lastConfirmedAt: Date?
+    var notThereCount: Int
+    var stillThereCount: Int
+    var totalCount: Int
+
+    static let empty = CommunityReportConfirmationSummary(
+        currentActorValue: nil,
+        lastConfirmedAt: nil,
+        notThereCount: 0,
+        stillThereCount: 0,
+        totalCount: 0
+    )
+}
+
+struct CommunityReportConfidenceSummary: Decodable, Equatable, Hashable, Sendable {
+    var level: String
+    var scorePercent: Int
+    var detail: String?
+}
+
 struct CommunityReport: Decodable, Identifiable, Equatable, Hashable, Sendable {
     var reportId: String
     var category: ReportCategory
@@ -1653,6 +1680,9 @@ struct CommunityReport: Decodable, Identifiable, Equatable, Hashable, Sendable {
     var groupName: String?
     var attachmentCount: Int
     var observedAt: Date
+    var validUntil: Date?
+    var confirmations: CommunityReportConfirmationSummary
+    var confidenceSummary: CommunityReportConfidenceSummary?
 
     var id: String { reportId }
 
@@ -1670,6 +1700,9 @@ struct CommunityReport: Decodable, Identifiable, Equatable, Hashable, Sendable {
         case attachmentCount
         case attachments
         case observedAt
+        case validUntil
+        case confirmations
+        case confidenceSummary
         case properties
     }
 
@@ -1684,7 +1717,10 @@ struct CommunityReport: Decodable, Identifiable, Equatable, Hashable, Sendable {
         groupId: String?,
         groupName: String?,
         attachmentCount: Int,
-        observedAt: Date
+        observedAt: Date,
+        validUntil: Date? = nil,
+        confirmations: CommunityReportConfirmationSummary = .empty,
+        confidenceSummary: CommunityReportConfidenceSummary? = nil
     ) {
         self.reportId = reportId
         self.category = category
@@ -1697,6 +1733,9 @@ struct CommunityReport: Decodable, Identifiable, Equatable, Hashable, Sendable {
         self.groupName = groupName
         self.attachmentCount = attachmentCount
         self.observedAt = observedAt
+        self.validUntil = validUntil
+        self.confirmations = confirmations
+        self.confidenceSummary = confidenceSummary
     }
 
     init(from decoder: Decoder) throws {
@@ -1711,6 +1750,9 @@ struct CommunityReport: Decodable, Identifiable, Equatable, Hashable, Sendable {
         groupId = try container.decodeIfPresent(String.self, forKey: .groupId) ?? properties?.groupId
         groupName = try container.decodeIfPresent(String.self, forKey: .groupName) ?? properties?.groupName
         observedAt = try container.decodeIfPresent(Date.self, forKey: .observedAt) ?? .distantPast
+        validUntil = try container.decodeIfPresent(Date.self, forKey: .validUntil) ?? properties?.validUntil
+        confirmations = try container.decodeIfPresent(CommunityReportConfirmationSummary.self, forKey: .confirmations) ?? .empty
+        confidenceSummary = try container.decodeIfPresent(CommunityReportConfidenceSummary.self, forKey: .confidenceSummary)
 
         if let severity = try container.decodeIfPresent(AlertSeverity.self, forKey: .severity) {
             self.severity = severity
@@ -1737,6 +1779,7 @@ private struct CommunityReportProperties: Decodable {
     var groupId: String?
     var groupName: String?
     var hazardSeverity: String?
+    var validUntil: Date?
 }
 
 private struct CommunityReportAttachmentSummary: Decodable {
