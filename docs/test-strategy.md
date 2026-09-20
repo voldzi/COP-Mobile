@@ -543,3 +543,9 @@ komunikace → práce s uloženými zprávami → opětovné připojení → ná
 Ověřit také VoiceOver, největší velikost textu, Omezit pohyb a rozdílnou
 identitu webu/nativního přihlášení. Výsledek preview testu není důkazem
 průchodu této fyzické brány.
+
+The iOS test script also runs `CSMCommunicationKit-Package` tests. These verify
+report spatial query propagation to COP, bounded/dateline geometry, inactive and
+expired record filtering, stable sorting, duplicate IDs, and older response
+decoding. The offline fallback UI regression remains in `COPMobileLaunchUITests`:
+its communication button must open chat and expose a separate accessibility node.

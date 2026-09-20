@@ -38,11 +38,15 @@ protocol CopAPIClientProtocol: Sendable {
         bundleId: String
     ) async throws -> MobileDeviceRegistrationTicketResponse
     func submitCommunityReport(_ draft: CommunityReportDraft) async throws -> CommunityReportSubmission
-    func communityReports() async throws -> [CommunityReport]
+    func communityReports(query: DriverReportQuery?) async throws -> [CommunityReport]
     func confirmCommunityReport(reportId: String, value: CommunityReportConfirmationValue) async throws -> CommunityReport
 }
 
 extension CopAPIClientProtocol {
+    func communityReports() async throws -> [CommunityReport] {
+        try await communityReports(query: nil)
+    }
+
     func queryAIChatAgent(_ request: CopAIChatAgentRequest) async throws -> CopAIChatAgentResponse {
         throw CSMServiceError.unavailable("COP AI agent neni v tomto prostredi dostupny.")
     }

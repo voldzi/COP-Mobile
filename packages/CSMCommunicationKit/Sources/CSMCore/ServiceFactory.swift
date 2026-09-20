@@ -176,8 +176,8 @@ actor DriverReportService {
         self.api = api
     }
 
-    func reports() async throws -> [CommunityReport] {
-        try await api.communityReports()
+    func reports(query: DriverReportQuery) async throws -> [CommunityReport] {
+        try await api.communityReports(query: query)
     }
 
     func confirm(

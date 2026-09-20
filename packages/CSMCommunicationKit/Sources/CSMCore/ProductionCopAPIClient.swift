@@ -259,8 +259,10 @@ struct ProductionCopAPIClient: CopAPIClientProtocol {
         )
     }
 
-    func communityReports() async throws -> [CommunityReport] {
-        let response: CommunityReportListResponse = try await http.get("/api/v1/community/reports")
+    func communityReports(query: DriverReportQuery?) async throws -> [CommunityReport] {
+        let response: CommunityReportListResponse = try await http.get(
+            "/api/v1/community/reports", queryItems: query?.queryItems ?? []
+        )
         return response.items
     }
 

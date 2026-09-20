@@ -554,7 +554,7 @@ struct PreviewCopAPIClient: CopAPIClientProtocol, Sendable {
         )
     }
 
-    func communityReports() async throws -> [CommunityReport] {
+    func communityReports(query: DriverReportQuery?) async throws -> [CommunityReport] {
         [
             CommunityReport(
                 reportId: "community-fire-vrbno",

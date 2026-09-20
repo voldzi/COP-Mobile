@@ -50,3 +50,14 @@ xcodebuild \
   -skipPackageUpdates \
   CODE_SIGNING_ALLOWED=NO \
   test
+
+# Package tests cover the shared Jizda transport and are not included by the app scheme.
+(
+  cd "$root/packages/CSMCommunicationKit"
+  xcodebuild \
+    -scheme CSMCommunicationKit-Package \
+    -configuration Debug \
+    -destination "platform=iOS Simulator,id=$destination" \
+    -skipPackageUpdates \
+    test
+)

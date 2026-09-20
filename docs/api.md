@@ -428,3 +428,17 @@ Nesmějí se sloučit ani potvrdit bez explicitního correlation ID.
 - Release gate ověří nekompatibilní web/host verzi jako řízený `BLOCKED` stav.
 - Změna COP REST API vždy začíná úpravou JSON-first OpenAPI; tento dokument
   nenahrazuje binding wire contract.
+
+## Nearby driver-report feed
+
+The shared authenticated client filters COP reports by `bbox`, traffic
+`categories`, active `statuses`, `includeExpired=false` and `limit=500` before
+local distance sorting. A capped response is marked potentially incomplete;
+expired/inactive/out-of-radius reports are discarded and duplicate IDs removed.
+The radius is bounded to 50 km and dateline queries are split. Only COP API is
+contacted. `nearbyDriverReportFeed` exposes successful fetch time and completeness;
+errors propagate without being converted into an empty success. Nearby is radial,
+not directional road matching. The legacy array facade remains compatible.
+
+COP computes category expiry from the original observation time, including offline
+uploads. The support score excludes the author and is not a probability of truth.

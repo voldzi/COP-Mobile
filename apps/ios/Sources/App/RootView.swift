@@ -147,22 +147,29 @@ private struct TechnicalFallbackView: View {
   var body: some View {
     ZStack {
       Color(.systemBackground).ignoresSafeArea()
-      ContentUnavailableView {
-        Label(title, systemImage: "network.slash")
-      } description: {
-        Text(message)
-      } actions: {
-        if let openChat {
-          Button("Otevřít komunikaci", action: openChat)
-            .buttonStyle(.borderedProminent)
-            .accessibilityIdentifier("app.openNativeChat")
+      VStack(spacing: 20) {
+        ContentUnavailableView {
+          Label(title, systemImage: "network.slash")
+        } description: {
+          Text(message)
         }
-        if let retry {
-          Button("Zkusit znovu", action: retry)
-            .buttonStyle(.bordered)
+        .fixedSize(horizontal: false, vertical: true)
+
+        VStack(spacing: 12) {
+          if let openChat {
+            Button("Otevřít komunikaci", action: openChat)
+              .buttonStyle(.borderedProminent)
+              .accessibilityIdentifier("app.openNativeChat")
+          }
+          if let retry {
+            Button("Zkusit znovu", action: retry)
+              .buttonStyle(.bordered)
+              .accessibilityIdentifier("app.retryMap")
+          }
         }
       }
       .padding()
+      .accessibilityElement(children: .contain)
       .accessibilityIdentifier("app.technicalFallback")
     }
   }

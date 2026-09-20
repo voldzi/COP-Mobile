@@ -97,6 +97,20 @@ final class HTTPClientTests: XCTestCase {
         )
     }
 
+    func testDriverFeedUsesOnlyCOPAndForwardsSpatialQuery() async throws {
+        PressureURLProtocol.configure { _ in (200, #"{"items":[]}"#) }
+        let api = ProductionCopAPIClient(http: HTTPClient(baseURL: URL(string: "https://cop.test")!, session: makeSession()))
+        let query = try XCTUnwrap(DriverReportQuery.nearby(latitude: 50.08, longitude: 14.42, radiusMeters: 10_000).first)
+        let reports = try await api.communityReports(query: query)
+        XCTAssertTrue(reports.isEmpty)
+        let request = try XCTUnwrap(PressureURLProtocol.lastRequest)
+        XCTAssertEqual(request.url?.host, "cop.test")
+        XCTAssertEqual(request.url?.path, "/api/v1/community/reports")
+        let components = try XCTUnwrap(URLComponents(url: request.url!, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "bbox" })?.value, query.queryItems.first?.value)
+        XCTAssertEqual(PressureURLProtocol.requestCount, 1)
+    }
+
     private func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [PressureURLProtocol.self]

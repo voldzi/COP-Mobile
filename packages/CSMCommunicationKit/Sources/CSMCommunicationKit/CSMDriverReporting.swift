@@ -154,44 +154,29 @@ public extension CSMCommunicationRuntime {
         longitude: Double,
         radiusMeters: Double = 10_000
     ) async throws -> [CSMNearbyDriverReport] {
-        guard (-90 ... 90).contains(latitude), (-180 ... 180).contains(longitude), radiusMeters > 0 else {
-            throw CSMDriverReportError.invalidLocation
-        }
+        try await nearbyDriverReportFeed(latitude: latitude, longitude: longitude, radiusMeters: radiusMeters).reports
+    }
+
+    func nearbyDriverReportFeed(
+        latitude: Double,
+        longitude: Double,
+        radiusMeters: Double = 10_000
+    ) async throws -> CSMDriverReportFeed {
+        let queries = try DriverReportQuery.nearby(latitude: latitude, longitude: longitude, radiusMeters: radiusMeters)
         await startIfNeeded()
-        let now = Date.now
-        return try await driverReportService.reports().compactMap { report in
-            guard let category = CSMDriverReportCategory(rawValue: report.category.rawValue),
-                  ["submitted", "published"].contains(report.status),
-                  report.validUntil.map({ $0 >= now }) ?? true
-            else { return nil }
-            let distance = Self.distanceMeters(
-                fromLatitude: latitude,
-                longitude: longitude,
-                toLatitude: report.location.lat,
-                longitude: report.location.lon
-            )
-            guard distance <= radiusMeters else { return nil }
-            let confidence = CSMDriverReportConfidence(rawValue: report.confidenceSummary?.level ?? "low") ?? .low
-            return CSMNearbyDriverReport(
-                id: report.reportId,
-                category: category,
-                title: report.title,
-                detail: report.description,
-                latitude: report.location.lat,
-                longitude: report.location.lon,
-                distanceMeters: distance,
-                observedAt: report.observedAt,
-                validUntil: report.validUntil,
-                confidence: confidence,
-                confidencePercent: report.confidenceSummary?.scorePercent ?? 0,
-                stillThereCount: report.confirmations.stillThereCount,
-                notThereCount: report.confirmations.notThereCount,
-                currentConfirmation: report.confirmations.currentActorValue.flatMap {
-                    CSMDriverReportConfirmation(rawValue: $0.rawValue)
-                }
-            )
+        var items: [CommunityReport] = []
+        var mayBeIncomplete = false
+        for query in queries {
+            try Task.checkCancellation()
+            let batch = try await driverReportService.reports(query: query)
+            mayBeIncomplete = mayBeIncomplete || batch.count >= DriverReportQuery.limit
+            items.append(contentsOf: batch)
         }
-        .sorted { $0.distanceMeters < $1.distanceMeters }
+        try Task.checkCancellation()
+        return DriverReportFeedProjector.project(
+            items, latitude: latitude, longitude: longitude, radiusMeters: radiusMeters,
+            now: .now, mayBeIncomplete: mayBeIncomplete
+        )
     }
 
     @discardableResult
@@ -272,23 +257,6 @@ public extension CSMCommunicationRuntime {
             state: submission == nil ? .queued : .submitted,
             recordedAt: submission?.submittedAt ?? .now
         )
-    }
-
-    private static func distanceMeters(
-        fromLatitude: Double,
-        longitude fromLongitude: Double,
-        toLatitude: Double,
-        longitude toLongitude: Double
-    ) -> Double {
-        let earthRadius = 6_371_000.0
-        let latitudeDelta = (toLatitude - fromLatitude) * .pi / 180
-        let longitudeDelta = (toLongitude - fromLongitude) * .pi / 180
-        let fromLatitudeRadians = fromLatitude * .pi / 180
-        let toLatitudeRadians = toLatitude * .pi / 180
-        let value = sin(latitudeDelta / 2) * sin(latitudeDelta / 2)
-            + cos(fromLatitudeRadians) * cos(toLatitudeRadians)
-                * sin(longitudeDelta / 2) * sin(longitudeDelta / 2)
-        return earthRadius * 2 * atan2(sqrt(value), sqrt(1 - value))
     }
 
     private static func defaultDriverReportTitle(_ category: CSMDriverReportCategory) -> String {
