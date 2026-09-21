@@ -114,6 +114,42 @@ final class ChatArchitectureTests: XCTestCase {
         XCTAssertNotEqual(normalized[0].avatarDataUrl, "data:image/png;base64,self-avatar")
     }
 
+    func testDirectConversationKeepsResolvedAvatarWhilePeerProfileCatchesUp() {
+        let actor = AuthenticatedActor(
+            subjectId: "oidc-current-user",
+            username: "current-user",
+            displayName: "Current User",
+            roles: ["user"]
+        )
+        let conversation = Conversation(
+            conversationId: "direct-room",
+            title: "COP Operator",
+            type: .direct,
+            status: "active",
+            encrypted: true,
+            e2eeRequired: true,
+            memberCount: 2,
+            mapLinkCount: 0,
+            members: [
+                ConversationMember(userId: "current-user", displayName: "Current User"),
+                ConversationMember(userId: "cop.operator", displayName: "COP Operator")
+            ],
+            mapLinks: [],
+            conversationAvatarDataUrl: "data:image/png;base64,resolved-avatar",
+            conversationAvatarUrl: "mxc://msg.example/operator-avatar",
+            updatedAt: .now
+        )
+
+        let normalized = CommunicationModel.normalizedConversationList(
+            [conversation],
+            actor: actor,
+            matrixUserId: "@current-user:matrix.example"
+        )
+
+        XCTAssertEqual(normalized[0].avatarDataUrl, "data:image/png;base64,resolved-avatar")
+        XCTAssertEqual(normalized[0].avatarUrl, "mxc://msg.example/operator-avatar")
+    }
+
     func testReducerDeduplicatesAndKeepsBoundedWindow() {
         var state = TimelineState(conversationID: "room")
         let messages = (0..<10_000).map { index in

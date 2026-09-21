@@ -2969,8 +2969,13 @@ final class CommunicationModel {
         } else if !peer.userId.isEmpty {
             result.title = peer.userId
         }
+        // The COP metadata service may already have resolved the peer avatar
+        // while Matrix membership is still catching up on a fresh device.
+        // Never erase that usable presentation with an incomplete member.
         result.conversationAvatarDataUrl = nonEmptyValue(peer.avatarDataUrl)
+            ?? nonEmptyValue(result.conversationAvatarDataUrl)
         result.conversationAvatarUrl = nonEmptyValue(peer.avatarUrl)
+            ?? nonEmptyValue(result.conversationAvatarUrl)
         return result
     }
 

@@ -143,6 +143,10 @@ Odchozí hovor je single-flight operace: opakovaný tap během zakládání nesm
 vytvořit druhý serverový hovor. Nový pokus i úspěšné připojení vždy odstraní
 starou chybu z prezentace. Call overlay zobrazuje jméno a avatar protistrany
 z právě otevřené konverzace; iniciály jsou pouze bezpečný fallback.
+Při čerstvé Matrix relaci se již serverem rozpoznaný avatar zachová, dokud se
+doplní členský profil. Neúspěšná příprava audio session kvůli dočasnému konfliktu
+s jiným systémovým médiem nesmí sama ukončit hovor; aktivaci následně převezme
+CallKit.
 
 Domovská obrazovka chatu používá jedinou kompaktní nativní hlavičku `Chat`,
 vyhledávání nahoře, přepínač `Skupiny / Lidé`, vodorovné `Oblíbené` a úsporné

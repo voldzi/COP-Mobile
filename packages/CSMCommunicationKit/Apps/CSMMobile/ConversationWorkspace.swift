@@ -888,6 +888,7 @@ struct ChatView: View {
         if activeConversation.type == .direct {
             return normalizedAvatarDataUrl(
                 appModel.directConversationPeer(in: activeConversation)?.avatarDataUrl
+                    ?? activeConversation.avatarDataUrl
             )
         }
         return normalizedAvatarDataUrl(activeConversation.avatarDataUrl)
@@ -898,6 +899,7 @@ struct ChatView: View {
         if activeConversation.type == .direct {
             return normalizedAvatarUrl(
                 appModel.directConversationPeer(in: activeConversation)?.avatarUrl
+                    ?? activeConversation.avatarUrl
             )
         }
         return normalizedAvatarUrl(activeConversation.avatarUrl)

@@ -777,22 +777,18 @@ public final class VoiceCallService:
       action.fail()
       return
     }
-    do {
-      try configureAudioSession(action: "start")
-      context.registeredWithCallKit = true
-      calls[action.callUUID] = context
-      action.fulfill()
-      provider.reportOutgoingCall(with: action.callUUID, startedConnectingAt: Date())
-      publish(action.callUUID)
-      guard let session = mediaSession(for: context.call) else {
-        throw CSMVoiceCallControlError.mediaUnavailable
-      }
-      Task { @MainActor [weak self] in
-        await self?.connectMedia(session: session, uuid: action.callUUID)
-      }
-    } catch {
-      action.fail()
-      fail(uuid: action.callUUID, error: error)
+    prepareAudioSession(action: "start")
+    context.registeredWithCallKit = true
+    calls[action.callUUID] = context
+    action.fulfill()
+    provider.reportOutgoingCall(with: action.callUUID, startedConnectingAt: Date())
+    publish(action.callUUID)
+    guard let session = mediaSession(for: context.call) else {
+      fail(uuid: action.callUUID, error: CSMVoiceCallControlError.mediaUnavailable)
+      return
+    }
+    Task { @MainActor [weak self] in
+      await self?.connectMedia(session: session, uuid: action.callUUID)
     }
   }
 
@@ -805,7 +801,7 @@ public final class VoiceCallService:
       return
     }
     do {
-      try configureAudioSession(action: "answer")
+      prepareAudioSession(action: "answer")
       context.answered = true
       calls[action.callUUID] = context
       publish(action.callUUID)
@@ -1250,7 +1246,7 @@ public final class VoiceCallService:
     }
   }
 
-  private func configureAudioSession(action: String) throws {
+  private func prepareAudioSession(action: String) {
     let session = AVAudioSession.sharedInstance()
     guard VoiceCallAudioSessionPolicy.needsConfiguration(
       category: session.category,
@@ -1261,8 +1257,21 @@ public final class VoiceCallService:
       CallDiagnosticStore.record("audio.configuration.reused", result: action)
       return
     }
-    try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP])
-    CallDiagnosticStore.record("audio.configuration.prepared", result: action)
+    do {
+      try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP])
+      CallDiagnosticStore.record("audio.configuration.prepared", result: action)
+    } catch {
+      // CallKit owns activation. A WebKit or another audio client can make
+      // this optional pre-configuration fail transiently; the call must still
+      // proceed and use the session delivered by provider(_:didActivate:).
+      CallDiagnosticStore.record(
+        "audio.configuration.deferred",
+        result: "\(action):\(error.localizedDescription)"
+      )
+      logger.warning(
+        "Audio session preparation deferred for \(action, privacy: .public): \(error.localizedDescription, privacy: .public)"
+      )
+    }
   }
 
   @objc private func proximityStateDidChange() {
