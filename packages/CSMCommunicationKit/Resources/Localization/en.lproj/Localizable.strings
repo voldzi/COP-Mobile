@@ -745,10 +745,14 @@
 "login.content.title" = "Message content stays protected";
 "login.content.text" = "Sign-in does not share chat text, attachments, or conversation history.";
 "login.platform_notice" = "Before first sign-in, iPhone may show a system confirmation. It only connects the app with the verified sign-in page; it is not consent to share message content.";
+"login.different_account" = "Use a different account";
 "login.state.checking" = "Checking sign-in";
 "login.state.signing_in" = "Opening sign-in";
 "login.state.signed_in" = "Signed in";
 "login.state.signed_out" = "Continue to sign-in";
+"conversation.account.switch" = "Sign in with another account";
+"conversation.account.switch.confirm" = "Sign in with another account?";
+"conversation.account.switch.confirm_message" = "The current session will end and a clean sign-in will open so you can enter another account.";
 "report.section.new" = "New report";
 "report.title.placeholder" = "Title";
 "report.title.accessibility" = "Report title";

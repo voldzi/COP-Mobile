@@ -193,7 +193,8 @@ Automatizované integrační testy a ruční penetrační scénáře musí ově�
 - asset allowlist, skutečná velikost, SHA-256, quota, TTL a cleanup;
 - APNs/deep-link parsing bez vystavení tokenu nebo nepovolené route;
 - nativní OIDC state/issuer/redirect/PKCE validace, cancel, refresh, logout a
-  změna subjectu;
+  explicitní změna účtu (`prompt=login` + izolovaná webová relace bez převzetí
+  SSO cookie předchozího uživatele) a změna subjectu;
 - Matrix bootstrap/session restore, oddělené web/native device ID, encrypted
   timeline/outbox reducer, idempotentní retry a cross-user store isolation;
 - call presentation state machine, incoming/outgoing CallKit action mapping,

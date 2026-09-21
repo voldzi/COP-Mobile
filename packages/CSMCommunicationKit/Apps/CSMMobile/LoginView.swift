@@ -76,6 +76,22 @@ struct LoginView: View {
                         .disabled(appModel.authState == .signingIn || appModel.authState == .checking)
                         .accessibilityIdentifier("login.signInButton")
 
+                        Button {
+                            Task {
+                                await appModel.signIn(forceAuthentication: true)
+                            }
+                        } label: {
+                            Label(
+                                CSMLocalization.text("login.different_account", fallback: "Použít jiný účet"),
+                                systemImage: "person.2.badge.gearshape"
+                            )
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glass)
+                        .controlSize(.large)
+                        .disabled(appModel.authState == .signingIn || appModel.authState == .checking)
+                        .accessibilityIdentifier("login.useDifferentAccountButton")
+
                         if appModel.authState == .signingIn || appModel.authState == .checking {
                             ProgressView()
                                 .tint(.white)

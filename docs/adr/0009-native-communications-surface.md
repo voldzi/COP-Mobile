@@ -114,6 +114,12 @@ signalizace, ICE/TURN a médií a neúměrně zvýšilo riziko.
     `start`/`addParticipants` action; webový Matrix `GroupCall` zůstává jediným
     vlastníkem E2EE signalizace a médií. Peer mesh je omezen na šest účastníků.
     Server znovu ověřuje každého cílového uživatele vůči členství v místnosti.
+13. Explicitní změna chatového účtu je samostatný uživatelský tok. Ukončí
+    lokální nativní relaci a otevře OIDC Authorization Code + PKCE s
+    `prompt=login` v dočasné `ASWebAuthenticationSession`, takže autentizační
+    cookie předchozího uživatele nemůže bez další interakce obnovit stejný účet.
+    Běžný start aplikace nadále tiše obnovuje platnou Keychain relaci a běžné
+    přihlášení může využít existující organizační SSO.
 
 ## Superseded scope
 

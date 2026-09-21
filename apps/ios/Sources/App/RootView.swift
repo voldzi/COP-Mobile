@@ -10,37 +10,43 @@ struct RootView: View {
     switch model.configuration {
     case .success(let configuration):
       ZStack {
-        if !model.isUITesting {
-          WebHostView(configuration: configuration, model: model)
-        }
-
-        switch model.phase {
-        case .loading:
-          LoadingView(environment: configuration.environment) {
-            model.openNativeChat(expectedSubjectID: model.nativeChatExpectedSubjectID)
+        Group {
+          if !model.isUITesting {
+            WebHostView(configuration: configuration, model: model)
           }
-        case .webContent:
-          EmptyView()
-        case .offlineFallback(let code):
-          TechnicalFallbackView(
-            title: "Mapa se nenačetla",
-            message:
-              "Zkuste mapu načíst znovu nebo otevřete komunikaci. Dříve uložené zprávy mohou být dostupné i bez připojení.",
-            diagnosticCode: code,
-            retry: model.retry,
-            openChat: {
-              model.openNativeChat(expectedSubjectID: model.nativeChatExpectedSubjectID)
+
+          if model.surface != .chat {
+            switch model.phase {
+            case .loading:
+              LoadingView(environment: configuration.environment) {
+                model.openNativeChat(expectedSubjectID: model.nativeChatExpectedSubjectID)
+              }
+            case .webContent:
+              EmptyView()
+            case .offlineFallback(let code):
+              TechnicalFallbackView(
+                title: "Mapa se nenačetla",
+                message:
+                  "Zkuste mapu načíst znovu nebo otevřete komunikaci. Dříve uložené zprávy mohou být dostupné i bez připojení.",
+                diagnosticCode: code,
+                retry: model.retry,
+                openChat: {
+                  model.openNativeChat(expectedSubjectID: model.nativeChatExpectedSubjectID)
+                }
+              )
+            case .blocked(let code):
+              TechnicalFallbackView(
+                title: "Načtení bylo zablokováno",
+                message:
+                  "Origin nebo verze Device API neprošla bezpečnostní kontrolou. Nativní funkce zůstávají vypnuté.",
+                diagnosticCode: code,
+                retry: model.retry
+              )
             }
-          )
-        case .blocked(let code):
-          TechnicalFallbackView(
-            title: "Načtení bylo zablokováno",
-            message:
-              "Origin nebo verze Device API neprošla bezpečnostní kontrolou. Nativní funkce zůstávají vypnuté.",
-            diagnosticCode: code,
-            retry: model.retry
-          )
+          }
         }
+        .allowsHitTesting(model.surface != .chat)
+        .accessibilityHidden(model.surface == .chat)
 
         if model.surface == .chat {
           CSMCommunicationHost(

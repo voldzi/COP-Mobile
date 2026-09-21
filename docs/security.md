@@ -34,6 +34,12 @@ Chráníme zejména:
   Embedded chat tiše obnoví vlastní Keychain session a po explicitním tapu na
   Chat může spustit nativní OIDC Authorization Code + PKCE. Webové
   cookies/bearer tokeny se nečtou ani nepřenášejí do nativního klienta.
+- Přihlášení z odhlášeného stavu nabízí vedle běžného pokračování také
+  explicitní volbu jiného účtu. Změna účtu nejprve odstraní lokální nativní
+  relaci a následný OIDC požadavek používá `prompt=login` v izolované
+  `ASWebAuthenticationSession`, aby systém bez dotazu znovu nepoužil SSO cookie
+  předchozího uživatele. Platná Keychain relace se při běžném startu nadále
+  obnovuje bez interaktivního přihlášení.
 - Přihlášená mapa smí přes exact-origin bridge předat pouze bounded opaque
   očekávaný OIDC `subjectId`. Native jej porovná s actor subjectem z vlastního
   bootstrapu a při neshodě failuje zavřeně. Toto není credential bridge:

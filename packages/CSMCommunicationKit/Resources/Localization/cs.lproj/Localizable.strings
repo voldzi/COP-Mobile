@@ -745,10 +745,14 @@
 "login.content.title" = "Obsah zpráv zůstává chráněný";
 "login.content.text" = "Přihlášení nesdílí texty chatů, přílohy ani historii konverzací.";
 "login.platform_notice" = "iPhone může před prvním přihlášením zobrazit systémové potvrzení. Znamená jen propojení aplikace s ověřenou přihlašovací stránkou, ne souhlas se sdílením obsahu zpráv.";
+"login.different_account" = "Použít jiný účet";
 "login.state.checking" = "Kontroluji přihlášení";
 "login.state.signing_in" = "Otevírám přihlášení";
 "login.state.signed_in" = "Přihlášeno";
 "login.state.signed_out" = "Pokračovat k přihlášení";
+"conversation.account.switch" = "Přihlásit jiný účet";
+"conversation.account.switch.confirm" = "Přihlásit jiný účet?";
+"conversation.account.switch.confirm_message" = "Současná relace se ukončí a otevře se čisté přihlášení, ve kterém můžete zadat jiný účet.";
 "report.section.new" = "Nové hlášení";
 "report.title.placeholder" = "Název";
 "report.title.accessibility" = "Název hlášení";

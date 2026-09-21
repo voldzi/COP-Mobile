@@ -428,6 +428,11 @@ final class CommunicationModel {
         }
     }
 
+    func switchAccount() async {
+        await signOut()
+        await signIn(forceAuthentication: true)
+    }
+
     func signOut() async {
         try? await stopLiveLocationShare()
         if let messagingDeviceId, let messagingDeviceRegistration {

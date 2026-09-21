@@ -548,7 +548,9 @@ private struct CommunicationAccountProfileView: View {
     @Environment(CommunicationModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
     @State private var showsSignOutConfirmation = false
+    @State private var showsSwitchAccountConfirmation = false
     @State private var isSigningOut = false
+    @State private var isSwitchingAccount = false
 
     private var profile: OperatorProfilePreferences {
         appModel.effectiveOperatorProfile
@@ -604,6 +606,26 @@ private struct CommunicationAccountProfileView: View {
                 }
 
                 Section {
+                    Button {
+                        showsSwitchAccountConfirmation = true
+                    } label: {
+                        HStack {
+                            Label(
+                                CSMLocalization.text(
+                                    "conversation.account.switch",
+                                    fallback: "Přihlásit jiný účet"
+                                ),
+                                systemImage: "person.2.badge.gearshape"
+                            )
+                            Spacer()
+                            if isSwitchingAccount {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isSigningOut || isSwitchingAccount)
+                    .accessibilityIdentifier("chat.switchAccount")
+
                     Button(role: .destructive) {
                         showsSignOutConfirmation = true
                     } label: {
@@ -618,7 +640,7 @@ private struct CommunicationAccountProfileView: View {
                             }
                         }
                     }
-                    .disabled(isSigningOut)
+                    .disabled(isSigningOut || isSwitchingAccount)
                     .accessibilityIdentifier("chat.signOut")
                 } footer: {
                     Text(CSMLocalization.text(
@@ -634,8 +656,33 @@ private struct CommunicationAccountProfileView: View {
                     Button(CSMLocalization.text("common.done", fallback: "Hotovo")) {
                         dismiss()
                     }
-                    .disabled(isSigningOut)
+                    .disabled(isSigningOut || isSwitchingAccount)
                 }
+            }
+            .confirmationDialog(
+                CSMLocalization.text(
+                    "conversation.account.switch.confirm",
+                    fallback: "Přihlásit jiný účet?"
+                ),
+                isPresented: $showsSwitchAccountConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button(CSMLocalization.text(
+                    "conversation.account.switch",
+                    fallback: "Přihlásit jiný účet"
+                )) {
+                    isSwitchingAccount = true
+                    Task {
+                        await appModel.switchAccount()
+                        dismiss()
+                    }
+                }
+                Button(CSMLocalization.text("common.cancel", fallback: "Zrušit"), role: .cancel) {}
+            } message: {
+                Text(CSMLocalization.text(
+                    "conversation.account.switch.confirm_message",
+                    fallback: "Současná relace se ukončí a otevře se čisté přihlášení, ve kterém můžete zadat jiný účet."
+                ))
             }
             .confirmationDialog(
                 CSMLocalization.text("conversation.account.sign_out.confirm", fallback: "Odhlásit z chatu?"),

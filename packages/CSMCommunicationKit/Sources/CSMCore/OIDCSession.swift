@@ -276,6 +276,53 @@ struct OIDCTokenExchanger: Sendable {
     }
 }
 
+struct OIDCInteractiveAuthenticationPolicy: Equatable, Sendable {
+    let forceAuthentication: Bool
+
+    var prompt: String? {
+        forceAuthentication ? "login" : nil
+    }
+
+    var prefersEphemeralWebBrowserSession: Bool {
+        forceAuthentication
+    }
+}
+
+enum OIDCAuthorizationRequestBuilder {
+    static func makeURL(
+        authorizationEndpoint: URL,
+        clientId: String,
+        redirectURI: String,
+        scope: String,
+        state: String,
+        nonce: String,
+        challenge: String,
+        challengeMethod: String,
+        policy: OIDCInteractiveAuthenticationPolicy
+    ) throws -> URL {
+        guard var components = URLComponents(url: authorizationEndpoint, resolvingAgainstBaseURL: false) else {
+            throw CSMServiceError.invalidState("Invalid OIDC authorization endpoint.")
+        }
+        components.queryItems = [
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "client_id", value: clientId),
+            URLQueryItem(name: "redirect_uri", value: redirectURI),
+            URLQueryItem(name: "scope", value: scope),
+            URLQueryItem(name: "state", value: state),
+            URLQueryItem(name: "nonce", value: nonce),
+            URLQueryItem(name: "code_challenge", value: challenge),
+            URLQueryItem(name: "code_challenge_method", value: challengeMethod)
+        ]
+        if let prompt = policy.prompt {
+            components.queryItems?.append(URLQueryItem(name: "prompt", value: prompt))
+        }
+        guard let authorizationURL = components.url else {
+            throw CSMServiceError.invalidState("Invalid OIDC authorization URL.")
+        }
+        return authorizationURL
+    }
+}
+
 #if os(iOS)
 import AuthenticationServices
 import UIKit
@@ -297,31 +344,28 @@ final class OIDCWebAuthenticator: NSObject, ASWebAuthenticationPresentationConte
         let redirectURI = "\(redirectScheme)://oauth/callback"
         let state = UUID().uuidString
         let nonce = UUID().uuidString
+        let policy = OIDCInteractiveAuthenticationPolicy(forceAuthentication: forceAuthentication)
         self.presentationAnchor = anchor ?? UIApplication.shared.connectedScenes
             .compactMap { ($0 as? UIWindowScene)?.keyWindow }
             .first
 
-        guard var components = URLComponents(url: discovery.authorizationEndpoint, resolvingAgainstBaseURL: false) else {
-            throw CSMServiceError.invalidState("Invalid OIDC authorization endpoint.")
-        }
-        components.queryItems = [
-            URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "client_id", value: clientId),
-            URLQueryItem(name: "redirect_uri", value: redirectURI),
-            URLQueryItem(name: "scope", value: scope),
-            URLQueryItem(name: "state", value: state),
-            URLQueryItem(name: "nonce", value: nonce),
-            URLQueryItem(name: "code_challenge", value: pkce.challenge),
-            URLQueryItem(name: "code_challenge_method", value: pkce.method)
-        ]
-        if forceAuthentication {
-            components.queryItems?.append(URLQueryItem(name: "prompt", value: "login"))
-        }
-        guard let authorizationURL = components.url else {
-            throw CSMServiceError.invalidState("Invalid OIDC authorization URL.")
-        }
+        let authorizationURL = try OIDCAuthorizationRequestBuilder.makeURL(
+            authorizationEndpoint: discovery.authorizationEndpoint,
+            clientId: clientId,
+            redirectURI: redirectURI,
+            scope: scope,
+            state: state,
+            nonce: nonce,
+            challenge: pkce.challenge,
+            challengeMethod: pkce.method,
+            policy: policy
+        )
 
-        let callbackURL = try await callbackURL(for: authorizationURL, callbackURLScheme: redirectScheme)
+        let callbackURL = try await callbackURL(
+            for: authorizationURL,
+            callbackURLScheme: redirectScheme,
+            prefersEphemeralWebBrowserSession: policy.prefersEphemeralWebBrowserSession
+        )
         guard
             let callbackComponents = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
             callbackComponents.queryItems?.first(where: { $0.name == "state" })?.value == state,
@@ -350,7 +394,11 @@ final class OIDCWebAuthenticator: NSObject, ASWebAuthenticationPresentationConte
         preconditionFailure("OIDC login requires an active UIWindowScene.")
     }
 
-    private func callbackURL(for authorizationURL: URL, callbackURLScheme: String) async throws -> URL {
+    private func callbackURL(
+        for authorizationURL: URL,
+        callbackURLScheme: String,
+        prefersEphemeralWebBrowserSession: Bool
+    ) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
             let session = ASWebAuthenticationSession(
                 url: authorizationURL,
@@ -363,7 +411,7 @@ final class OIDCWebAuthenticator: NSObject, ASWebAuthenticationPresentationConte
                 }
             }
             session.presentationContextProvider = self
-            session.prefersEphemeralWebBrowserSession = false
+            session.prefersEphemeralWebBrowserSession = prefersEphemeralWebBrowserSession
             self.session = session
             session.start()
         }

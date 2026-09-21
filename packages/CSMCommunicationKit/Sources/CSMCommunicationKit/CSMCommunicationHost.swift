@@ -117,6 +117,14 @@ public struct CSMCommunicationHost: View {
                             Task {
                                 await runtime.signIn(expectedSubjectID: expectedSubjectID)
                             }
+                        },
+                        onSwitchAccount: {
+                            Task {
+                                await runtime.signIn(
+                                    expectedSubjectID: expectedSubjectID,
+                                    switchAccount: true
+                                )
+                            }
                         }
                     )
                 case .accountMismatch:
@@ -228,14 +236,17 @@ private struct EmbeddedChatDeviceUnlockRequiredView: View {
 private struct EmbeddedChatSignInRequiredView: View {
     var onClose: (() -> Void)?
     let onSignIn: () -> Void
+    let onSwitchAccount: () -> Void
 
     var body: some View {
         EmbeddedChatStatusView(
             title: "Přihlaste se do COP Mobile",
-            message: "Přihlášení otevře zabezpečenou stránku vaší organizace. Pro mapu i chat použijte stejný účet.",
+            message: "Pokračování může použít poslední účet přihlášený u vaší organizace. Pokud chcete jiný účet, zvolte jej výslovně.",
             systemImage: "person.crop.circle.badge.checkmark",
             primaryTitle: "Přihlásit",
             primaryAction: onSignIn,
+            alternativeTitle: "Použít jiný účet",
+            alternativeAction: onSwitchAccount,
             secondaryTitle: onClose == nil ? nil : "Zpět",
             secondaryAction: onClose,
             accessibilityIdentifier: "chat.signInRequired"
@@ -285,6 +296,8 @@ private struct EmbeddedChatStatusView: View {
     let systemImage: String
     let primaryTitle: String
     let primaryAction: () -> Void
+    var alternativeTitle: String?
+    var alternativeAction: (() -> Void)?
     var secondaryTitle: String?
     var secondaryAction: (() -> Void)?
     let accessibilityIdentifier: String
@@ -314,6 +327,15 @@ private struct EmbeddedChatStatusView: View {
                         .tint(Color(red: 0.03, green: 0.28, blue: 0.58))
                         .controlSize(.large)
                         .frame(maxWidth: .infinity, minHeight: 48)
+
+                    if let alternativeTitle, let alternativeAction {
+                        Button(alternativeTitle, action: alternativeAction)
+                            .buttonStyle(.bordered)
+                            .tint(Color(red: 0.03, green: 0.28, blue: 0.58))
+                            .controlSize(.large)
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .accessibilityIdentifier("chat.useDifferentAccount")
+                    }
 
                     if let secondaryTitle, let secondaryAction {
                         Button(secondaryTitle, action: secondaryAction)

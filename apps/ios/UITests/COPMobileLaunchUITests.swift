@@ -62,5 +62,9 @@ final class COPMobileLaunchUITests: XCTestCase {
       app.buttons["Přihlásit"].waitForExistence(timeout: 8),
       "Odhlášený stav musí uživatele srozumitelně navést k přihlášení."
     )
+    XCTAssertTrue(
+      app.buttons["chat.useDifferentAccount"].exists,
+      "Odhlášený stav musí nabídnout bezpečnou volbu jiného účtu."
+    )
   }
 }
