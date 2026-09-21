@@ -20,6 +20,19 @@ final class VoiceCallPushPayloadTests: XCTestCase {
     XCTAssertEqual(payload.callerDisplayName, "Jiřina Volková")
   }
 
+  func testAnsweredElsewherePushCarriesWinningEndpoint() throws {
+    let payload = try XCTUnwrap(
+      VoiceCallPushPayload(dictionary: [
+        "acceptedEndpointId": "ios:cop-mobile-device",
+        "callId": "b5ea7309-7f53-4e87-9225-fd38e9737540",
+        "roomId": "!direct:msg.zeleznalady.cz",
+        "type": "chat.voice_call.answered_elsewhere",
+      ]))
+
+    XCTAssertEqual(payload.event, .answeredElsewhere)
+    XCTAssertEqual(payload.acceptedEndpointID, "ios:cop-mobile-device")
+  }
+
   func testVoiceCallPushRejectsUnknownAndIncompletePayloads() {
     XCTAssertNil(
       VoiceCallPushPayload(dictionary: [

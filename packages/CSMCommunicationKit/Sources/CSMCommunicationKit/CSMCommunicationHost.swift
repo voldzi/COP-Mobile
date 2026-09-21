@@ -569,6 +569,8 @@ public final class CSMCommunicationRuntime {
         return try await model.activeVoiceCalls()
     }
 
+    public var voiceCallEndpointID: String { model.messagingDeviceId ?? CSMVoiceCallEndpointIdentity.current }
+
     public func transitionVoiceCall(
         callID: String,
         action: CSMVoiceCallAction,

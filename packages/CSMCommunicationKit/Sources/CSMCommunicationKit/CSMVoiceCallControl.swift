@@ -42,6 +42,7 @@ public enum CSMVoiceCallAction: String, Codable, Equatable, Sendable {
 }
 
 public struct CSMVoiceCall: Codable, Equatable, Sendable {
+    public let acceptedByEndpointId: String?
     public let callId: String
     public let connectedAt: Date?
     public let createdAt: Date
@@ -59,6 +60,7 @@ public struct CSMVoiceCall: Codable, Equatable, Sendable {
     public let updatedAt: Date
 
     public init(
+        acceptedByEndpointId: String? = nil,
         callId: String,
         connectedAt: Date?,
         createdAt: Date,
@@ -75,6 +77,7 @@ public struct CSMVoiceCall: Codable, Equatable, Sendable {
         title: String,
         updatedAt: Date
     ) {
+        self.acceptedByEndpointId = acceptedByEndpointId
         self.callId = callId
         self.connectedAt = connectedAt
         self.createdAt = createdAt
@@ -134,8 +137,25 @@ struct CSMVoiceCallStartRequest: Codable, Sendable {
     let title: String?
 }
 
+enum CSMVoiceCallEndpointIdentity {
+    private static let storageKey = "csm.voice-call.endpoint-id.v1"
+
+    static var current: String {
+        if let stored = UserDefaults.standard.string(forKey: storageKey),
+           !stored.isEmpty {
+            return stored
+        }
+        let bundle = (Bundle.main.bundleIdentifier ?? "unknown")
+            .replacingOccurrences(of: "[^A-Za-z0-9._:-]", with: "-", options: .regularExpression)
+        let generated = "ios:\(bundle):\(UUID().uuidString.lowercased())"
+        UserDefaults.standard.set(generated, forKey: storageKey)
+        return generated
+    }
+}
+
 struct CSMVoiceCallActionRequest: Codable, Sendable {
     let action: CSMVoiceCallAction
+    let endpointId: String?
     let expectedRevision: Int?
     let reason: String?
 }

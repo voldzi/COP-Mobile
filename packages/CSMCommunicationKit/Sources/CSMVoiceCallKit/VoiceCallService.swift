@@ -163,11 +163,13 @@ enum VoiceCallKind: String, Equatable, Sendable {
 }
 
 enum VoiceCallPushEvent: String, Equatable, Sendable {
+  case answeredElsewhere = "chat.voice_call.answered_elsewhere"
   case ended = "chat.voice_call.ended"
   case incoming = "chat.voice_call.incoming"
 }
 
 struct VoiceCallPushPayload: Equatable, Sendable {
+  let acceptedEndpointID: String?
   let callID: String
   let callerDisplayName: String
   let event: VoiceCallPushEvent
@@ -183,6 +185,7 @@ struct VoiceCallPushPayload: Equatable, Sendable {
       let roomID = Self.string(dictionary["roomId"])
     else { return nil }
 
+    acceptedEndpointID = Self.string(dictionary["acceptedEndpointId"])
     self.callID = callID
     callerDisplayName = Self.string(dictionary["senderDisplayName"]) ?? "COP kontakt"
     self.event = event
@@ -590,24 +593,31 @@ public final class VoiceCallService:
       return
     }
 
-    if calls[push.uuid] != nil {
-      CallDiagnosticStore.record("pushkit.duplicate.ignored")
+    if push.event == .ended || push.event == .answeredElsewhere {
+      let isWinningEndpoint =
+        push.event == .answeredElsewhere
+        && push.acceptedEndpointID == CSMCommunicationRuntime.shared.voiceCallEndpointID
+      if !isWinningEndpoint {
+        let hadLocalCall = calls[push.uuid] != nil
+        CallDiagnosticStore.record(
+          push.event == .answeredElsewhere ? "pushkit.call.answered-elsewhere" : "pushkit.call.ended"
+        )
+        provider.reportCall(
+          with: push.uuid,
+          endedAt: Date(),
+          reason: push.event == .answeredElsewhere ? .answeredElsewhere : .remoteEnded
+        )
+        tearDown(uuid: push.uuid, reportServer: false)
+        if !hadLocalCall {
+          notifyCallTimelineChanged(roomID: push.roomID)
+        }
+      }
       completion()
       return
     }
 
-    if push.event == .ended {
-      CallDiagnosticStore.record("pushkit.call.ended")
-      let hadLocalCall = calls[push.uuid] != nil
-      provider.reportCall(
-        with: push.uuid,
-        endedAt: Date(),
-        reason: .remoteEnded
-      )
-      tearDown(uuid: push.uuid, reportServer: false)
-      if !hadLocalCall {
-        notifyCallTimelineChanged(roomID: push.roomID)
-      }
+    if calls[push.uuid] != nil {
+      CallDiagnosticStore.record("pushkit.duplicate.ignored")
       completion()
       return
     }
@@ -953,6 +963,16 @@ public final class VoiceCallService:
       apply(accepted, uuid: uuid)
       await connectMedia(session: accepted, uuid: uuid)
     } catch {
+      // Another app or device of the same account may have won the atomic
+      // accept. Reconcile before reporting a media failure; a losing endpoint
+      // must never terminate the call that is already active elsewhere.
+      if let session = try? await CSMCommunicationRuntime.shared.voiceCall(
+        callID: context.call.callId
+      ), answeredElsewhere(session.call) {
+        provider.reportCall(with: uuid, endedAt: Date(), reason: .answeredElsewhere)
+        tearDown(uuid: uuid, reportServer: false)
+        return
+      }
       fail(uuid: uuid, error: error)
     }
   }
@@ -1096,6 +1116,11 @@ public final class VoiceCallService:
 
   private func apply(_ session: CSMVoiceCallSession, uuid: UUID) {
     guard var context = calls[uuid] else { return }
+    if !context.answered && answeredElsewhere(session.call) {
+      provider.reportCall(with: uuid, endedAt: Date(), reason: .answeredElsewhere)
+      tearDown(uuid: uuid, reportServer: false)
+      return
+    }
     context.call = session.call
     calls[uuid] = context
     if let media = session.media {
@@ -1119,6 +1144,16 @@ public final class VoiceCallService:
     {
       markMediaConnected(uuid: uuid)
     }
+  }
+
+
+  private func answeredElsewhere(_ call: CSMVoiceCall) -> Bool {
+    guard call.direction == .incoming,
+      let acceptedEndpointID = call.acceptedByEndpointId
+    else { return false }
+    let localEndpointID = CSMCommunicationRuntime.shared.voiceCallEndpointID
+    return acceptedEndpointID != localEndpointID
+      && (call.phase == .accepted || call.phase == .connectingMedia || call.phase == .connected)
   }
 
   private func publish(_ uuid: UUID) {
@@ -1335,6 +1370,7 @@ public final class VoiceCallService:
     connectedAt: Date?
   ) -> CSMVoiceCall {
     CSMVoiceCall(
+      acceptedByEndpointId: call.acceptedByEndpointId,
       callId: call.callId,
       connectedAt: connectedAt,
       createdAt: call.createdAt,
@@ -1355,6 +1391,7 @@ public final class VoiceCallService:
 
   private func replacingTitle(_ call: CSMVoiceCall, title: String) -> CSMVoiceCall {
     CSMVoiceCall(
+      acceptedByEndpointId: call.acceptedByEndpointId,
       callId: call.callId,
       connectedAt: call.connectedAt,
       createdAt: call.createdAt,

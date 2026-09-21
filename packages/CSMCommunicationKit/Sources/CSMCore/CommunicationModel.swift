@@ -426,6 +426,7 @@ final class CommunicationModel {
             callId: callID,
             request: CSMVoiceCallActionRequest(
                 action: action,
+                endpointId: messagingDeviceId ?? CSMVoiceCallEndpointIdentity.current,
                 expectedRevision: expectedRevision,
                 reason: reason
             )
