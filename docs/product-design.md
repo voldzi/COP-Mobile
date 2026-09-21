@@ -139,6 +139,11 @@ stále živým WebView, aby návrat neztratil COP route. Aktivní nativní call
 overlay má nejvyšší prioritu bez ohledu na zvolený povrch a pokračuje i při
 reloadu WebView.
 
+Odchozí hovor je single-flight operace: opakovaný tap během zakládání nesmí
+vytvořit druhý serverový hovor. Nový pokus i úspěšné připojení vždy odstraní
+starou chybu z prezentace. Call overlay zobrazuje jméno a avatar protistrany
+z právě otevřené konverzace; iniciály jsou pouze bezpečný fallback.
+
 Domovská obrazovka chatu používá jedinou kompaktní nativní hlavičku `Chat`,
 vyhledávání nahoře, přepínač `Skupiny / Lidé`, vodorovné `Oblíbené` a úsporné
 chronologické řádky. Host nesmí přidávat druhou hlavičku; zavření, připravenost,

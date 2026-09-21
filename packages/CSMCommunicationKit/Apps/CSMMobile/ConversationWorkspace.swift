@@ -7,7 +7,7 @@ struct ConversationWorkspace: View {
         (@MainActor @Sendable () async throws -> CSMCommunicationLocation)?
     var onClose: (() -> Void)?
     var onOpenCOP: (() -> Void)?
-    var onStartVoiceCall: ((String, String, [String]?) -> Void)?
+    var onStartVoiceCall: ((String, String, [String]?, String?) -> Void)?
     @State private var navigationPath: [String] = []
 
     var body: some View {
@@ -83,7 +83,7 @@ struct ChatView: View {
     var locationShareProvider:
         (@MainActor @Sendable () async throws -> CSMCommunicationLocation)?
     var onOpenCOP: (() -> Void)?
-    var onStartVoiceCall: ((String, String, [String]?) -> Void)?
+    var onStartVoiceCall: ((String, String, [String]?, String?) -> Void)?
     @State private var draft = ""
     @State private var localSummary: LocalAIConversationSummary?
     @State private var replyTo: MessageReplyReference?
@@ -847,7 +847,7 @@ struct ChatView: View {
         // transport identities are not authoritative COP subject identifiers.
         // The API resolves the canonical direct peer from the server-owned
         // conversation bound to this room and validates that it is one-to-one.
-        onStartVoiceCall(roomID, conversation.title, nil)
+        onStartVoiceCall(roomID, conversation.title, nil, activeConversationAvatarDataUrl)
     }
 
     private func isVoiceCallTimelineEvent(_ message: ChatMessage) -> Bool {

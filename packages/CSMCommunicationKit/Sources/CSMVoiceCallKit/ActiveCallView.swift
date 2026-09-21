@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 @MainActor
 public struct ActiveCallView: View {
@@ -70,9 +71,17 @@ public struct ActiveCallView: View {
         Circle()
           .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
           .frame(width: 150, height: 150)
-        Text(initials(call.title))
-          .font(.system(size: 52, weight: .semibold, design: .rounded))
-          .foregroundStyle(.white)
+        if let avatar = callAvatar(from: call.avatarDataURL) {
+          Image(uiImage: avatar)
+            .resizable()
+            .scaledToFill()
+            .frame(width: 150, height: 150)
+            .clipShape(Circle())
+        } else {
+          Text(initials(call.title))
+            .font(.system(size: 52, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white)
+        }
       }
       .accessibilityHidden(true)
 
@@ -168,6 +177,17 @@ public struct ActiveCallView: View {
     let words = title.split(whereSeparator: { $0.isWhitespace }).prefix(2)
     let value = words.compactMap(\.first).map(String.init).joined()
     return value.isEmpty ? "COP" : value.uppercased()
+  }
+
+  private func callAvatar(from dataURL: String?) -> UIImage? {
+    guard let dataURL,
+      dataURL.count <= 1_500_000,
+      dataURL.hasPrefix("data:image/"),
+      let separator = dataURL.firstIndex(of: ","),
+      let data = Data(base64Encoded: String(dataURL[dataURL.index(after: separator)...])),
+      data.count <= 1_000_000
+    else { return nil }
+    return UIImage(data: data)
   }
 
   private func elapsedTime(from start: Date, to end: Date) -> String {

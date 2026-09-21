@@ -176,16 +176,18 @@ final class AppModel {
     roomID: String,
     title: String,
     participantSubjectIDs: [String]?,
-    starter: (_ roomID: String, _ title: String, _ participantSubjectIDs: [String]?) -> Void = {
-      roomID, title, participantSubjectIDs in
+    avatarDataURL: String? = nil,
+    starter: (_ roomID: String, _ title: String, _ participantSubjectIDs: [String]?, _ avatarDataURL: String?) -> Void = {
+      roomID, title, participantSubjectIDs, avatarDataURL in
       VoiceCallService.shared.startVoiceCall(
         roomID: roomID,
         title: title,
-        participantSubjectIDs: participantSubjectIDs
+        participantSubjectIDs: participantSubjectIDs,
+        avatarDataURL: avatarDataURL
       )
     }
   ) {
-    starter(roomID, title, participantSubjectIDs)
+    starter(roomID, title, participantSubjectIDs, avatarDataURL)
   }
 
   private static func makeDiagnosticCode(prefix: String) -> String {

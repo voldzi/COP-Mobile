@@ -64,7 +64,7 @@ public struct CSMCommunicationHost: View {
     private let expectedSubjectID: String?
     private let onClose: (() -> Void)?
     private let onOpenCOP: (() -> Void)?
-    private let onStartVoiceCall: ((String, String, [String]?) -> Void)?
+    private let onStartVoiceCall: ((String, String, [String]?, String?) -> Void)?
 
     public init(
         currentLocationProvider: (@MainActor @Sendable () async -> CSMCommunicationLocation?)? = nil,
@@ -74,7 +74,7 @@ public struct CSMCommunicationHost: View {
         expectedSubjectID: String? = nil,
         onClose: (() -> Void)? = nil,
         onOpenCOP: (() -> Void)? = nil,
-        onStartVoiceCall: ((String, String, [String]?) -> Void)? = nil
+        onStartVoiceCall: ((String, String, [String]?, String?) -> Void)? = nil
     ) {
         self.currentLocationProvider = currentLocationProvider
         self.locationShareProvider = locationShareProvider

@@ -56,11 +56,12 @@ struct RootView: View {
             expectedSubjectID: model.nativeChatExpectedSubjectID,
             onClose: model.closeNativeChat,
             onOpenCOP: model.closeNativeChat,
-            onStartVoiceCall: { roomID, title, participantSubjectIDs in
+            onStartVoiceCall: { roomID, title, participantSubjectIDs, avatarDataURL in
               model.startNativeVoiceCall(
                 roomID: roomID,
                 title: title,
-                participantSubjectIDs: participantSubjectIDs
+                participantSubjectIDs: participantSubjectIDs,
+                avatarDataURL: avatarDataURL
               )
             }
           )

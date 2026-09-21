@@ -210,6 +210,7 @@ struct VoiceCallPresentation: Equatable, Identifiable, Sendable {
   let callID: String
   let roomID: String
   let title: String
+  let avatarDataURL: String?
   let direction: VoiceCallDirection
   let eligibleParticipants: [VoiceCallParticipant]
   let kind: VoiceCallKind
@@ -329,6 +330,7 @@ public final class VoiceCallService:
 
   private struct CallContext {
     var call: CSMVoiceCall
+    var avatarDataURL: String?
     var registeredWithCallKit: Bool
     var answered: Bool
     var muted: Bool
@@ -353,6 +355,7 @@ public final class VoiceCallService:
   private var registry: PKPushRegistry!
   private var calls: [UUID: CallContext] = [:]
   private var activeRoom: Room?
+  private var callStartInFlight = false
   private var activeRoomCallUUID: UUID?
   private var audioActivated = false
   private var roomConnected = false
@@ -467,8 +470,11 @@ public final class VoiceCallService:
     roomID: String,
     title: String,
     participantSubjectIDs: [String]?,
+    avatarDataURL: String? = nil,
     registerWithSystemCallUI: Bool = true
   ) {
+    presentation.clearError()
+    guard !callStartInFlight else { return }
     guard presentation.activeCall == nil else {
       presentation.setError("Jiný hovor už probíhá.")
       return
@@ -479,8 +485,10 @@ public final class VoiceCallService:
       presentation.setError("Konverzace zatím není připravena pro hovor.")
       return
     }
+    callStartInFlight = true
     Task { @MainActor [weak self] in
       guard let self else { return }
+      defer { self.callStartInFlight = false }
       do {
         guard await AVAudioApplication.requestRecordPermission() else {
           throw CSMVoiceCallControlError.mediaUnavailable
@@ -493,6 +501,7 @@ public final class VoiceCallService:
         try self.install(
           session: session,
           title: normalizedTitle,
+          avatarDataURL: avatarDataURL,
           registeredWithCallKit: false,
           answered: false
         )
@@ -624,6 +633,7 @@ public final class VoiceCallService:
     )
     calls[push.uuid] = CallContext(
       call: call,
+      avatarDataURL: nil,
       registeredWithCallKit: true,
       answered: false,
       muted: false,
@@ -718,6 +728,7 @@ public final class VoiceCallService:
         guard let uuid = UUID(uuidString: call.callId), calls[uuid] == nil else { continue }
         calls[uuid] = CallContext(
           call: call,
+          avatarDataURL: nil,
           registeredWithCallKit: true,
           answered: false,
           muted: false,
@@ -897,6 +908,7 @@ public final class VoiceCallService:
   private func install(
     session: CSMVoiceCallSession,
     title: String,
+    avatarDataURL: String?,
     registeredWithCallKit: Bool,
     answered: Bool
   ) throws {
@@ -906,11 +918,13 @@ public final class VoiceCallService:
     let call = replacingTitle(session.call, title: title)
     calls[uuid] = CallContext(
       call: call,
+      avatarDataURL: avatarDataURL,
       registeredWithCallKit: registeredWithCallKit,
       answered: answered,
       muted: false,
       participants: []
     )
+    presentation.clearError()
     publish(uuid)
     startStatePolling(uuid: uuid)
     if let media = session.media {
@@ -973,6 +987,7 @@ public final class VoiceCallService:
         return
       }
       roomConnected = true
+      presentation.clearError()
       await publishMicrophoneIfReady()
       if !room.remoteParticipants.isEmpty {
         markMediaConnected(uuid: uuid)
@@ -1132,6 +1147,7 @@ public final class VoiceCallService:
         callID: context.call.callId,
         roomID: context.call.roomId,
         title: context.call.title,
+        avatarDataURL: context.avatarDataURL,
         direction: direction,
         eligibleParticipants: [],
         kind: .direct,
