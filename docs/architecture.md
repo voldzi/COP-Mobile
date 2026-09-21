@@ -283,12 +283,20 @@ hlavičky.
 Přímý chat zobrazuje avatar protějšku nebo jeho iniciály; skupina používá jen
 vlastní Matrix room avatar nebo iniciály názvu. V detailu skupiny lze tento
 avatar samostatně vybrat, změnit nebo odstranit.
+Dočasně nedostupné Matrix médium používá krátkou negativní cache. Po jejím
+vypršení se avatar načte znovu, takže krátký výpadek média neskryje avatar po
+celou relaci aplikace.
 
 APNs token neopouští nativní vrstvu směrem do JavaScriptu a COP jej neukládá.
 COP Mobile je jediným vlastníkem process-wide notification delegate; běžný
 token, foreground/background delivery a notification actions současně předává
 přes úzkou facade do `CSMCommunicationKit`, aby nativní Matrix pusher a deep
 link neztrácely lifecycle ani cílovou konverzaci.
+Registrace COP zařízení, CSM Messaging zařízení i Matrix pusheru je v rámci
+jedné relace idempotentní. Souběžné lifecycle callbacky se slučují a nezměněný
+token, posture a registrační payload se neposílají znovu. Otisk úspěšné
+registrace se uloží až po potvrzení serverem; odmítnutý Matrix pusher proto
+zůstává způsobilý k dalšímu pokusu a nikdy se nevykáže jako úspěšný.
 Před dokončením foreground, background nebo notification-action callbacku host
 awaituje headless zpracování facade. Sdílený runtime se tak spustí a zpracuje
 způsobilé metadata-only payloady i bez připojeného SwiftUI chat view.

@@ -53,6 +53,23 @@ final class ChatArchitectureTests: XCTestCase {
         XCTAssertNotEqual(original, reinstalled)
     }
 
+    func testOfflineClientPropagatesPusherRegistrationFailure() async {
+        let client = OfflineFirstMessagingClient(
+            liveClient: FailingPusherMessagingClient(),
+            outbox: InMemoryMessageOutbox()
+        )
+
+        do {
+            try await client.registerPusher(
+                pushKey: "apns-token",
+                pushGatewayURL: URL(string: "https://messaging.example/api/v1/matrix/push/notify")!
+            )
+            XCTFail("Pusher registration failure must not be reported as success.")
+        } catch {
+            XCTAssertEqual(error as? PusherRegistrationTestError, .rejected)
+        }
+    }
+
     func testDirectConversationUsesPeerAvatarInsteadOfCurrentMatrixUserAvatar() {
         let actor = AuthenticatedActor(
             subjectId: "oidc-current-user",
@@ -452,5 +469,47 @@ final class ChatArchitectureTests: XCTestCase {
         guard !sorted.isEmpty else { return 0 }
         let index = min(sorted.count - 1, Int((Double(sorted.count) * 0.95).rounded(.up)) - 1)
         return sorted[index]
+    }
+}
+
+private enum PusherRegistrationTestError: Error, Equatable {
+    case rejected
+}
+
+private struct FailingPusherMessagingClient: MessagingClientProtocol {
+    func configure(with bootstrap: MessagingBootstrap) async throws {}
+
+    func messages(for conversation: Conversation) async throws -> [ChatMessage] { [] }
+
+    func sendMessage(_ body: String, to conversation: Conversation) async throws -> ChatMessage {
+        throw PusherRegistrationTestError.rejected
+    }
+
+    func sendMessage(_ draft: OutgoingMessageDraft, to conversation: Conversation) async throws -> ChatMessage {
+        throw PusherRegistrationTestError.rejected
+    }
+
+    func toggleReaction(
+        _ emoji: String,
+        on message: ChatMessage,
+        in conversation: Conversation
+    ) async throws -> ChatMessage { message }
+
+    func redactMessage(_ message: ChatMessage, in conversation: Conversation) async throws -> ChatMessage { message }
+
+    func setMessagePinned(
+        _ pinned: Bool,
+        message: ChatMessage,
+        in conversation: Conversation
+    ) async throws -> ChatMessage { message }
+
+    func leaveConversation(_ conversation: Conversation) async throws {}
+
+    func synchronizePendingMessages(for conversation: Conversation) async throws -> MessageOutboxSyncResult {
+        .empty
+    }
+
+    func registerPusher(pushKey: String, pushGatewayURL: URL) async throws {
+        throw PusherRegistrationTestError.rejected
     }
 }

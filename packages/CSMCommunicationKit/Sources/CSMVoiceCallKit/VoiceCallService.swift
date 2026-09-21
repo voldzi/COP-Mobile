@@ -958,7 +958,12 @@ public final class VoiceCallService:
     roomConnected = false
     microphonePublished = false
 
-    let room = Room(delegate: roomObserver)
+    let room = Room(
+      delegate: roomObserver,
+      roomOptions: RoomOptions(
+        encryptionOptions: .sharedKey(media.e2eeKey)
+      )
+    )
     activeRoom = room
     scheduleConnectionTimeout(uuid: uuid)
     do {

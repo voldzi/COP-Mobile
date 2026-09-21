@@ -95,6 +95,8 @@ share_import_total{kind,result}
 share_inbox_items
 share_inbox_bytes
 notification_event_total{type,result}
+device_registration_total{boundary,result}
+matrix_pusher_registration_total{result}
 offline_boot_total{mode,result}
 web_cache_recovery_total{result}
 chat_cached_open_duration_ms

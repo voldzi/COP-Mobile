@@ -36,7 +36,9 @@ audio cestu a stejné chování jako webový klient bez závislosti na WebView.
    aktivní serverové hovory a prezentovat dosud neznámý příchozí hovor.
 5. LiveKit je jediný media transport. COP API vydá krátkodobý room-scoped token
    pouze účastníkovi aktivního hovoru. Token se neukládá, neloguje a není součástí
-   push payloadu.
+   push payloadu. COP API zároveň vydá účastníkům hovoru jedinečný klíč odvozený
+   serverově pro dané `callId`; web i native jej povinně použijí pro LiveKit
+   end-to-end šifrování médií.
 6. CallKit je jediným vlastníkem aktivace `AVAudioSession`. LiveKit mikrofon se
    publikuje teprve po skutečné CallKit audio aktivaci. Mute, speaker/Bluetooth,
    interruption, proximity a teardown vlastní native.
@@ -76,6 +78,8 @@ audio cestu a stejné chování jako webový klient bez závislosti na WebView.
 - revize a idempotency key zabraňují opakovanému nebo opožděnému přechodu;
 - LiveKit token je krátkodobý, room-scoped a umožňuje jen potřebné publish/
   subscribe operace;
+- zvukový track je koncově šifrovaný jedinečným klíčem hovoru; LiveKit server
+  klíč neobdrží a nemůže zvuk dešifrovat;
 - push payload neobsahuje zprávy, tokeny, media adresu ani přesnou polohu;
 - diagnostika smí obsahovat call ID a redigovaný stav, nikdy token nebo audio.
 

@@ -74,11 +74,16 @@ protocol MessagingClientProtocol: Sendable {
     func setMessagePinned(_ pinned: Bool, message: ChatMessage, in conversation: Conversation) async throws -> ChatMessage
     func leaveConversation(_ conversation: Conversation) async throws
     func synchronizePendingMessages(for conversation: Conversation) async throws -> MessageOutboxSyncResult
-    func registerPusher(pushKey: String, pushGatewayURL: URL) async
+    func registerPusher(pushKey: String, pushGatewayURL: URL) async throws
 }
 
 protocol MessagingClientDiagnostics: Sendable {
     func latestTransportError(for conversation: Conversation?) async -> String?
+}
+
+protocol MessagingLifecycleControlling: Sendable {
+    func resumeMessaging() async throws
+    func suspendMessaging() async throws
 }
 
 protocol MessagingLiveMessageStreaming: Sendable {

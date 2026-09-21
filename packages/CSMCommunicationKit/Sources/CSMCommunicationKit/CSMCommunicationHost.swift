@@ -164,12 +164,15 @@ public struct CSMCommunicationHost: View {
             )
         }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
             Task {
-                await runtime.prepare(
-                    expectedSubjectID: expectedSubjectID,
-                    allowInteractiveSignIn: false
-                )
+                if phase == .active {
+                    await runtime.prepare(
+                        expectedSubjectID: expectedSubjectID,
+                        allowInteractiveSignIn: false
+                    )
+                } else if phase == .background {
+                    await runtime.suspendMessaging()
+                }
             }
         }
         .onChange(of: expectedSubjectID) { _, value in
@@ -523,6 +526,11 @@ public final class CSMCommunicationRuntime {
         await startIfNeeded()
         guard started, model.authState == .signedIn, !model.isLoading else { return }
         await drainPendingNotifications()
+    }
+
+    func suspendMessaging() async {
+        guard started else { return }
+        await model.appDidEnterBackground()
     }
 
     private func drainPendingNotifications() async {

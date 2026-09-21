@@ -94,11 +94,13 @@ public struct CSMVoiceCall: Codable, Equatable, Sendable {
 }
 
 public struct CSMVoiceCallMediaCredentials: Codable, Equatable, Sendable {
+    public let e2eeKey: String
     public let expiresAt: Date
     public let serverUrl: URL
     public let token: String
 
-    public init(expiresAt: Date, serverUrl: URL, token: String) {
+    public init(e2eeKey: String, expiresAt: Date, serverUrl: URL, token: String) {
+        self.e2eeKey = e2eeKey
         self.expiresAt = expiresAt
         self.serverUrl = serverUrl
         self.token = token

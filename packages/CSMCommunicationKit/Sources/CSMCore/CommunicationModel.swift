@@ -265,6 +265,14 @@ final class CommunicationModel {
     @ObservationIgnored private let authSession: any AuthSessionManaging
     @ObservationIgnored private let securityUnlock: any SecurityUnlockManaging
     @ObservationIgnored private var registeredMessagingDeviceTokenFingerprint: String?
+    @ObservationIgnored private var lastSuccessfulDeviceRegistration: MobileDeviceRegistration?
+    @ObservationIgnored private var lastSuccessfulMessagingDeviceRegistrationRequest: CSMMessagingDeviceRegistrationRequest?
+    @ObservationIgnored private var deviceRegistrationInFlight = false
+    @ObservationIgnored private var deviceRegistrationRefreshPending = false
+    @ObservationIgnored private var messagingDeviceRegistrationInFlight = false
+    @ObservationIgnored private var messagingDeviceRegistrationRefreshPending = false
+    @ObservationIgnored private var matrixPusherRegistrationInFlight = false
+    @ObservationIgnored private var matrixPusherRegistrationRefreshPending = false
     @ObservationIgnored private var registeredMatrixPusherTokenFingerprint: String?
     @ObservationIgnored private var registeredMatrixPusherGatewayURL: URL?
     @ObservationIgnored private var messagingTransportReadyForPusher = false
@@ -486,6 +494,14 @@ final class CommunicationModel {
         deviceSessionId = nil
         messagingDeviceId = nil
         registeredMessagingDeviceTokenFingerprint = nil
+        lastSuccessfulDeviceRegistration = nil
+        lastSuccessfulMessagingDeviceRegistrationRequest = nil
+        deviceRegistrationInFlight = false
+        deviceRegistrationRefreshPending = false
+        messagingDeviceRegistrationInFlight = false
+        messagingDeviceRegistrationRefreshPending = false
+        matrixPusherRegistrationInFlight = false
+        matrixPusherRegistrationRefreshPending = false
         messagingDeviceRegistrationStatusText = "not_registered"
         registeredMatrixPusherTokenFingerprint = nil
         registeredMatrixPusherGatewayURL = nil
@@ -529,6 +545,13 @@ final class CommunicationModel {
             connectionMode = .offline
             return
         }
+        if let lifecycle = messaging as? any MessagingLifecycleControlling {
+            do {
+                try await lifecycle.resumeMessaging()
+            } catch {
+                lastError = error.localizedDescription
+            }
+        }
         let shouldRecoverMessagingTransport = messagingStatusText == "e2ee_queue" ||
             messagingStatusText == "degraded" ||
             messagingStatusText == "offline_queue"
@@ -540,6 +563,16 @@ final class CommunicationModel {
             await automaticallySynchronizePendingMessagesIfPossible(for: selectedConversation, force: true)
         }
         await updateApplicationBadgeCount()
+    }
+
+    func appDidEnterBackground() async {
+        guard authState == .signedIn,
+              let lifecycle = messaging as? any MessagingLifecycleControlling else { return }
+        do {
+            try await lifecycle.suspendMessaging()
+        } catch {
+            lastError = error.localizedDescription
+        }
     }
 
     private func bootstrapCommunication() async {
@@ -881,130 +914,183 @@ final class CommunicationModel {
 
     private func registerDeviceIfPossible() async {
         guard let deviceRegistration else { return }
-        do {
+        guard !deviceRegistrationInFlight else {
+            deviceRegistrationRefreshPending = true
+            return
+        }
+        deviceRegistrationInFlight = true
+        defer { deviceRegistrationInFlight = false }
+
+        repeat {
+            deviceRegistrationRefreshPending = false
             let registration = deviceRegistration.registration(
                 push: nil,
                 posture: devicePosture
             )
-            let response = try await api.registerDevice(registration)
-            deviceSessionId = response.deviceSessionId
-            policy = response.policy
-            await appendEvent(
-                kind: .deviceRegistered,
-                relatedId: response.deviceSessionId,
-                summary: "Zarizeni registrovano u COP.",
-                metadata: [
-                    "pushTokenRegistered": response.pushTokenRegistered ? "true" : "false",
-                    "platform": registration.platform
-                ]
-            )
-        } catch {
-            lastError = error.localizedDescription
-        }
+            guard registration != lastSuccessfulDeviceRegistration else { continue }
+            do {
+                let response = try await api.registerDevice(registration)
+                deviceSessionId = response.deviceSessionId
+                policy = response.policy
+                lastSuccessfulDeviceRegistration = registration
+                await appendEvent(
+                    kind: .deviceRegistered,
+                    relatedId: response.deviceSessionId,
+                    summary: "Zarizeni registrovano u COP.",
+                    metadata: [
+                        "pushTokenRegistered": response.pushTokenRegistered ? "true" : "false",
+                        "platform": registration.platform
+                    ]
+                )
+            } catch {
+                lastError = error.localizedDescription
+            }
+        } while deviceRegistrationRefreshPending
     }
 
     private func registerMessagingDeviceIfPossible() async {
         guard let messagingDeviceRegistration else { return }
-        guard let token = pushSnapshot.deviceToken, pushSnapshot.environment != "unavailable" else {
-            messagingDeviceRegistrationStatusText = "waiting_for_apns"
-            Self.recordDeviceRegistrationDiagnostic("waiting_for_apns")
-            Self.diagnostics.notice("device-registration=waiting_for_apns")
+        guard !messagingDeviceRegistrationInFlight else {
+            messagingDeviceRegistrationRefreshPending = true
             return
         }
-        guard let voipToken = await voipDeviceTokenProvider?(), !voipToken.isEmpty else {
-            messagingDeviceRegistrationStatusText = "waiting_for_voip"
-            Self.recordDeviceRegistrationDiagnostic("waiting_for_voip")
-            Self.diagnostics.notice("device-registration=waiting_for_voip")
-            return
-        }
+        messagingDeviceRegistrationInFlight = true
+        defer { messagingDeviceRegistrationInFlight = false }
 
-        do {
-            let tokenFingerprint = Self.tokenFingerprint("\(token):\(voipToken)")
-            if let messagingDeviceId,
-               let registeredMessagingDeviceTokenFingerprint,
-               registeredMessagingDeviceTokenFingerprint != tokenFingerprint {
-                try? await messagingDeviceRegistration.deleteDevice(deviceId: messagingDeviceId)
-                self.messagingDeviceId = nil
-                messagingDeviceRegistrationStatusText = "refreshing_apns_token"
+        repeat {
+            messagingDeviceRegistrationRefreshPending = false
+            guard let token = pushSnapshot.deviceToken, pushSnapshot.environment != "unavailable" else {
+                messagingDeviceRegistrationStatusText = "waiting_for_apns"
+                Self.recordDeviceRegistrationDiagnostic("waiting_for_apns")
+                Self.diagnostics.notice("device-registration=waiting_for_apns")
+                return
+            }
+            guard let voipToken = await voipDeviceTokenProvider?(), !voipToken.isEmpty else {
+                messagingDeviceRegistrationStatusText = "waiting_for_voip"
+                Self.recordDeviceRegistrationDiagnostic("waiting_for_voip")
+                Self.diagnostics.notice("device-registration=waiting_for_voip")
+                return
             }
 
-            let request = makeMessagingDeviceRegistrationRequest(
-                deviceToken: token,
-                voipDeviceToken: voipToken
-            )
-            let ticket = try await api.deviceRegistrationTicket(
-                appInstanceId: request.appInstanceId,
-                bundleId: request.appBundleId
-            )
-            guard ticket.messagingBaseUrl.host == appConfiguration.messagingBaseURL.host else {
-                throw CSMServiceError.invalidState("Registrační ticket směřuje na neočekávanou službu.")
+            do {
+                let tokenFingerprint = Self.tokenFingerprint("\(token):\(voipToken)")
+                if let messagingDeviceId,
+                   let registeredMessagingDeviceTokenFingerprint,
+                   registeredMessagingDeviceTokenFingerprint != tokenFingerprint {
+                    try? await messagingDeviceRegistration.deleteDevice(deviceId: messagingDeviceId)
+                    self.messagingDeviceId = nil
+                    lastSuccessfulMessagingDeviceRegistrationRequest = nil
+                    messagingDeviceRegistrationStatusText = "refreshing_apns_token"
+                }
+
+                let request = makeMessagingDeviceRegistrationRequest(
+                    deviceToken: token,
+                    voipDeviceToken: voipToken
+                )
+                if request == lastSuccessfulMessagingDeviceRegistrationRequest,
+                   messagingDeviceId != nil,
+                   messagingDeviceRegistrationStatusText == "active" {
+                    continue
+                }
+                let ticket = try await api.deviceRegistrationTicket(
+                    appInstanceId: request.appInstanceId,
+                    bundleId: request.appBundleId
+                )
+                guard ticket.messagingBaseUrl.host == appConfiguration.messagingBaseURL.host else {
+                    throw CSMServiceError.invalidState("Registrační ticket směřuje na neočekávanou službu.")
+                }
+                let response = try await messagingDeviceRegistration.registerDevice(
+                    request,
+                    authorizationTicket: ticket.ticket
+                )
+                messagingDeviceId = response.device.deviceId
+                registeredMessagingDeviceTokenFingerprint = tokenFingerprint
+                lastSuccessfulMessagingDeviceRegistrationRequest = request
+                messagingDeviceRegistrationStatusText = response.device.status ?? "active"
+                applyMessagingDeviceServerState(response.device)
+                Self.recordDeviceRegistrationDiagnostic("active_\(Self.apnsEnvironment)")
+                Self.diagnostics.notice(
+                    "device-registration=active apns-environment=\(Self.apnsEnvironment, privacy: .public)"
+                )
+                await appendEvent(
+                    kind: .messagingDeviceRegistered,
+                    relatedId: response.device.deviceId,
+                    summary: "Zarizeni registrovano u CSM Messaging pro push dorucovani.",
+                    metadata: [
+                        "platform": response.device.platform ?? "ios",
+                        "provider": response.providerId ?? "csm.messaging",
+                        "apns": "token-present",
+                        "voip": "token-present"
+                    ]
+                )
+            } catch {
+                messagingDeviceRegistrationStatusText = "failed"
+                lastError = error.localizedDescription
+                Self.recordDeviceRegistrationDiagnostic(
+                    "failed_\(String(describing: type(of: error)))"
+                )
+                Self.diagnostics.error(
+                    "device-registration=failed error-type=\(String(describing: type(of: error)), privacy: .public)"
+                )
+                await appendEvent(
+                    kind: .messagingDeviceRegistrationFailed,
+                    summary: "Registrace zarizeni u CSM Messaging selhala.",
+                    metadata: ["error": error.localizedDescription]
+                )
             }
-            let response = try await messagingDeviceRegistration.registerDevice(
-                request,
-                authorizationTicket: ticket.ticket
-            )
-            messagingDeviceId = response.device.deviceId
-            registeredMessagingDeviceTokenFingerprint = tokenFingerprint
-            messagingDeviceRegistrationStatusText = response.device.status ?? "active"
-            applyMessagingDeviceServerState(response.device)
-            Self.recordDeviceRegistrationDiagnostic(
-                "active_\(Self.apnsEnvironment)"
-            )
-            Self.diagnostics.notice(
-                "device-registration=active apns-environment=\(Self.apnsEnvironment, privacy: .public)"
-            )
-            await appendEvent(
-                kind: .messagingDeviceRegistered,
-                relatedId: response.device.deviceId,
-                summary: "Zarizeni registrovano u CSM Messaging pro push dorucovani.",
-                metadata: [
-                    "platform": response.device.platform ?? "ios",
-                    "provider": response.providerId ?? "csm.messaging",
-                    "apns": "token-present",
-                    "voip": "token-present"
-                ]
-            )
-        } catch {
-            messagingDeviceRegistrationStatusText = "failed"
-            lastError = error.localizedDescription
-            Self.recordDeviceRegistrationDiagnostic(
-                "failed_\(String(describing: type(of: error)))"
-            )
-            Self.diagnostics.error(
-                "device-registration=failed error-type=\(String(describing: type(of: error)), privacy: .public)"
-            )
-            await appendEvent(
-                kind: .messagingDeviceRegistrationFailed,
-                summary: "Registrace zarizeni u CSM Messaging selhala.",
-                metadata: ["error": error.localizedDescription]
-            )
-        }
+        } while messagingDeviceRegistrationRefreshPending
     }
 
     private func registerMatrixPusherIfPossible(force: Bool = false) async {
-        guard messagingTransportReadyForPusher else { return }
-        guard let token = pushSnapshot.deviceToken, pushSnapshot.environment != "unavailable" else { return }
-        guard let gatewayURL = matrixPushGatewayURL else { return }
-
-        let tokenFingerprint = Self.tokenFingerprint(token)
-        guard force ||
-            registeredMatrixPusherTokenFingerprint != tokenFingerprint ||
-            registeredMatrixPusherGatewayURL != gatewayURL
-        else {
+        guard !matrixPusherRegistrationInFlight else {
+            matrixPusherRegistrationRefreshPending = true
             return
         }
+        matrixPusherRegistrationInFlight = true
+        defer { matrixPusherRegistrationInFlight = false }
 
-        await messaging.registerPusher(pushKey: token, pushGatewayURL: gatewayURL)
-        registeredMatrixPusherTokenFingerprint = tokenFingerprint
-        registeredMatrixPusherGatewayURL = gatewayURL
-        await appendEvent(
-            kind: .pushRegistrationUpdated,
-            summary: "Matrix pusher pro chatove push notifikace byl aktualizovan.",
-            metadata: [
-                "gateway": gatewayURL.absoluteString,
-                "pushKey": "token-present"
-            ]
-        )
+        var forceCurrentAttempt = force
+        repeat {
+            matrixPusherRegistrationRefreshPending = false
+            guard messagingTransportReadyForPusher else { return }
+            guard let token = pushSnapshot.deviceToken, pushSnapshot.environment != "unavailable" else { return }
+            guard let gatewayURL = matrixPushGatewayURL else { return }
+
+            let tokenFingerprint = Self.tokenFingerprint(token)
+            guard forceCurrentAttempt ||
+                registeredMatrixPusherTokenFingerprint != tokenFingerprint ||
+                registeredMatrixPusherGatewayURL != gatewayURL
+            else {
+                return
+            }
+            forceCurrentAttempt = false
+
+            do {
+                try await messaging.registerPusher(pushKey: token, pushGatewayURL: gatewayURL)
+                registeredMatrixPusherTokenFingerprint = tokenFingerprint
+                registeredMatrixPusherGatewayURL = gatewayURL
+                await appendEvent(
+                    kind: .pushRegistrationUpdated,
+                    summary: "Matrix pusher pro chatove push notifikace byl aktualizovan.",
+                    metadata: [
+                        "gateway": gatewayURL.absoluteString,
+                        "pushKey": "token-present",
+                        "success": "true"
+                    ]
+                )
+            } catch {
+                lastError = error.localizedDescription
+                await appendEvent(
+                    kind: .pushRegistrationUpdated,
+                    summary: "Registrace Matrix pusheru selhala.",
+                    metadata: [
+                        "gateway": gatewayURL.absoluteString,
+                        "success": "false",
+                        "errorType": String(describing: type(of: error))
+                    ]
+                )
+            }
+        } while matrixPusherRegistrationRefreshPending
     }
 
     private var matrixPushGatewayURL: URL? {
@@ -2718,10 +2804,21 @@ final class CommunicationModel {
         guard let enricher = messaging as? any MessagingConversationPresentationEnriching else {
             return prioritizedConversations(values)
         }
-        var enriched: [Conversation] = []
-        enriched.reserveCapacity(values.count)
-        for conversation in values {
-            enriched.append(await enricher.enrichedConversationPresentation(conversation))
+        var enriched = values
+        let batchSize = 8
+        for batchStart in stride(from: 0, to: values.count, by: batchSize) {
+            let batchEnd = min(batchStart + batchSize, values.count)
+            await withTaskGroup(of: (Int, Conversation).self) { group in
+                for index in batchStart..<batchEnd {
+                    let conversation = values[index]
+                    group.addTask {
+                        (index, await enricher.enrichedConversationPresentation(conversation))
+                    }
+                }
+                for await (index, conversation) in group {
+                    enriched[index] = conversation
+                }
+            }
         }
         return prioritizedConversations(enriched)
     }

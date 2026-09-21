@@ -83,12 +83,14 @@ actor MatrixMessagingClient: MessagingClientProtocol {
 
     // MARK: - Pusher
 
-    func registerPusher(pushKey: String, pushGatewayURL: URL) async {
-        guard let session else { return }
+    func registerPusher(pushKey: String, pushGatewayURL: URL) async throws {
+        guard let session else {
+            throw CSMServiceError.invalidState("Matrix session is not configured for push registration.")
+        }
         guard let url = matrixURL(
             homeserver: session.homeserverURL,
             path: "/_matrix/client/v3/pushers/set"
-        ) else { return }
+        ) else { throw MatrixAPIError.badURL }
 
         #if os(iOS)
         let deviceName = await MainActor.run { UIDevice.current.name }
@@ -107,7 +109,7 @@ actor MatrixMessagingClient: MessagingClientProtocol {
         )
 
         struct PusherSetResponse: Decodable {}
-        _ = try? await matrixPOST(url: url, body: pusher, session: session) as PusherSetResponse
+        let _: PusherSetResponse = try await matrixPOST(url: url, body: pusher, session: session)
     }
 
     // MARK: - Join

@@ -1,6 +1,6 @@
 import Foundation
 
-actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagnostics, MessagingLiveMessageStreaming, MessagingLiveLocationSharing, MessagingHistoryPaging, MessagingCachedSnapshotLoading, MessagingConversationPresentationEnriching, MessagingConversationAvatarUpdating, MatrixEncryptionRecoveryManaging {
+actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagnostics, MessagingLifecycleControlling, MessagingLiveMessageStreaming, MessagingLiveLocationSharing, MessagingHistoryPaging, MessagingCachedSnapshotLoading, MessagingConversationPresentationEnriching, MessagingConversationAvatarUpdating, MatrixEncryptionRecoveryManaging {
     private let liveClient: any MessagingClientProtocol
     private let outbox: any MessageOutboxStoring
     private let outboxActor: OutboxActor
@@ -300,8 +300,18 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
         }
     }
 
-    func registerPusher(pushKey: String, pushGatewayURL: URL) async {
-        await liveClient.registerPusher(pushKey: pushKey, pushGatewayURL: pushGatewayURL)
+    func registerPusher(pushKey: String, pushGatewayURL: URL) async throws {
+        try await liveClient.registerPusher(pushKey: pushKey, pushGatewayURL: pushGatewayURL)
+    }
+
+    func resumeMessaging() async throws {
+        guard let lifecycle = liveClient as? any MessagingLifecycleControlling else { return }
+        try await lifecycle.resumeMessaging()
+    }
+
+    func suspendMessaging() async throws {
+        guard let lifecycle = liveClient as? any MessagingLifecycleControlling else { return }
+        try await lifecycle.suspendMessaging()
     }
 
     func startLiveLocationShare(

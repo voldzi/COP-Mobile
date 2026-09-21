@@ -16,7 +16,7 @@ import UIKit
 /// the SDK handle Megolm encryption, room key sharing, media encryption and
 /// local crypto state. It deliberately checks encrypted-room state before
 /// sending whenever COP/CSM policy marks the conversation as E2EE-required.
-actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLiveMessageStreaming, MessagingLiveLocationSharing, MessagingHistoryPaging, MessagingConversationPresentationEnriching, MessagingConversationAvatarUpdating, MatrixEncryptionRecoveryManaging {
+actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycleControlling, MessagingLiveMessageStreaming, MessagingLiveLocationSharing, MessagingHistoryPaging, MessagingConversationPresentationEnriching, MessagingConversationAvatarUpdating, MatrixEncryptionRecoveryManaging {
     private static let userAgent = "COP Mobile iOS/0.1.2 MatrixRustSDK/26.06.23"
     private static let preflightUserAgent = "COP Mobile iOS/0.1.2 Matrix preflight"
     private static let historyPageSize: UInt16 = 100
@@ -46,7 +46,7 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLiveMessa
     private var timelineSubscriptions: [String: MatrixRustTimelineSubscription] = [:]
     private var timelineHasEarlierMessages: [String: Bool] = [:]
     private var avatarDataURLCache: [String: String] = [:]
-    private var unavailableAvatarURLs: Set<String> = []
+    private var unavailableAvatarURLs: [String: Date] = [:]
     private var liveLocationCompatibilitySessions: [String: LiveLocationCompatibilitySession] = [:]
 
     init(
@@ -323,7 +323,7 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLiveMessa
             content: content
         )
         avatarDataURLCache[matrixContentURL] = avatarDataUrl
-        unavailableAvatarURLs.remove(matrixContentURL)
+        unavailableAvatarURLs.removeValue(forKey: matrixContentURL)
         updated.conversationAvatarDataUrl = avatarDataUrl
         updated.conversationAvatarUrl = matrixContentURL
         return updated
@@ -548,8 +548,10 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLiveMessa
         }
     }
 
-    func registerPusher(pushKey: String, pushGatewayURL: URL) async {
-        guard let client else { return }
+    func registerPusher(pushKey: String, pushGatewayURL: URL) async throws {
+        guard let client else {
+            throw CSMServiceError.invalidState("Matrix session is not configured for push registration.")
+        }
         #if os(iOS)
         let deviceName = await MainActor.run { UIDevice.current.name }
         #else
@@ -567,7 +569,7 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLiveMessa
                 defaultPayload: nil
             )
         )
-        try? await client.setPusher(
+        try await client.setPusher(
             identifiers: identifiers,
             kind: kind,
             appDisplayName: "CSM Messenger",
@@ -576,6 +578,16 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLiveMessa
             lang: Locale.current.identifier.replacingOccurrences(of: "_", with: "-"),
             append: false
         )
+    }
+
+    func resumeMessaging() async throws {
+        guard let client else { return }
+        try await client.resume()
+    }
+
+    func suspendMessaging() async throws {
+        guard let client else { return }
+        try await client.pause()
     }
 
     // MARK: - MatrixEncryptionRecoveryManaging
@@ -1832,7 +1844,8 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLiveMessa
     private func avatarDataURL(for rawURL: String?) async -> String? {
         guard let rawURL = Self.nonEmpty(rawURL) else { return nil }
         if let cached = avatarDataURLCache[rawURL] { return cached }
-        if unavailableAvatarURLs.contains(rawURL) { return nil }
+        if let retryAfter = unavailableAvatarURLs[rawURL], retryAfter > Date() { return nil }
+        unavailableAvatarURLs.removeValue(forKey: rawURL)
 
         do {
             let matrixClient = try requireClient()
@@ -1850,7 +1863,10 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLiveMessa
             avatarDataURLCache[rawURL] = value
             return value
         } catch {
-            unavailableAvatarURLs.insert(rawURL)
+            // Media can be temporarily unavailable while the room/member state
+            // catches up. A bounded negative cache prevents hot retry loops
+            // without hiding an avatar for the remainder of the app session.
+            unavailableAvatarURLs[rawURL] = Date().addingTimeInterval(60)
             return nil
         }
     }

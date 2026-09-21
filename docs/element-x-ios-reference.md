@@ -39,6 +39,8 @@ Zdroje:
 | FFI izolované za aplikační gateway | `MatrixRustSDK` importuje jediný soubor; SwiftUI používá CSM typy a úzké služby |
 | Bounded a deterministická timeline | Okno 500 položek, stránkování a jediná redukční cesta |
 | Stabilní offline outbox | Persistovaný šifrovaný outbox, stabilní transaction ID a deduplikace |
+| Idempotentní lifecycle a pravdivý stav push | Souběžné registrace se slučují, nezměněné payloady se neposílají znovu a chyba Matrix pusheru se propaguje |
+| Obnovitelné načítání médií | Dočasná chyba avataru má bounded negativní cache a po 60 sekundách se znovu ověří |
 | Recovery a session stavy | Samostatné stavy obnovy, zamknutí, nesouladu účtu a nedostupnosti |
 | Samostatný Notification Service Extension | Přidán target `COPMobileNotificationService` |
 | Malé extension jádro bez plného Matrix SDK | Přidán produkt `CSMNotificationCore` pouze nad Foundation/CryptoKit |

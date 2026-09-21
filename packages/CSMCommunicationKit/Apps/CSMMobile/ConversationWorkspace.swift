@@ -909,9 +909,6 @@ struct ChatView: View {
             for member in activeConversation.members {
                 guard let avatarDataUrl = normalizedAvatarDataUrl(member.avatarDataUrl) else { continue }
                 storeAvatar(avatarDataUrl, for: member.userId, in: &values)
-                if let displayName = member.displayName {
-                    storeAvatar(avatarDataUrl, for: displayName, in: &values)
-                }
             }
         }
 
@@ -929,9 +926,6 @@ struct ChatView: View {
             for member in activeConversation.members {
                 guard let avatarUrl = normalizedAvatarUrl(member.avatarUrl) else { continue }
                 storeAvatar(avatarUrl, for: member.userId, in: &values)
-                if let displayName = member.displayName {
-                    storeAvatar(avatarUrl, for: displayName, in: &values)
-                }
             }
         }
         return values
@@ -953,15 +947,13 @@ struct ChatView: View {
     private func avatarDataUrl(for message: ChatMessage, using values: [String: String]) -> String? {
         guard !message.isAIAgentFallbackResponse else { return nil }
         return normalizedAvatarDataUrl(message.senderAvatarDataUrl) ??
-            values[ConversationIdentity.canonicalKey(message.senderId)] ??
-            values[normalizedIdentity(message.senderDisplayName)]
+            values[ConversationIdentity.canonicalKey(message.senderId)]
     }
 
     private func avatarRemoteUrl(for message: ChatMessage, using values: [String: String]) -> String? {
         guard !message.isAIAgentFallbackResponse else { return nil }
         return normalizedAvatarUrl(message.senderAvatarUrl) ??
-            values[ConversationIdentity.canonicalKey(message.senderId)] ??
-            values[normalizedIdentity(message.senderDisplayName)]
+            values[ConversationIdentity.canonicalKey(message.senderId)]
     }
 
     private func storeAvatar(_ avatarDataUrl: String, for identity: String, in values: inout [String: String]) {
