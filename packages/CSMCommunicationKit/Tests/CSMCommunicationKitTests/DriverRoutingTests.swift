@@ -44,6 +44,14 @@ final class DriverRoutingTests: XCTestCase {
         }
     }
 
+    func testPreservesOptionalProviderLaneMasks() throws {
+        let fixture = Self.fixture.replacingOccurrences(of: "\"maneuverType\":1", with: "\"maneuverType\":1,\"lanes\":[{\"directions\":2,\"active\":2},{\"directions\":64}]")
+        let route = try XCTUnwrap(decode(fixture).navigationRoutes().first)
+        XCTAssertEqual(route.steps[0].lanes?.first?.active, 2)
+        XCTAssertEqual(route.steps[0].lanes?.last?.directions, 64)
+        XCTAssertNil(route.steps[0].lanes?.last?.active)
+    }
+
     func testUnknownFreshnessDoesNotClaimVerifiedLiveTraffic() throws {
         let live = try CSMJSONCoding.decoder.decode(CSMLiveSpeeds.self, from: Data(#"{"enabled":true,"state":"ok"}"#.utf8))
         XCTAssertNotNil(live.presentation(at: .now, receivedAt: .now).warning)

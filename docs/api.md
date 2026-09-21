@@ -455,3 +455,7 @@ The nearby report projection consumes optional `roadEnrichment.clusterId` only
 when state is matched. Grouping happens after active/expiry/radius/access
 filtering, preserves the newest observation and exposes `relatedReportCount`.
 Votes and confidence belong to that observation and are not summed.
+
+Optional route-step `lanes` preserves numeric `directions`, `active` and `valid`
+provider masks. The transport does not infer missing lanes or own lane advice;
+Jizda validates and presents them in its navigation session.

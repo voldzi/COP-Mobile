@@ -81,9 +81,17 @@ public struct CSMRouteStep: Codable, Sendable {
     public let roadName: String?
     public let maneuverType: Int?
     public let roundaboutExitCount: Int?
+    public let lanes: [CSMRouteLane]?
     /// Indices in the complete response route geometry, including joined legs.
     public let beginShapeIndex: Int?
     public let endShapeIndex: Int?
+}
+
+/// Raw provider masks. Presentation and lane choice remain owned by the host.
+public struct CSMRouteLane: Codable, Sendable {
+    public let directions: Int
+    public let active: Int?
+    public let valid: Int?
 }
 
 public struct CSMRouteTraffic: Codable, Sendable {
