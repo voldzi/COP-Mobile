@@ -122,7 +122,7 @@ MVP neobsahuje:
 | Nativní chat | Seznam, konverzace, composer, E2EE/offline stav a komunikační nastavení | `CSMCommunicationKit` | Vlastní OIDC/Matrix session; žádný token nebo decrypted payload přes bridge |
 | Aktivní hovor | Příchozí/odchozí direct-call UI, status, duration, mute, route a end | CSM native + CallKit + LiveKit | Stav vlastní COP API; připojení potvrzuje LiveKit; WebView ani Matrix call signaling se nepoužívají |
 | Proximity blackout | Ochrana obrazovky a dotyků při connected handset hovoru | iOS sensor + CSM native | Jen po dobu relevantního hovoru; není to auth/presence signál |
-| Launch/loading shell | Bezpečný start a rozlišení loading/offline/error | CSM native | Jen technický stav, žádná doménová data ani navigace COP |
+| Launch/loading shell | Značkový plynulý start, okamžitý vstup do komunikace a rozlišení loading/offline/error | CSM native | Nezobrazuje interní prostředí; mizí po přijetí důvěryhodného hlavního dokumentu a nečeká na mapové zdroje |
 | Offline fallback | Čerstvý offline start nebo nepoužitelná cache | CSM native | Konektivita, Retry, verze a bezpečná nápověda; bez nativního reportu v MVP |
 | Permission pre-prompt | Vysvětlení konkrétního účelu před systémovým dialogem | Web text + native systémová akce | Zobrazí se až po uživatelské akci; odmítnutí se respektuje |
 | Tracking status | Aktivní režim, přesnost, baterie a Stop | Native stav prezentovaný webu; systémová indikace iOS | Musí zůstat dostupný i po reloadu webu |

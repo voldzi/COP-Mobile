@@ -32,6 +32,10 @@ final class COPMobileLaunchUITests: XCTestCase {
 
     let openChat = app.buttons["app.openNativeChat"]
     XCTAssertTrue(openChat.waitForExistence(timeout: 8))
+    XCTAssertFalse(
+      app.staticTexts["development"].exists,
+      "Interní název prostředí se nesmí zobrazit uživateli ani v Debug sestavení."
+    )
     openChat.tap()
     XCTAssertTrue(app.otherElements["chat.workspace"].waitForExistence(timeout: 8))
     XCTAssertFalse(app.alerts.firstMatch.exists)

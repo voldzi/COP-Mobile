@@ -85,7 +85,14 @@
     <string>voip</string>
   </array>
   <key>UILaunchScreen</key>
-  <dict/>
+  <dict>
+    <key>UIColorName</key>
+    <string>LaunchBackground</string>
+    <key>UIImageName</key>
+    <string>COPLaunchMark</string>
+    <key>UIImageRespectsSafeAreaInsets</key>
+    <true/>
+  </dict>
   <key>UISupportedInterfaceOrientations</key>
   <array>
     <string>UIInterfaceOrientationPortrait</string>

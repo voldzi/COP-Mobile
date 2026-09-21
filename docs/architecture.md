@@ -317,8 +317,12 @@ ani Matrix interní stav.
 ### Offline start
 
 - Host vytváří `WKWebView` okamžitě; žádné mazání nebo migrace WebKit dat nesmí
-  blokovat první obrazovku. Jednou opakuje navigaci bez cache a potom zobrazí
-  lokální fallback.
+  blokovat první obrazovku. Při opakovaném startu preferuje uložený webový shell
+  a živá data obnovuje web po zobrazení. Značkový nativní launch/loading stav se
+  skryje už po `didCommit` důvěryhodného hlavního dokumentu, takže nečeká na
+  dokončení mapových dlaždic, fontů ani datových requestů. Pokud hlavní dokument
+  nezačne přicházet do deadline, host jednou zopakuje navigaci bez cache a potom
+  zobrazí lokální fallback.
 - COP web v nativním hostu neregistruje browser service worker. Offline start se
   proto neopírá o PWA navigační intercept, který na fyzickém zařízení blokoval
   WebKit proces. Pojmenovaný profil dál bezpečně uchovává cookies, Local Storage,

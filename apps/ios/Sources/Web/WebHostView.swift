@@ -177,7 +177,10 @@ struct WebHostView: UIViewRepresentable {
 
     func loadInitialPage() {
       webRuntimeRecoveryAttempted = false
-      startNavigation(cachePolicy: .useProtocolCachePolicy)
+      // A previously rendered COP shell is safe to show immediately. The web
+      // app refreshes live data after launch, while this policy avoids blocking
+      // the native shell on a network revalidation.
+      startNavigation(cachePolicy: .returnCacheDataElseLoad)
     }
 
     private func startNavigation(cachePolicy: URLRequest.CachePolicy) {
@@ -225,7 +228,8 @@ struct WebHostView: UIViewRepresentable {
     func reloadIfNeeded(token: Int) {
       guard token != lastReloadToken else { return }
       lastReloadToken = token
-      loadInitialPage()
+      webRuntimeRecoveryAttempted = false
+      startNavigation(cachePolicy: .reloadIgnoringLocalCacheData)
     }
 
     func bridgeEventDeliveryDidSucceed() {
@@ -295,6 +299,14 @@ struct WebHostView: UIViewRepresentable {
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
       bridge?.navigationDidCommit(url: webView.url)
+      guard originPolicy.allowsInternalNavigation(to: webView.url ?? appConfiguration.initialURL)
+      else { return }
+
+      // didCommit means the trusted main document is already arriving and can
+      // paint progressively. Waiting for every map tile, font and live-data
+      // request kept the launch cover visible for many unnecessary seconds.
+      finishNavigationAttempt()
+      model.webDidBecomeReady()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

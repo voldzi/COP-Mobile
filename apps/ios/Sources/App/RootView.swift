@@ -18,7 +18,7 @@ struct RootView: View {
           if model.surface != .chat {
             switch model.phase {
             case .loading:
-              LoadingView(environment: configuration.environment) {
+              LoadingView {
                 model.openNativeChat(expectedSubjectID: model.nativeChatExpectedSubjectID)
               }
             case .webContent:
@@ -118,25 +118,65 @@ struct RootView: View {
 }
 
 private struct LoadingView: View {
-  let environment: String
   let openChat: () -> Void
 
   var body: some View {
     ZStack {
-      Color(.systemBackground).ignoresSafeArea()
-      VStack(spacing: 16) {
+      LinearGradient(
+        colors: [
+          Color(red: 0.015, green: 0.045, blue: 0.105),
+          Color(red: 0.025, green: 0.11, blue: 0.17),
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+      )
+      .ignoresSafeArea()
+
+      Circle()
+        .fill(Color.cyan.opacity(0.12))
+        .frame(width: 360, height: 360)
+        .blur(radius: 70)
+        .offset(x: 150, y: -260)
+
+      VStack(spacing: 0) {
+        Spacer()
+
+        Image("COPLaunchMark")
+          .resizable()
+          .scaledToFit()
+          .frame(width: 116, height: 116)
+          .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+          .shadow(color: .cyan.opacity(0.2), radius: 28, y: 10)
+
+        Text("COP Mobile")
+          .font(.system(size: 32, weight: .bold, design: .rounded))
+          .foregroundStyle(.white)
+          .padding(.top, 24)
+
+        Text("Připravuji situační mapu")
+          .font(.subheadline.weight(.medium))
+          .foregroundStyle(.white.opacity(0.68))
+          .padding(.top, 8)
+
         ProgressView()
-          .controlSize(.large)
-        Text("Načítám mapu COP")
-          .font(.headline)
-        Button("Otevřít komunikaci", action: openChat)
-          .buttonStyle(.bordered)
-          .accessibilityIdentifier("app.openNativeChat")
-        if environment != "production" {
-          Text(environment)
-            .font(.caption.monospaced())
-            .foregroundStyle(.secondary)
+          .tint(Color(red: 0.43, green: 0.91, blue: 0.98))
+          .controlSize(.regular)
+          .padding(.top, 22)
+
+        Spacer()
+
+        Button(action: openChat) {
+          Label("Otevřít komunikaci", systemImage: "bubble.left.and.bubble.right.fill")
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
         }
+          .buttonStyle(.borderedProminent)
+          .buttonBorderShape(.capsule)
+          .tint(Color(red: 0.12, green: 0.67, blue: 0.82))
+          .accessibilityIdentifier("app.openNativeChat")
+          .padding(.horizontal, 30)
+          .padding(.bottom, 34)
       }
       .accessibilityElement(children: .contain)
       .accessibilityIdentifier("app.loading")
