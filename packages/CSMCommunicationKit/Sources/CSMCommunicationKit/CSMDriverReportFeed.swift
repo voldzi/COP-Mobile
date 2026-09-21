@@ -56,16 +56,24 @@ enum DriverReportFeedProjector {
         radiusMeters: Double, now: Date, mayBeIncomplete: Bool
     ) -> CSMDriverReportFeed {
         var seen = Set<String>()
-        let reports = items.compactMap { report -> CSMNearbyDriverReport? in
+        var grouped: [String: CSMNearbyDriverReport] = [:]
+        for report in items.sorted(by: { $0.observedAt > $1.observedAt }) {
             guard let category = CSMDriverReportCategory(rawValue: report.category.rawValue),
                   ["submitted", "published"].contains(report.status),
                   report.validUntil.map({ $0 > now }) ?? true,
                   report.observedAt <= now.addingTimeInterval(300),
                   (-90...90).contains(report.location.lat), (-180...180).contains(report.location.lon)
-            else { return nil }
+            else { continue }
             let distance = distance(latitude, longitude, report.location.lat, report.location.lon)
-            guard distance <= radiusMeters, seen.insert(report.reportId).inserted else { return nil }
-            return CSMNearbyDriverReport(
+            guard distance <= radiusMeters, seen.insert(report.reportId).inserted else { continue }
+            let clusterKey = report.roadEnrichment?.state == "matched" ? report.roadEnrichment?.clusterId : nil
+            let key = clusterKey.map { "cluster:\($0)" } ?? "report:\(report.reportId)"
+            if var existing = grouped[key] {
+                existing.relatedReportCount += 1
+                grouped[key] = existing
+                continue
+            }
+            grouped[key] = CSMNearbyDriverReport(
                 id: report.reportId, category: category, title: report.title, detail: report.description,
                 latitude: report.location.lat, longitude: report.location.lon, distanceMeters: distance,
                 observedAt: report.observedAt, validUntil: report.validUntil,
@@ -75,7 +83,8 @@ enum DriverReportFeedProjector {
                 notThereCount: report.confirmations.notThereCount,
                 currentConfirmation: report.confirmations.currentActorValue.flatMap { CSMDriverReportConfirmation(rawValue: $0.rawValue) }
             )
-        }.sorted { $0.distanceMeters == $1.distanceMeters ? $0.id < $1.id : $0.distanceMeters < $1.distanceMeters }
+        }
+        let reports = grouped.values.sorted { $0.distanceMeters == $1.distanceMeters ? $0.id < $1.id : $0.distanceMeters < $1.distanceMeters }
         return CSMDriverReportFeed(reports: reports, fetchedAt: now, mayBeIncomplete: mayBeIncomplete)
     }
 

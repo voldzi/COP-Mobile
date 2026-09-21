@@ -1668,6 +1668,11 @@ struct CommunityReportConfidenceSummary: Decodable, Equatable, Hashable, Sendabl
     var detail: String?
 }
 
+struct CommunityRoadEnrichment: Decodable, Equatable, Hashable, Sendable {
+    var state: String
+    var clusterId: String?
+}
+
 struct CommunityReport: Decodable, Identifiable, Equatable, Hashable, Sendable {
     var reportId: String
     var category: ReportCategory
@@ -1682,6 +1687,7 @@ struct CommunityReport: Decodable, Identifiable, Equatable, Hashable, Sendable {
     var observedAt: Date
     var validUntil: Date?
     var confirmations: CommunityReportConfirmationSummary
+    var roadEnrichment: CommunityRoadEnrichment?
     var confidenceSummary: CommunityReportConfidenceSummary?
 
     var id: String { reportId }
@@ -1703,6 +1709,7 @@ struct CommunityReport: Decodable, Identifiable, Equatable, Hashable, Sendable {
         case validUntil
         case confirmations
         case confidenceSummary
+        case roadEnrichment
         case properties
     }
 
@@ -1736,6 +1743,7 @@ struct CommunityReport: Decodable, Identifiable, Equatable, Hashable, Sendable {
         self.validUntil = validUntil
         self.confirmations = confirmations
         self.confidenceSummary = confidenceSummary
+        self.roadEnrichment = nil
     }
 
     init(from decoder: Decoder) throws {
@@ -1752,6 +1760,7 @@ struct CommunityReport: Decodable, Identifiable, Equatable, Hashable, Sendable {
         observedAt = try container.decodeIfPresent(Date.self, forKey: .observedAt) ?? .distantPast
         validUntil = try container.decodeIfPresent(Date.self, forKey: .validUntil) ?? properties?.validUntil
         confirmations = try container.decodeIfPresent(CommunityReportConfirmationSummary.self, forKey: .confirmations) ?? .empty
+        roadEnrichment = try container.decodeIfPresent(CommunityRoadEnrichment.self, forKey: .roadEnrichment)
         confidenceSummary = try container.decodeIfPresent(CommunityReportConfidenceSummary.self, forKey: .confidenceSummary)
 
         if let severity = try container.decodeIfPresent(AlertSeverity.self, forKey: .severity) {

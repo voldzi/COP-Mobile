@@ -1,6 +1,7 @@
 import Foundation
 
 protocol CopAPIClientProtocol: Sendable {
+    func drivingRoutes(_ request: CSMDriverRouteRequest) async throws -> CSMDriverRouteResponse
     func bootstrap(seconds: Int) async throws -> MobileBootstrap
     func offlineSnapshot(seconds: Int) async throws -> MobileOfflineSnapshot
     func mapCatalog(locale: String, includeDiagnostics: Bool, includePartner: Bool) async throws -> MapLayerCatalog
@@ -43,6 +44,10 @@ protocol CopAPIClientProtocol: Sendable {
 }
 
 extension CopAPIClientProtocol {
+    func drivingRoutes(_ request: CSMDriverRouteRequest) async throws -> CSMDriverRouteResponse {
+        throw CSMDriverRoutingError.noNavigableRoute
+    }
+
     func communityReports() async throws -> [CommunityReport] {
         try await communityReports(query: nil)
     }

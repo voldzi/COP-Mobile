@@ -64,6 +64,18 @@ final class DriverReportFeedTests: XCTestCase {
         XCTAssertEqual(feed.reports.map(\.id), ["legacy", "far"])
     }
 
+    func testClustersOnlyActiveInRadiusObservationsAndKeepsNewestRepresentative() {
+        var first = report("first")
+        first.roadEnrichment = CommunityRoadEnrichment(state: "matched", clusterId: "cluster")
+        var newer = first; newer.reportId = "newer"; newer.observedAt = now.addingTimeInterval(-1)
+        var expired = first; expired.reportId = "expired"; expired.validUntil = now
+        let feed = DriverReportFeedProjector.project([first, newer, expired], latitude: 50.08, longitude: 14.42,
+            radiusMeters: 10_000, now: now, mayBeIncomplete: false)
+        XCTAssertEqual(feed.reports.map(\.id), ["newer"])
+        XCTAssertEqual(feed.reports.first?.relatedReportCount, 2)
+        XCTAssertEqual(feed.reports.first?.confidence, .low)
+    }
+
     private func report(_ id: String) -> CommunityReport {
         CommunityReport(reportId: id, category: .trafficAccident, title: "Nehoda", description: nil,
             location: GeoPoint(lat: 50.08, lon: 14.42, accuracyM: 5, source: "device"), severity: .warning,

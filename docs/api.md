@@ -442,3 +442,16 @@ not directional road matching. The legacy array facade remains compatible.
 
 COP computes category expiry from the original observation time, including offline
 uploads. The support score excludes the author and is not a probability of truth.
+
+## Stateless Jizda routing facade
+
+`CSMCommunicationRuntime.drivingRoutes(from:to:alternatives:)` uses only the
+authenticated COP `POST /api/v1/routing/route` endpoint. Typed DTOs include
+inclusive global shape indices, numeric maneuver type/roundabout exit and all
+live-speed fields. Validation permits degraded or absent traffic while requiring
+a real navigable Valhalla route. No SIM credentials or base URL are exposed.
+
+The nearby report projection consumes optional `roadEnrichment.clusterId` only
+when state is matched. Grouping happens after active/expiry/radius/access
+filtering, preserves the newest observation and exposes `relatedReportCount`.
+Votes and confidence belong to that observation and are not summed.

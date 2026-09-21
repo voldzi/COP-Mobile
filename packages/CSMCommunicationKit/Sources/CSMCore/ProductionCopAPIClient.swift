@@ -4,6 +4,10 @@ import Foundation
 struct ProductionCopAPIClient: CopAPIClientProtocol {
     var http: HTTPClient
 
+    func drivingRoutes(_ request: CSMDriverRouteRequest) async throws -> CSMDriverRouteResponse {
+        try await http.post("/api/v1/routing/route", body: request)
+    }
+
     func bootstrap(seconds: Int) async throws -> MobileBootstrap {
         try await http.get(
             "/api/v1/mobile/bootstrap",
@@ -373,6 +377,10 @@ struct ProductionCopAPIClient: CopAPIClientProtocol {
 /// map and decision authority for the wider COP/CSM system.
 struct CopConversationMetadataClient: ConversationMetadataProviding {
     var http: HTTPClient
+
+    func drivingRoutes(_ request: CSMDriverRouteRequest) async throws -> CSMDriverRouteResponse {
+        try await http.post("/api/v1/routing/route", body: request)
+    }
 
     func conversations() async throws -> [Conversation] {
         let response: MessagingConversationListResponse = try await http.get("/api/v1/messaging/conversations")

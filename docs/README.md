@@ -49,3 +49,5 @@ ověřuje ve Swift testech; pozdější Kotlin použije stejný artifact.
   produkční nebo fyzicky ověřený stav.
 - Dokumentace musí rozlišovat současný skeleton, plánovanou implementaci a
   externí brány, které tým ani kód nemůže sám schválit.
+
+Driver routing boundary: [ADR 0016](adr/0016-stateless-driver-routing-transport.md).

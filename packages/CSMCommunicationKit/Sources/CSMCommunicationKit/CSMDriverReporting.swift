@@ -79,6 +79,7 @@ public struct CSMNearbyDriverReport: Identifiable, Sendable {
     public var observedAt: Date
     public var validUntil: Date?
     public var confidence: CSMDriverReportConfidence
+    public var relatedReportCount: Int = 1
     public var confidencePercent: Int
     public var stillThereCount: Int
     public var notThereCount: Int

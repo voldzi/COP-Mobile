@@ -32,3 +32,5 @@ Use ADRs for important, costly, risky, or hard-to-reverse technical decisions.
 - `0013-bounded-native-chat-state.md` — screen-owned stores, one reducer, paged timeline, persistent outbox and measurable performance gates
 - `0014-communication-only-native-domain.md` — communication-only native runtime; map, reports and business workflow remain in web COP
 - `0015-shared-driver-report-transport.md` — bounded Jizda report facade, encrypted outbox and COP-owned workflow
+
+- `0016-stateless-driver-routing-transport.md` — authenticated COP route DTOs for Jizda; navigation stays outside the kit

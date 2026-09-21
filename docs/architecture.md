@@ -443,3 +443,9 @@ zvonění nebo relay. Time Sensitive notifikaci může uživatel umlčet. Critic
 Alert je samostatně schvalovaná capability. Device-to-device relay zůstane
 defaultně vypnutou foreground laboratoří, dokud neprojde iOS–Android fyzický,
 bezpečnostní a privacy gate.
+
+## Driver route transport
+
+The bounded Jizda facade in ADR 0016 shares the authenticated HTTP client and
+route DTO validation. It is stateless: route matching, MapKit rendering,
+progress, alternatives UI, speech and trip lifecycle remain Jizda-owned.

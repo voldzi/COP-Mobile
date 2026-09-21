@@ -111,6 +111,27 @@ final class HTTPClientTests: XCTestCase {
         XCTAssertEqual(PressureURLProtocol.requestCount, 1)
     }
 
+    func testRoutingUsesAuthenticatedCOPOnlyAndDoesNotRetryOrAdjustTime() async throws {
+        PressureURLProtocol.configure { _ in (200, DriverRoutingTests.fixture) }
+        let api = ProductionCopAPIClient(http: HTTPClient(
+            baseURL: URL(string: "https://cop.test")!,
+            tokenProvider: StaticTestTokenProvider(token: "test-user-token"),
+            session: makeSession(), requiresAuthorization: true
+        ))
+        let body = CSMDriverRouteRequest(from: .init(latitude: 50, longitude: 14), to: .init(latitude: 51, longitude: 15), alternatives: 3)
+        let response = try await api.drivingRoutes(body)
+        XCTAssertEqual(try response.navigationRoutes().first?.durationSeconds, 2400)
+        let request = try XCTUnwrap(PressureURLProtocol.lastRequest)
+        XCTAssertEqual(request.url?.absoluteString, "https://cop.test/api/v1/routing/route")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-user-token")
+        XCTAssertEqual(PressureURLProtocol.requestCount, 1)
+        let encoded = try XCTUnwrap(JSONSerialization.jsonObject(with: CSMJSONCoding.encoder.encode(body)) as? [String: Any])
+        XCTAssertEqual(encoded["profileId"] as? String, "car")
+        XCTAssertEqual(encoded["includeSteps"] as? Bool, true)
+        XCTAssertEqual(encoded["alternatives"] as? Int, 3)
+    }
+
     private func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [PressureURLProtocol.self]
