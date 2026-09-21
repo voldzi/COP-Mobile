@@ -1,0 +1,4 @@
+"NSLocationWhenInUseUsageDescription" = "COP Mobile uses your location to show your position and heading. It shares location only for an action you start.";
+"NSMicrophoneUsageDescription" = "COP Mobile uses the microphone only during a call or while recording a voice message you start.";
+"NSCameraUsageDescription" = "COP Mobile uses the camera only to take a photo you choose to send in chat.";
+"NSFaceIDUsageDescription" = "COP Mobile uses Face ID only when COP security policy requires local access to protected data.";

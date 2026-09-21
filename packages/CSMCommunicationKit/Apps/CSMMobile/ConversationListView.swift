@@ -176,32 +176,34 @@ struct ConversationListView: View {
 
     @ToolbarContentBuilder
     private var conversationToolbar: some ToolbarContent {
-        if let onClose {
+        if onClose != nil || appModel.actor != nil {
             ToolbarItem(placement: .topBarLeading) {
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.body.weight(.semibold))
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.glass)
-                .accessibilityLabel(CSMLocalization.text("conversation.close", fallback: "Zavřít chat"))
-                .accessibilityIdentifier("chat.closeToMap")
-            }
-        }
+                HStack(spacing: 10) {
+                    if let onClose {
+                        Button(action: onClose) {
+                            Image(systemName: "xmark")
+                                .font(.body.weight(.semibold))
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.glass)
+                        .accessibilityLabel(CSMLocalization.text("conversation.close", fallback: "Zavřít chat"))
+                        .accessibilityIdentifier("chat.closeToMap")
+                    }
 
-        if appModel.actor != nil {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    showsAccountProfile = true
-                } label: {
-                    CommunicationAccountAvatar(profile: appModel.effectiveOperatorProfile)
+                    if appModel.actor != nil {
+                        Button {
+                            showsAccountProfile = true
+                        } label: {
+                            CommunicationAccountAvatar(profile: appModel.effectiveOperatorProfile)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(CSMLocalization.text(
+                            "conversation.account.open",
+                            fallback: "Otevřít profil účtu"
+                        ))
+                        .accessibilityIdentifier("chat.accountProfile")
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(CSMLocalization.text(
-                    "conversation.account.open",
-                    fallback: "Otevřít profil účtu"
-                ))
-                .accessibilityIdentifier("chat.accountProfile")
             }
         }
 

@@ -38,9 +38,10 @@ transportu.
 
 Target `COPMobileUITests` spouští host v izolovaném preview režimu. Ověřuje, že
 nativní chat otevře bez WebKitu a bez systémového permission dialogu, a že
-odhlášený stav nabízí jen explicitní přihlášení. Je to rychlá regresní brána
-pro start, přístupnost a základní navigaci; nepředstírá ověření OIDC, Matrix,
-push, E2EE ani hovoru na skutečném zařízení.
+odhlášený stav nabízí jen explicitní přihlášení. Kontroluje také, že tlačítko
+návratu na mapu a profil účtu mají oddělené hit area. Je to rychlá regresní
+brána pro start, přístupnost a základní navigaci; nepředstírá ověření OIDC,
+Matrix, push, E2EE ani hovoru na skutečném zařízení.
 
 Release kandidát se připravuje pouze z čisté commitnuté kopie pomocí
 `bash scripts/verify-release-candidate.sh`. Skript spouští standardní kontrolu
@@ -49,9 +50,12 @@ samostatnou povinnou bránou podle níže uvedené matice.
 
 Aktuální automatizované pokrytí ověřuje, že handshake pravdivě hlásí foreground
 location/heading bez background supportu, `location.getCurrent` nevyvolá
-permission request, location event nese monotónní sequence a invalidace session
-zastaví senzorové updates. Konfigurační validátor vyžaduje When In Use purpose
-string a současně zakazuje Always/background deklarace.
+permission request a automatický webový požadavek nemůže otevřít systémový
+dialog. Explicitní uživatelská aktivace se bezpečně přenese přes asynchronní
+kontrolu stavu k jednomu permission requestu. Location event nese monotónní
+sequence a invalidace session zastaví senzorové updates. Konfigurační validátor
+vyžaduje české i anglické When In Use purpose stringy a současně zakazuje
+Always/background deklarace.
 
 WebView smoke test na fyzickém zařízení navíc ověřuje, že selection haptika
 nastane po tapnutí, ale nevzniká při scrollu a neblokuje aktivaci webového

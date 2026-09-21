@@ -67,4 +67,20 @@ final class COPMobileLaunchUITests: XCTestCase {
       "Odhlášený stav musí nabídnout bezpečnou volbu jiného účtu."
     )
   }
+
+  func testChatToolbarControlsDoNotOverlap() {
+    app.launchEnvironment["COP_UI_TEST_INITIAL_SURFACE"] = "cop"
+    app.launch()
+    XCTAssertTrue(app.buttons["app.openNativeChat"].waitForExistence(timeout: 8))
+    app.buttons["app.openNativeChat"].tap()
+
+    let close = app.buttons["chat.closeToMap"]
+    let profile = app.buttons["chat.accountProfile"]
+    XCTAssertTrue(close.waitForExistence(timeout: 8))
+    XCTAssertTrue(profile.waitForExistence(timeout: 8))
+    XCTAssertFalse(
+      close.frame.intersects(profile.frame),
+      "Tlačítko zavření a profil účtu se v navigační liště nesmějí překrývat."
+    )
+  }
 }

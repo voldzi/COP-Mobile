@@ -5,6 +5,7 @@ import UIKit
 private enum BridgeExecutionError: Error {
   case notForeground
   case rateLimited
+  case userActionRequired
   case unsupported
 }
 
@@ -14,6 +15,19 @@ final class DeviceBridgeCoordinator {
     let isMainFrame: Bool
     let frameURL: URL?
     let mainFrameURL: URL?
+    let isUserInitiated: Bool
+
+    init(
+      isMainFrame: Bool,
+      frameURL: URL?,
+      mainFrameURL: URL?,
+      isUserInitiated: Bool = false
+    ) {
+      self.isMainFrame = isMainFrame
+      self.frameURL = frameURL
+      self.mainFrameURL = mainFrameURL
+      self.isUserInitiated = isUserInitiated
+    }
   }
 
   private let originPolicy: OriginPolicy
@@ -27,6 +41,7 @@ final class DeviceBridgeCoordinator {
   private var sessionID: String?
   private var eventSequence = 0
   private var pendingEvents: [(String, Any)] = []
+  private var locationPermissionGestureExpiresAt: Date?
   private struct CachedResponse {
     let requestDigest: String
     let response: [String: Any]
@@ -64,6 +79,7 @@ final class DeviceBridgeCoordinator {
     eventSequence = 0
     responseCache.removeAll(keepingCapacity: true)
     responseOrder.removeAll(keepingCapacity: true)
+    locationPermissionGestureExpiresAt = nil
   }
 
   func detachEventReceiver() {
@@ -111,7 +127,11 @@ final class DeviceBridgeCoordinator {
     case "hello":
       return handleHello(dictionary)
     case "request":
-      return await handleRequest(dictionary, requestDigest: digest(dictionary))
+      return await handleRequest(
+        dictionary,
+        requestDigest: digest(dictionary),
+        context: context
+      )
     default:
       return blocked(
         id: messageID(from: dictionary), code: "INVALID_REQUEST",
@@ -157,7 +177,11 @@ final class DeviceBridgeCoordinator {
     ]
   }
 
-  private func handleRequest(_ message: [String: Any], requestDigest: String) async -> [String: Any]
+  private func handleRequest(
+    _ message: [String: Any],
+    requestDigest: String,
+    context: RequestContext
+  ) async -> [String: Any]
   {
     let requiredKeys: Set<String> = [
       "kind", "protocolVersion", "id", "sessionId", "method", "sentAt", "params",
@@ -195,7 +219,11 @@ final class DeviceBridgeCoordinator {
     }
     let result: Any
     do {
-      result = try await execute(method: method, params: message["params"] as! [String: Any])
+      result = try await execute(
+        method: method,
+        params: message["params"] as! [String: Any],
+        context: context
+      )
     } catch {
       let mapped = mapError(error)
       return cache(
@@ -214,17 +242,28 @@ final class DeviceBridgeCoordinator {
     return cache(response, id: id, requestDigest: requestDigest)
   }
 
-  private func execute(method: String, params: [String: Any]) async throws -> Any {
+  private func execute(
+    method: String,
+    params: [String: Any],
+    context: RequestContext
+  ) async throws -> Any {
     switch method {
     case "system.getCapabilities":
       guard params.isEmpty else { throw DeviceLocationError.invalidSample }
       return DeviceCapabilities.fullSnapshot(observedAt: timestamp(), location: location)
     case "permissions.getStatus":
       try validateLocationPermissionParams(params)
+      if context.isUserInitiated {
+        locationPermissionGestureExpiresAt = Date().addingTimeInterval(10)
+      }
       return permissionResult()
     case "permissions.request":
       try validateLocationPermissionParams(params)
       guard isForeground() else { throw BridgeExecutionError.notForeground }
+      let hasRecentUserAction = context.isUserInitiated
+        || locationPermissionGestureExpiresAt.map { $0 > Date() } == true
+      guard hasRecentUserAction else { throw BridgeExecutionError.userActionRequired }
+      locationPermissionGestureExpiresAt = nil
       let previous = location.permission
       _ = await location.requestWhenInUseAuthorization()
       if location.permission != previous {
@@ -387,6 +426,8 @@ final class DeviceBridgeCoordinator {
       ("NOT_FOREGROUND", "This operation requires the app to be active.")
     case BridgeExecutionError.rateLimited:
       ("RATE_LIMITED", "Too many call presentation updates were requested.")
+    case BridgeExecutionError.userActionRequired:
+      ("PERMISSION_NOT_DETERMINED", "A direct user action is required before requesting location permission.")
     case BridgeExecutionError.unsupported:
       ("UNSUPPORTED", "Method is not implemented by this host.")
     case DeviceLocationError.invalidSample:

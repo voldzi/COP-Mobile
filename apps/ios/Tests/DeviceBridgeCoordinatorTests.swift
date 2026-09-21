@@ -217,6 +217,63 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     XCTAssertEqual(provider.authorizationRequestCount, 0)
   }
 
+  func testAutomaticWebRequestCannotTriggerLocationPermissionPrompt() async throws {
+    let provider = FakeLocationProvider()
+    provider.permission = "notDetermined"
+    provider.permissionAfterAuthorizationRequest = "granted"
+    let bridge = try makeBridge(location: provider)
+    bridge.navigationDidCommit(url: productionURL)
+    let ready = await bridge.handle(message: hello(), context: allowedContext())
+    let sessionID = try XCTUnwrap(ready["sessionId"] as? String)
+
+    let response = await bridge.handle(
+      message: request(
+        method: "permissions.request",
+        sessionID: sessionID,
+        params: ["permission": "location"]
+      ),
+      context: allowedContext()
+    )
+
+    XCTAssertEqual(response["ok"] as? Bool, false)
+    XCTAssertEqual(
+      (response["error"] as? [String: Any])?["code"] as? String,
+      "PERMISSION_NOT_DETERMINED"
+    )
+    XCTAssertEqual(provider.authorizationRequestCount, 0)
+  }
+
+  func testUserInitiatedStatusCheckAuthorizesFollowingLocationPrompt() async throws {
+    let provider = FakeLocationProvider()
+    provider.permission = "notDetermined"
+    provider.permissionAfterAuthorizationRequest = "granted"
+    let bridge = try makeBridge(location: provider)
+    bridge.navigationDidCommit(url: productionURL)
+    let ready = await bridge.handle(message: hello(), context: allowedContext())
+    let sessionID = try XCTUnwrap(ready["sessionId"] as? String)
+
+    _ = await bridge.handle(
+      message: request(
+        method: "permissions.getStatus",
+        sessionID: sessionID,
+        params: ["permission": "location"]
+      ),
+      context: allowedContext(isUserInitiated: true)
+    )
+    let response = await bridge.handle(
+      message: request(
+        method: "permissions.request",
+        sessionID: sessionID,
+        params: ["permission": "location"]
+      ),
+      context: allowedContext()
+    )
+
+    XCTAssertEqual(response["ok"] as? Bool, true)
+    XCTAssertEqual(provider.authorizationRequestCount, 1)
+    XCTAssertEqual((response["result"] as? [String: Any])?["status"] as? String, "granted")
+  }
+
   func testLocationSubscriptionEmitsSequencedEventAndStopsWithSession() async throws {
     let provider = FakeLocationProvider()
     let bridge = try makeBridge(location: provider)
@@ -326,8 +383,15 @@ final class DeviceBridgeCoordinatorTests: XCTestCase {
     ]
   }
 
-  private func allowedContext() -> DeviceBridgeCoordinator.RequestContext {
-    .init(isMainFrame: true, frameURL: productionURL, mainFrameURL: productionURL)
+  private func allowedContext(
+    isUserInitiated: Bool = false
+  ) -> DeviceBridgeCoordinator.RequestContext {
+    .init(
+      isMainFrame: true,
+      frameURL: productionURL,
+      mainFrameURL: productionURL,
+      isUserInitiated: isUserInitiated
+    )
   }
 
   private func request(method: String, sessionID: String, params: [String: Any]) -> [String: Any] {

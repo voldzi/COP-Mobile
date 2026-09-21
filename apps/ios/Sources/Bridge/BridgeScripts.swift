@@ -21,7 +21,8 @@ enum BridgeScripts {
         if (typeof event.detail !== 'string') return;
         let message;
         try { message = JSON.parse(event.detail); } catch { return; }
-        window.webkit.messageHandlers.\(handlerName).postMessage(message).then(
+        const userInitiated = navigator.userActivation?.isActive === true;
+        window.webkit.messageHandlers.\(handlerName).postMessage({ message, userInitiated }).then(
           response => window.dispatchEvent(new CustomEvent('\(responseEvent)', { detail: JSON.stringify(response) })),
           () => window.dispatchEvent(new CustomEvent('\(responseEvent)', { detail: JSON.stringify({
             kind: 'blocked',

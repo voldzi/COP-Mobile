@@ -37,8 +37,10 @@ Každá permission cesta má stejný stavový model:
 2. Uživatel spustí konkrétní funkci, například „Přidat aktuální polohu“.
 3. Web zobrazí účel, rozsah, dopad na baterii/retenci a možnost pokračovat bez
    capability. Text musí odpovídat lokalizovanému system purpose stringu.
-4. Bridge přijme `permissions.request` pouze z důvěryhodného main frame a po
-   platném handshake.
+4. Bridge přijme `permissions.request` pouze z důvěryhodného main frame, po
+   platném handshake a po důvěryhodně zachycené uživatelské aktivaci. Aktivace
+   se krátce přenese přes předcházející kontrolu stavu, aby asynchronní odpověď
+   iOS nezrušila oprávněné klepnutí uživatele.
 5. Native vrstva vyvolá nejvýše jeden systémový dialog pro tento krok.
 6. Výsledek vrátí jako `granted`, `denied`, `restricted`, `notDetermined` nebo
    detailnější capability stav. Web nesmí odhadovat stav z chyby.
@@ -89,8 +91,9 @@ API. Background modes jsou omezeny na `audio`, `remote-notification` a `voip`;
 
 ### Závazné purpose stringy
 
-Finální české a anglické texty musí před releasem projít produktovým a privacy
-review. Význam nesmí být širší než implementace. Doporučený český baseline:
+České i anglické texty jsou součástí aplikace v lokalizovaných
+`InfoPlist.strings`; význam nesmí být širší než implementace. Schválený český
+baseline:
 
 | Key | Český významový baseline |
 | --- | --- |
@@ -100,11 +103,13 @@ review. Význam nesmí být širší než implementace. Doporučený český bas
 | `NSCameraUsageDescription` | „CSM použije fotoaparát pouze tehdy, když pořídíte fotografii jako přílohu ve workflow COP.“ |
 | `NSMicrophoneUsageDescription` | „COP Mobile používá mikrofon jen během hovoru nebo nahrávání hlasové zprávy, které sami spustíte.“ |
 
-`NSLocationAlwaysAndWhenInUseUsageDescription`, `NSPhotoLibraryUsageDescription`,
-`NSFaceIDUsageDescription` a `NSUserTrackingUsageDescription` se do MVP
-nepřidávají bez funkce, která je skutečně potřebuje. Mikrofon je povolen pouze
-pro uživatelem zahájený nebo přijatý webový hlasový hovor. CSM nepoužívá App
-Tracking Transparency pro analytické nebo reklamní sledování.
+`NSLocationAlwaysAndWhenInUseUsageDescription`, `NSPhotoLibraryUsageDescription`
+a `NSUserTrackingUsageDescription` se do MVP nepřidávají bez funkce, která je
+skutečně potřebuje. `NSFaceIDUsageDescription` pokrývá pouze lokální odemknutí
+chráněných dat vyžádané bezpečnostní politikou. Mikrofon je povolen pouze pro
+uživatelem zahájený nebo přijatý nativní hlasový hovor nebo hlasovou zprávu.
+COP Mobile nepoužívá App Tracking Transparency pro analytické ani reklamní
+sledování.
 Integrovaný COP Chat může mikrofon požádat ze same-origin iframe; nativní host
 ověřuje shodu přesného originu iframe, hlavního COP dokumentu a žádosti WebKitu.
 Před udělením WebKit media-capture oprávnění host explicitně ověří nebo vyžádá

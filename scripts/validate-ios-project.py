@@ -68,8 +68,8 @@ def main() -> int:
             failures.append("local CSMCommunicationKit must retain its communication test target")
         if 'name: "CSMVoiceCallKit"' not in package_text:
             failures.append("local CSMCommunicationKit must expose the shared CSMVoiceCallKit product")
-        if 'exact: "2.16.0"' not in package_text:
-            failures.append("shared CSMVoiceCallKit must pin the audited LiveKit 2.16.0 dependency")
+        if 'exact: "2.17.0"' not in package_text:
+            failures.append("shared CSMVoiceCallKit must pin the audited LiveKit 2.17.0 dependency")
 
     communication_model = COMMUNICATION_KIT / "Sources" / "CSMCore" / "CommunicationModel.swift"
     legacy_app_model = COMMUNICATION_KIT / "Sources" / "CSMCore" / "AppModel.swift"
@@ -166,7 +166,11 @@ def main() -> int:
                 failures.append(
                     f"{source_file.relative_to(ROOT)} must not restore {description}"
                 )
-    nested_projects = list(COMMUNICATION_KIT.rglob("*.xcodeproj"))
+    nested_projects = [
+        path
+        for path in COMMUNICATION_KIT.rglob("*.xcodeproj")
+        if ".build" not in path.parts
+    ]
     if nested_projects:
         failures.append("local CSMCommunicationKit must not embed a legacy Xcode application project")
     if "- path: Resources" not in project:
@@ -192,6 +196,22 @@ def main() -> int:
     ui_smoke_test = ROOT / "apps" / "ios" / "UITests" / "COPMobileLaunchUITests.swift"
     if not ui_smoke_test.is_file():
         failures.append("native UI smoke-test source must be present")
+
+    localized_purpose_keys = {
+        "NSLocationWhenInUseUsageDescription",
+        "NSMicrophoneUsageDescription",
+        "NSCameraUsageDescription",
+        "NSFaceIDUsageDescription",
+    }
+    for language in ("cs", "en"):
+        localized_info = IOS / "Resources" / f"{language}.lproj" / "InfoPlist.strings"
+        if not localized_info.is_file():
+            failures.append(f"{language} InfoPlist.strings must localize protected-resource prompts")
+            continue
+        localized_text = localized_info.read_text(encoding="utf-8")
+        for key in localized_purpose_keys:
+            if f'"{key}"' not in localized_text:
+                failures.append(f"{language} InfoPlist.strings must localize {key}")
 
     if release.get("COPWebOrigin") != "https://cop.zeleznalady.cz":
         failures.append("release COP origin must be exact production HTTPS origin")

@@ -20,7 +20,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/livekit/client-sdk-swift.git",
-            exact: "2.16.0"
+            exact: "2.17.0"
         )
     ],
     targets: [
