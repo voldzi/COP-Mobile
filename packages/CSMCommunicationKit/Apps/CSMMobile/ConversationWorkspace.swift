@@ -885,30 +885,20 @@ struct ChatView: View {
 
     private var activeConversationAvatarDataUrl: String? {
         guard let activeConversation else { return nil }
-        if activeConversation.type == .direct,
-           let peerAvatar = activeConversation.members.compactMap({ member -> String? in
-               guard !isOwnIdentity(member.userId) else { return nil }
-               return normalizedAvatarDataUrl(member.avatarDataUrl)
-           }).first {
-            return peerAvatar
-        }
         if activeConversation.type == .direct {
-            return nil
+            return normalizedAvatarDataUrl(
+                appModel.directConversationPeer(in: activeConversation)?.avatarDataUrl
+            )
         }
         return normalizedAvatarDataUrl(activeConversation.avatarDataUrl)
     }
 
     private var activeConversationAvatarRemoteUrl: String? {
         guard let activeConversation else { return nil }
-        if activeConversation.type == .direct,
-           let peerAvatar = activeConversation.members.compactMap({ member -> String? in
-               guard !isOwnIdentity(member.userId) else { return nil }
-               return normalizedAvatarUrl(member.avatarUrl)
-           }).first {
-            return peerAvatar
-        }
         if activeConversation.type == .direct {
-            return nil
+            return normalizedAvatarUrl(
+                appModel.directConversationPeer(in: activeConversation)?.avatarUrl
+            )
         }
         return normalizedAvatarUrl(activeConversation.avatarUrl)
     }
@@ -972,11 +962,6 @@ struct ChatView: View {
         return normalizedAvatarUrl(message.senderAvatarUrl) ??
             values[ConversationIdentity.canonicalKey(message.senderId)] ??
             values[normalizedIdentity(message.senderDisplayName)]
-    }
-
-    private func isOwnIdentity(_ value: String) -> Bool {
-        let ownIdentities = Set(ownIdentityValues.map(ConversationIdentity.canonicalKey).filter { !$0.isEmpty })
-        return ownIdentities.contains(ConversationIdentity.canonicalKey(value))
     }
 
     private func storeAvatar(_ avatarDataUrl: String, for identity: String, in values: inout [String: String]) {

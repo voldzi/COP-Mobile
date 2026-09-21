@@ -239,6 +239,16 @@ final class CommunicationModel {
             .mergedWithIdentity(actor: actor)
     }
 
+    /// Returns the other participant of a direct conversation using every
+    /// identity spelling known to the current session, including Matrix.
+    func directConversationPeer(in conversation: Conversation) -> ConversationMember? {
+        guard conversation.type == .direct else { return nil }
+        return Self.directPeer(
+            in: conversation,
+            selfIds: Self.selfIdentifierSet(actor, matrixUserId: lastMessagingBootstrap?.userId)
+        )
+    }
+
     @ObservationIgnored private let appConfiguration: AppConfiguration
     @ObservationIgnored private let api: any CopAPIClientProtocol
     @ObservationIgnored private let messaging: any MessagingClientProtocol

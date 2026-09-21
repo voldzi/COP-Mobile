@@ -53,6 +53,50 @@ final class ChatArchitectureTests: XCTestCase {
         XCTAssertNotEqual(original, reinstalled)
     }
 
+    func testDirectConversationUsesPeerAvatarInsteadOfCurrentMatrixUserAvatar() {
+        let actor = AuthenticatedActor(
+            subjectId: "oidc-current-user",
+            username: "account-visible-to-cop",
+            displayName: "Current User",
+            roles: ["user"]
+        )
+        let conversation = Conversation(
+            conversationId: "direct-room",
+            title: "Jiřina Volková",
+            type: .direct,
+            status: "active",
+            encrypted: true,
+            e2eeRequired: true,
+            memberCount: 2,
+            mapLinkCount: 0,
+            members: [
+                ConversationMember(
+                    userId: "@cop_matrix-identity-42:matrix.example",
+                    displayName: "Current User",
+                    avatarDataUrl: "data:image/png;base64,self-avatar"
+                ),
+                ConversationMember(
+                    userId: "@cop_jirina:matrix.example",
+                    displayName: "Jiřina Volková",
+                    avatarDataUrl: "data:image/png;base64,peer-avatar"
+                )
+            ],
+            mapLinks: [],
+            updatedAt: .now
+        )
+
+        let normalized = CommunicationModel.normalizedConversationList(
+            [conversation],
+            actor: actor,
+            matrixUserId: "@cop_matrix-identity-42:matrix.example"
+        )
+
+        XCTAssertEqual(normalized.count, 1)
+        XCTAssertEqual(normalized[0].title, "Jiřina Volková")
+        XCTAssertEqual(normalized[0].avatarDataUrl, "data:image/png;base64,peer-avatar")
+        XCTAssertNotEqual(normalized[0].avatarDataUrl, "data:image/png;base64,self-avatar")
+    }
+
     func testReducerDeduplicatesAndKeepsBoundedWindow() {
         var state = TimelineState(conversationID: "room")
         let messages = (0..<10_000).map { index in

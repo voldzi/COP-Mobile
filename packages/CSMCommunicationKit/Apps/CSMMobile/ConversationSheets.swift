@@ -277,18 +277,7 @@ struct ConversationDetailSheet: View {
     }
 
     private var directPeer: ConversationMember? {
-        guard currentConversation.type == .direct else { return nil }
-        let selfIds = [
-            appModel.actor?.subjectId,
-            appModel.actor?.username,
-            appModel.actor?.displayName
-        ]
-            .compactMap { $0 }
-            .map(ConversationIdentity.canonicalKey)
-        let ownIds = Set(selfIds)
-        return currentConversation.members.first {
-            !ownIds.contains(ConversationIdentity.canonicalKey($0.userId))
-        }
+        appModel.directConversationPeer(in: currentConversation)
     }
 
     private var memberText: String {
