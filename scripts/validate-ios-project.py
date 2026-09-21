@@ -32,8 +32,8 @@ def main() -> int:
         failures.append("Base.xcconfig must pin Swift 6.0")
     if "PRODUCT_BUNDLE_IDENTIFIER = cz.zeleznalady.csm.messenger" not in base:
         failures.append("Base.xcconfig must use the approved legacy bundle ID")
-    if "DEVELOPMENT_TEAM: LM6W548X36" not in project:
-        failures.append("project.yml must use the approved Apple Development Team")
+    if project.count("DEVELOPMENT_TEAM: LM6W548X36") != 2:
+        failures.append("project.yml host and notification extension must use the approved Apple Development Team")
     if "path: ../../packages/CSMCommunicationKit" not in project:
         failures.append("project.yml must consume the COP Mobile-owned local CSMCommunicationKit package")
     if "CSM-messenger.git" in project or "04 CSM messenger" in project:

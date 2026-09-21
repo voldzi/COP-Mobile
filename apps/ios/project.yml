@@ -65,6 +65,7 @@ targets:
       - path: Extensions/NotificationService
     settings:
       base:
+        DEVELOPMENT_TEAM: LM6W548X36
         APPLICATION_EXTENSION_API_ONLY: YES
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Extensions/NotificationService/Info.plist
