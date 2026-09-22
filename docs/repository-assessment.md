@@ -277,7 +277,7 @@ rovněž musí být navržena znovu pro thin host.
 
 - nový repozitář zůstává sibling projektu `01 COP`;
 - produktové jméno je COP Mobile/CSM host; kompatibilní bundle ID a deep-link
-  rozhodnutí bylo potvrzeno s Teamem `LM6W548X36`;
+  rozhodnutí bylo potvrzeno s Teamem `MC3RPR926P`;
 - minimum je iOS/iPadOS 26.0, nikoli 18 ani 27;
 - production web je `https://cop.zeleznalady.cz`;
 - první distribuce je TestFlight/interní pilot;

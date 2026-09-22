@@ -33,8 +33,8 @@ kde chybí rozhodnutí nebo fyzický důkaz.
 
 ## OQ-004: Bundle ID, signing a nástupnictví staré aplikace
 
-- Stav: uzavřeno — potvrzen Team `LM6W548X36` a kompatibilní bundle ID
-  `cz.zeleznalady.csm.messenger`; XcodeGen target obě hodnoty používá
+- Stav: uzavřeno — potvrzen Team `MC3RPR926P` a kompatibilní bundle ID
+  `cz.voldzi.copmobile`; XcodeGen target obě hodnoty používá
 - Vlastník: Apple Developer/App Store správce
 - Dopad: APNs topic, AASA, `csm://` deep links, instalace vedle legacy aplikace
 - Rozhodnutí: nový host pokračuje jako náhrada legacy aplikace, nikoli jako

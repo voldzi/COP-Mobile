@@ -32,7 +32,7 @@ actor KeychainCredentialStore: TokenCredentialStoring {
     private let service: String
     private let accessGroup: String?
 
-    init(service: String = "cz.zeleznalady.csm.messenger.credentials", accessGroup: String? = nil) {
+    init(service: String = "cz.voldzi.copmobile.credentials", accessGroup: String? = nil) {
         self.service = service
         self.accessGroup = accessGroup
     }

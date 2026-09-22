@@ -99,7 +99,7 @@ actor MatrixMessagingClient: MessagingClientProtocol {
         #endif
 
         let pusher = MatrixPusherSetRequest(
-            appId: Bundle.main.bundleIdentifier ?? "cz.zeleznalady.csm.messenger",
+            appId: Bundle.main.bundleIdentifier ?? "cz.voldzi.copmobile",
             appDisplayName: "CSM Messenger",
             deviceDisplayName: deviceName,
             pushkey: pushKey,

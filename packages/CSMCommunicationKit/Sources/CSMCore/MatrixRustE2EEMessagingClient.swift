@@ -32,7 +32,7 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
     }
 
     private let logger = Logger(
-        subsystem: Bundle.main.bundleIdentifier ?? "cz.zeleznalady.csm.messenger",
+        subsystem: Bundle.main.bundleIdentifier ?? "cz.voldzi.copmobile",
         category: "matrix-rust"
     )
     private let keychain: KeychainCredentialStore
@@ -560,7 +560,7 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
 
         let identifiers = PusherIdentifiers(
             pushkey: pushKey,
-            appId: Bundle.main.bundleIdentifier ?? "cz.zeleznalady.csm.messenger"
+            appId: Bundle.main.bundleIdentifier ?? "cz.voldzi.copmobile"
         )
         let kind = PusherKind.http(
             data: HttpPusherData(

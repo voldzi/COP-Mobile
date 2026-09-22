@@ -101,7 +101,7 @@ final class PushNotificationService: NSObject, PushNotificationProviding,
   func registrationContext() -> [String: Any] {
     [
       "appInstanceId": appInstanceID,
-      "bundleId": Bundle.main.bundleIdentifier ?? "cz.zeleznalady.csm.messenger",
+      "bundleId": Bundle.main.bundleIdentifier ?? "cz.voldzi.copmobile",
     ]
   }
 
@@ -120,7 +120,7 @@ final class PushNotificationService: NSObject, PushNotificationProviding,
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = try JSONSerialization.data(withJSONObject: [
       "apnsEnvironment": Self.apnsEnvironment,
-      "appBundleId": Bundle.main.bundleIdentifier ?? "cz.zeleznalady.csm.messenger",
+      "appBundleId": Bundle.main.bundleIdentifier ?? "cz.voldzi.copmobile",
       "appInstanceId": appInstanceID,
       "capabilities": [
         "e2ee": true, "criticalAlerts": false, "liveActivities": false, "voip": true,

@@ -65,8 +65,8 @@ generovány do typed build configuration; secrets zůstávají v Keychain/CI/ser
 | Název | Povinný | Bezpečný default | Účel |
 | --- | --- | --- | --- |
 | `COP_MOBILE_ENVIRONMENT` | ano | `development` | Výběr debug/staging/release veřejné konfigurace |
-| `COP_IOS_BUNDLE_ID` | ano | `cz.zeleznalady.csm.messenger` | Potvrzená kompatibilní App ID, APNs topic a deep-link identita |
-| `COP_IOS_DEVELOPMENT_TEAM` | ano | `LM6W548X36` | Potvrzený veřejný Apple Team identifikátor; nejde o signing secret |
+| `COP_IOS_BUNDLE_ID` | ano | `cz.voldzi.copmobile` | Potvrzená kompatibilní App ID, APNs topic a deep-link identita |
+| `COP_IOS_DEVELOPMENT_TEAM` | ano | `MC3RPR926P` | Potvrzený veřejný Apple Team identifikátor; nejde o signing secret |
 | `COP_IOS_MINIMUM_VERSION` | ano | `26.0` | Závazný deployment target |
 | `COP_WEB_ORIGIN` | ano | `https://cop.zeleznalady.cz` | Přesný hlavní release origin; ne wildcard |
 | `COP_OIDC_ISSUER` | ano | `https://login.zeleznalady.cz/realms/cop` | Navigační OIDC origin, nikdy bridge origin |
@@ -106,8 +106,8 @@ projektu. Každý release kandidát prochází těmito kroky:
 7. oddělený real-device test report před promotion stejného buildu.
 
 Produkční app se nebuildí z `04 CSM messenger`. Tento projekt používá potvrzený
-Team `LM6W548X36` a záměrně zachovaný bundle ID
-`cz.zeleznalady.csm.messenger`, ale má vlastní build a release historii.
+Team `MC3RPR926P` a novou, tímto týmem vlastněnou identitu
+`cz.voldzi.copmobile`; má vlastní build a release historii.
 Komunikační kód vlastní lokálně v `packages/CSMCommunicationKit`; release
 projekt nesmí obsahovat sibling cestu ani Git dependency původní aplikace.
 Původní velkou iOS aplikaci lze odstranit bez dopadu na build nebo runtime

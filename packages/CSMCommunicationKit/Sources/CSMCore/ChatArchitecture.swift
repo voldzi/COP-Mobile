@@ -651,9 +651,9 @@ enum ChatPerformanceBudget {
 }
 
 enum ChatPerformance {
-    private static let logger = Logger(subsystem: "cz.zeleznalady.csm.messenger", category: "ChatPerformance")
+    private static let logger = Logger(subsystem: "cz.voldzi.copmobile", category: "ChatPerformance")
     private static let signpostLog = OSLog(
-        subsystem: "cz.zeleznalady.csm.messenger",
+        subsystem: "cz.voldzi.copmobile",
         category: .pointsOfInterest
     )
 

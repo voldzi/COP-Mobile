@@ -62,7 +62,7 @@ background mode ani entitlement. Přesné souřadnice a heading jsou pouze v pam
 a předávají se platné bridge session, nikoli do nativních logů nebo telemetry.
 
 APNs implementace znovu používá schválený topic
-`cz.zeleznalady.csm.messenger`, vyžaduje explicitní zapnutí oznámení a registruje
+`cz.voldzi.copmobile`, vyžaduje explicitní zapnutí oznámení a registruje
 aktuální device token přímo u CSM Messaging jednorázovým ticketem. Raw APNs
 token ani samostatný PushKit VoIP token se nikdy neposílá do COP webu nebo COP
 API. Background modes jsou omezeny na `audio`, `remote-notification` a `voip`;

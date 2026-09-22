@@ -39,7 +39,7 @@ targets:
       - path: Resources
     settings:
       base:
-        DEVELOPMENT_TEAM: LM6W548X36
+        DEVELOPMENT_TEAM: MC3RPR926P
         CODE_SIGN_ENTITLEMENTS: Config/COPMobile.entitlements
         PRODUCT_NAME: COPMobile
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -65,11 +65,11 @@ targets:
       - path: Extensions/NotificationService
     settings:
       base:
-        DEVELOPMENT_TEAM: LM6W548X36
+        DEVELOPMENT_TEAM: MC3RPR926P
         APPLICATION_EXTENSION_API_ONLY: YES
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Extensions/NotificationService/Info.plist
-        PRODUCT_BUNDLE_IDENTIFIER: cz.zeleznalady.csm.messenger.notification-service
+        PRODUCT_BUNDLE_IDENTIFIER: cz.voldzi.copmobile.notification-service
         PRODUCT_NAME: COPMobileNotificationService
         SKIP_INSTALL: YES
     dependencies:

@@ -352,7 +352,7 @@ public final class VoiceCallService:
   private let provider: CXProvider
   private let callController = CXCallController()
   private let logger = Logger(
-    subsystem: Bundle.main.bundleIdentifier ?? "cz.zeleznalady.csm.messenger",
+    subsystem: Bundle.main.bundleIdentifier ?? "cz.voldzi.copmobile",
     category: "native-voice-call"
   )
   private var registry: PKPushRegistry!

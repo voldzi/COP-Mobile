@@ -30,9 +30,9 @@ def main() -> int:
         failures.append("Base.xcconfig must pin IPHONEOS_DEPLOYMENT_TARGET to 26.0")
     if "SWIFT_VERSION = 6.0" not in base:
         failures.append("Base.xcconfig must pin Swift 6.0")
-    if "PRODUCT_BUNDLE_IDENTIFIER = cz.zeleznalady.csm.messenger" not in base:
-        failures.append("Base.xcconfig must use the approved legacy bundle ID")
-    if project.count("DEVELOPMENT_TEAM: LM6W548X36") != 2:
+    if "PRODUCT_BUNDLE_IDENTIFIER = cz.voldzi.copmobile" not in base:
+        failures.append("Base.xcconfig must use the approved VCode-owned bundle ID")
+    if project.count("DEVELOPMENT_TEAM: MC3RPR926P") != 2:
         failures.append("project.yml host and notification extension must use the approved Apple Development Team")
     if "path: ../../packages/CSMCommunicationKit" not in project:
         failures.append("project.yml must consume the COP Mobile-owned local CSMCommunicationKit package")

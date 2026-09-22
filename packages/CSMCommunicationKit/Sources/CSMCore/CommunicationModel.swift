@@ -14,7 +14,7 @@ enum ConversationListLoadState: Equatable, Sendable {
 @Observable
 final class CommunicationModel {
     private static let diagnostics = Logger(
-        subsystem: "cz.zeleznalady.csm.messenger",
+        subsystem: "cz.voldzi.copmobile",
         category: "communication"
     )
     private static let deviceRegistrationDiagnosticStatusKey =
@@ -1105,7 +1105,7 @@ final class CommunicationModel {
     ) -> CSMMessagingDeviceRegistrationRequest {
         return CSMMessagingDeviceRegistrationRequest(
             apnsEnvironment: Self.apnsEnvironment,
-            appBundleId: Bundle.main.bundleIdentifier ?? "cz.zeleznalady.csm.messenger",
+            appBundleId: Bundle.main.bundleIdentifier ?? "cz.voldzi.copmobile",
             appInstanceId: Self.appInstanceId,
             capabilities: .init(
                 criticalAlerts: false,
