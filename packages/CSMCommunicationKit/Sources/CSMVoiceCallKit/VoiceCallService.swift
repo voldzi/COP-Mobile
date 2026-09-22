@@ -810,18 +810,13 @@ public final class VoiceCallService:
       action.fail()
       return
     }
-    do {
-      prepareAudioSession(action: "answer")
-      context.answered = true
-      calls[action.callUUID] = context
-      publish(action.callUUID)
-      action.fulfill()
-      Task { @MainActor [weak self] in
-        await self?.acceptAndConnect(uuid: action.callUUID)
-      }
-    } catch {
-      action.fail()
-      fail(uuid: action.callUUID, error: error)
+    prepareAudioSession(action: "answer")
+    context.answered = true
+    calls[action.callUUID] = context
+    publish(action.callUUID)
+    action.fulfill()
+    Task { @MainActor [weak self] in
+      await self?.acceptAndConnect(uuid: action.callUUID)
     }
   }
 
