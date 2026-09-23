@@ -148,6 +148,14 @@ doplní členský profil. Neúspěšná příprava audio session kvůli dočasn�
 s jiným systémovým médiem nesmí sama ukončit hovor; aktivaci následně převezme
 CallKit.
 
+Přímá konverzace používá `directPeer` z COP metadat jako zdroj identity a
+profilového obrázku. Pozdější neúplný Matrix profil nesmí obrázek vymazat.
+Odchozí hovor přijme datový obrázek i bezpečnou HTTPS adresu; při chybě média
+zobrazí iniciály. Stav `e2ee_queue` nadále blokuje odesílání bez šifrování,
+ale karta chatu zobrazí konkrétní známou příčinu (ověření účtu, dostupnost
+serveru nebo navázání místnosti) a další krok. Detail přenosové chyby zůstává
+jen v diagnostice.
+
 Domovská obrazovka chatu používá jedinou kompaktní nativní hlavičku `Chat`,
 vyhledávání nahoře, přepínač `Skupiny / Lidé`, vodorovné `Oblíbené` a úsporné
 chronologické řádky. Host nesmí přidávat druhou hlavičku; zavření, připravenost,

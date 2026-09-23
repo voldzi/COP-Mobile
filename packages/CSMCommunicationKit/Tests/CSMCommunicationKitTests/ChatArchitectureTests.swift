@@ -150,6 +150,66 @@ final class ChatArchitectureTests: XCTestCase {
         XCTAssertEqual(normalized[0].avatarUrl, "mxc://msg.example/operator-avatar")
     }
 
+    func testCOPDirectPeerAvatarSurvivesConversationDecoding() throws {
+        let payload = #"{"conversationId":"room-1","title":"COP Operator","type":"direct","members":[{"userId":"current-user"},{"userId":"cop.operator"}],"directPeer":{"userId":"cop.operator","displayName":"COP Operator","avatarUrl":"https://cop.example/operator.png"}}"#
+        let conversation = try JSONDecoder().decode(Conversation.self, from: Data(payload.utf8))
+        let actor = AuthenticatedActor(
+            subjectId: "current-user",
+            username: "current-user",
+            displayName: "Current User",
+            roles: ["user"]
+        )
+
+        let normalized = CommunicationModel.normalizedConversationList([conversation], actor: actor)
+        XCTAssertEqual(normalized.first?.avatarUrl, "https://cop.example/operator.png")
+        XCTAssertNil(normalized.first?.avatarDataUrl)
+        XCTAssertEqual(normalized.first?.members.count, 2)
+    }
+
+    func testHistoricalDirectAliasesMergeByPeerInsteadOfRoomKey() throws {
+        let actor = AuthenticatedActor(
+            subjectId: "current-user",
+            username: "current-user",
+            displayName: "Current User",
+            roles: ["user"]
+        )
+        let first = try JSONDecoder().decode(Conversation.self, from: Data(#"{"conversationId":"old-room","canonicalKey":"old:operator","title":"COP Operator","type":"direct","members":[{"userId":"current-user"},{"userId":"@cop_cop.operator:matrix.example"}]}"#.utf8))
+        let second = try JSONDecoder().decode(Conversation.self, from: Data(#"{"conversationId":"new-room","canonicalKey":"direct:current-user:cop.operator","title":"COP Operator","type":"direct","members":[{"userId":"current-user"},{"userId":"cop.operator","avatarUrl":"https://cop.example/operator.png"}]}"#.utf8))
+
+        let normalized = CommunicationModel.normalizedConversationList([first, second], actor: actor)
+        XCTAssertEqual(normalized.count, 1)
+        XCTAssertEqual(normalized.first?.avatarUrl, "https://cop.example/operator.png")
+    }
+
+    func testBlockedSecureChatExplainsAuthenticationFailureWithoutAllowingPlaintext() {
+        let trust = MessagingTrustPresentation.make(status: "e2ee_queue", pendingCount: 0)
+        let presentation = ChatDeliveryPresentation.make(
+            trust: trust,
+            pendingCount: 0,
+            transportError: "M_UNKNOWN_TOKEN",
+            syncStatus: "blocked_e2ee"
+        )
+
+        XCTAssertTrue(trust.blocksSending)
+        XCTAssertEqual(presentation.severity, .blocked)
+        XCTAssertEqual(presentation.title, "Přihlášení k chatu vypršelo")
+        XCTAssertTrue(presentation.detail.contains("znovu přihlaste"))
+        XCTAssertFalse(presentation.canSync)
+    }
+
+    func testBlockedSecureChatKeepsTransportReasonForDiagnostics() {
+        let presentation = ChatDeliveryPresentation.make(
+            trust: MessagingTrustPresentation.make(status: "e2ee_queue", pendingCount: 0),
+            pendingCount: 0,
+            transportError: "Matrix session is not configured on this device.",
+            syncStatus: "blocked_e2ee"
+        )
+
+        XCTAssertEqual(presentation.title, "Šifrovaný chat v telefonu není připravený")
+        XCTAssertTrue(presentation.detail.contains("Obnovte konverzace"))
+        XCTAssertTrue(presentation.technicalDetail?.contains("Matrix session") == true)
+    }
+
     func testReducerDeduplicatesAndKeepsBoundedWindow() {
         var state = TimelineState(conversationID: "room")
         let messages = (0..<10_000).map { index in

@@ -847,7 +847,7 @@ struct ChatView: View {
         // transport identities are not authoritative COP subject identifiers.
         // The API resolves the canonical direct peer from the server-owned
         // conversation bound to this room and validates that it is one-to-one.
-        onStartVoiceCall(roomID, conversation.title, nil, activeConversationAvatarDataUrl)
+        onStartVoiceCall(roomID, conversation.title, nil, activeConversationAvatarDataUrl ?? activeConversationAvatarRemoteUrl)
     }
 
     private func isVoiceCallTimelineEvent(_ message: ChatMessage) -> Bool {

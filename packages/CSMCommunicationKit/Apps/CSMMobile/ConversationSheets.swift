@@ -1443,10 +1443,10 @@ struct MessagingIssueCard: View {
 
     private var issue: MessagingUserFacingIssue {
         MessagingUserFacingIssue.make(errorText: errorText) ?? MessagingUserFacingIssue(
-            title: CSMLocalization.text("messaging.issue.generic.title", fallback: "Akci se nepodařilo dokončit"),
+            title: CSMLocalization.text("messaging.issue.generic.title", fallback: "Chat se nepodařilo načíst"),
             message: CSMLocalization.text(
                 "messaging.issue.generic.message",
-                fallback: "Aplikace zachová chráněná data v zařízení a dovolí pokus zopakovat."
+                fallback: "Neodeslané zprávy zůstávají v telefonu."
             ),
             recoverySuggestion: CSMLocalization.text(
                 "messaging.issue.generic.recovery",

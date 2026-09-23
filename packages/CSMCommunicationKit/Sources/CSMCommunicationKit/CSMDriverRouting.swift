@@ -119,14 +119,17 @@ public struct CSMLiveSpeeds: Codable, Sendable {
     public func presentation(at now: Date, receivedAt: Date) -> (title: String, warning: String?) {
         let age = effectiveAge(at: now, receivedAt: receivedAt)
         guard enabled == true else {
-            return ("Živá doprava není aktivní", "Výpočet může používat běžné mapové rychlosti.")
+            return ("Živá doprava není dostupná", "Výpočet může používat běžné mapové rychlosti.")
         }
-        if state == "stale" || state == "failed" || (age ?? 0) > 900 {
-            return ("Živá doprava není aktuální", "Část výpočtu může používat běžné mapové rychlosti.")
+        if state == "failed" {
+            return ("Živá doprava není dostupná", "Část výpočtu může používat běžné mapové rychlosti.")
+        }
+        if state == "stale" || (age ?? 0) > 900 {
+            return ("Živá doprava je zastaralá", "Část výpočtu může používat běžné mapové rychlosti.")
         }
         if state == "idle" { return ("Živá doprava čeká na data", "Adaptivní režim čeká na automobilový dotaz.") }
         if state == "degraded" {
-            return ("Živá doprava aktivní", "Živá data mají částečné pokrytí nebo omezenou kvalitu.")
+            return ("Živá doprava s omezeným pokrytím", "Část trasy může používat běžné mapové rychlosti.")
         }
         if state == "ok", age != nil {
             return ("Živá doprava aktivní", nil)

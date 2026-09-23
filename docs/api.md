@@ -59,6 +59,13 @@ Native nikdy nevyvolá systémový dialog z handshake, capability dotazu ani
 | Matrix Client-Server/E2EE | Matrix/Synapse a připnutý Matrix Rust SDK | `CSMCommunicationKit` |
 | Native communications module API | Swift Package produkt `CSMCommunicationKit` | COP Mobile SwiftUI host |
 
+`CSMDriverRouting` předává dobu trasy přímo z COP/SIM bez dalšího přičítání
+zdržení. `traffic.liveSpeeds` ponechává stav a čerstvost z API; prezentační
+vrstva rozlišuje `ok` (čerstvá živá data), `degraded` (omezené pokrytí),
+`stale` nebo vysoké stáří (zastaralá data), `failed` či vypnutý režim
+(nedostupná data) a `idle` (čekání na automobilový dotaz). Ani jeden stav
+nesmí sám zneplatnit jinak použitelnou trasu.
+
 Mobilní repozitář nesmí ručně založit konkurenční „master“ kopii TypeScript
 typů nebo JSON Schema. Může obsahovat generované Swift/Kotlin modely, zamčenou
 verzi schémat a test fixtures jako build input, ale změna kontraktu začíná v

@@ -77,6 +77,16 @@ public struct ActiveCallView: View {
             .scaledToFill()
             .frame(width: 150, height: 150)
             .clipShape(Circle())
+        } else if let url = remoteAvatarURL(from: call.avatarDataURL) {
+          AsyncImage(url: url) { image in
+            image.resizable().scaledToFill()
+          } placeholder: {
+            Text(initials(call.title))
+              .font(.system(size: 52, weight: .semibold, design: .rounded))
+              .foregroundStyle(.white)
+          }
+          .frame(width: 150, height: 150)
+          .clipShape(Circle())
         } else {
           Text(initials(call.title))
             .font(.system(size: 52, weight: .semibold, design: .rounded))
@@ -188,6 +198,14 @@ public struct ActiveCallView: View {
       data.count <= 1_000_000
     else { return nil }
     return UIImage(data: data)
+  }
+
+  private func remoteAvatarURL(from value: String?) -> URL? {
+    guard let value, value.count <= 4_096,
+      let url = URL(string: value),
+      url.scheme?.lowercased() == "https", url.host != nil
+    else { return nil }
+    return url
   }
 
   private func elapsedTime(from start: Date, to end: Date) -> String {

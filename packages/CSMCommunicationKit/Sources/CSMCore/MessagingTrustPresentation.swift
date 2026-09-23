@@ -130,7 +130,8 @@ struct ChatDeliveryPresentation: Codable, Equatable, Sendable {
     ) -> ChatDeliveryPresentation {
         let trimmedTransportError = normalizedOptional(transportError)
         let userFacingIssue = MessagingUserFacingIssue.make(errorText: trimmedTransportError)
-        let pendingPreparationIssue = MessagingUserFacingIssue.isMissingRoomBinding(trimmedTransportError) ? userFacingIssue : nil
+        let pendingPreparationIssue = trust.blocksSending || MessagingUserFacingIssue.isMissingRoomBinding(trimmedTransportError)
+            ? userFacingIssue : nil
         let trimmedTrustMessage = normalizedOptional(trust.userMessage)
         let technicalDetail = joinedTechnicalDetails(trimmedTrustMessage, trimmedTransportError)
         let syncText = syncStatusText(for: syncStatus)
@@ -178,14 +179,14 @@ struct ChatDeliveryPresentation: Codable, Equatable, Sendable {
         if trust.blocksSending {
             return ChatDeliveryPresentation(
                 isVisible: true,
-                title: CSMLocalization.text("chat.delivery.blocked.title", fallback: "Bezpečný chat se připravuje"),
-                subtitle: CSMLocalization.text(
+                title: userFacingIssue?.title ?? CSMLocalization.text("chat.delivery.blocked.title", fallback: "Bezpečný chat není připravený"),
+                subtitle: userFacingIssue?.message ?? CSMLocalization.text(
                     "chat.delivery.blocked.subtitle",
-                    fallback: "Obsah zůstává chráněný a aplikace nepošle zprávu nezabezpečeně."
+                    fallback: "Šifrované spojení se nepodařilo připravit. Zpráva se neodešle nezabezpečeně."
                 ),
-                detail: CSMLocalization.text(
+                detail: userFacingIssue?.recoverySuggestion ?? CSMLocalization.text(
                     "chat.delivery.blocked.detail",
-                    fallback: "Aplikace čeká na ověřené šifrované spojení. Zprávy zůstanou v telefonu, dokud nebude bezpečný kanál připravený."
+                    fallback: "Obnovte konverzace. Pokud stav trvá, otevřete diagnostiku chatu a předejte ji správci."
                 ),
                 technicalDetail: technicalDetail,
                 systemImage: trust.systemImage,
@@ -357,6 +358,22 @@ struct MessagingUserFacingIssue: Codable, Equatable, Sendable {
             )
         }
 
+        if normalizedRaw.containsAny(of: localEncryptionMarkers) {
+            return MessagingUserFacingIssue(
+                title: CSMLocalization.text("messaging.issue.local_e2ee.title", fallback: "Šifrovaný chat v telefonu není připravený"),
+                message: CSMLocalization.text(
+                    "messaging.issue.local_e2ee.message",
+                    fallback: "Zařízení zatím nemá funkční šifrovanou relaci. Zpráva se neodešle nezabezpečeně."
+                ),
+                recoverySuggestion: CSMLocalization.text(
+                    "messaging.issue.local_e2ee.recovery",
+                    fallback: "Obnovte konverzace a zkontrolujte stav šifrování v detailu chatu. Pokud se stav nemění, předejte diagnostiku správci."
+                ),
+                technicalDetail: raw,
+                systemImage: "lock.trianglebadge.exclamationmark"
+            )
+        }
+
         if normalizedRaw.containsAny(of: connectivityMarkers) {
             return MessagingUserFacingIssue(
                 title: CSMLocalization.text("messaging.issue.connectivity.title", fallback: "Spojení s chatem se obnovuje"),
@@ -374,14 +391,14 @@ struct MessagingUserFacingIssue: Codable, Equatable, Sendable {
         }
 
         return MessagingUserFacingIssue(
-            title: CSMLocalization.text("messaging.issue.generic.title", fallback: "Akci se nepodařilo dokončit"),
+            title: CSMLocalization.text("messaging.issue.generic.title", fallback: "Chat se nepodařilo načíst"),
             message: CSMLocalization.text(
                 "messaging.issue.generic.message",
-                fallback: "Aplikace zachová chráněná data v zařízení a dovolí pokus zopakovat."
+                fallback: "Bezpečné spojení nebo konverzaci se nepodařilo připravit. Neodeslané zprávy zůstávají v telefonu."
             ),
             recoverySuggestion: CSMLocalization.text(
                 "messaging.issue.generic.recovery",
-                fallback: "Zkuste akci znovu. Pokud chyba trvá, předejte detail správci."
+                fallback: "Obnovte konverzace. Pokud chyba trvá, předejte technický detail správci."
             ),
             technicalDetail: raw,
             systemImage: "exclamationmark.triangle.fill"
@@ -440,6 +457,14 @@ struct MessagingUserFacingIssue: Codable, Equatable, Sendable {
         "503",
         "504",
         "live unavailable"
+    ]
+
+    private static let localEncryptionMarkers = [
+        "matrix session is not configured",
+        "matrix client is not configured",
+        "e2ee adapter",
+        "crypto store",
+        "encryption store"
     ]
 }
 

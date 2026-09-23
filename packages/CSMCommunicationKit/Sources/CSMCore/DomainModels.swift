@@ -723,6 +723,7 @@ struct Conversation: Codable, Identifiable, Equatable, Hashable, Sendable {
         case memberCount
         case mapLinkCount
         case members
+        case directPeer
         case mapLinks
         case unreadCount
         case lastActivityPreview
@@ -790,6 +791,16 @@ struct Conversation: Codable, Identifiable, Equatable, Hashable, Sendable {
         e2eeRequired = try container.decodeIfPresent(Bool.self, forKey: .e2eeRequired) ?? true
         matrix = try container.decodeIfPresent(MessagingMatrixRoom.self, forKey: .matrix)
         members = try container.decodeIfPresent([ConversationMember].self, forKey: .members) ?? []
+        if type == .direct,
+           let peer = try container.decodeIfPresent(ConversationMember.self, forKey: .directPeer) {
+            if let index = members.firstIndex(where: { ConversationIdentity.matches($0.userId, peer.userId) }) {
+                members[index].displayName = peer.displayName ?? members[index].displayName
+                members[index].avatarDataUrl = peer.avatarDataUrl ?? members[index].avatarDataUrl
+                members[index].avatarUrl = peer.avatarUrl ?? members[index].avatarUrl
+            } else {
+                members.append(peer)
+            }
+        }
         memberCount = try container.decodeIfPresent(Int.self, forKey: .memberCount) ?? members.count
         mapLinks = try container.decodeIfPresent([MessagingMapLink].self, forKey: .mapLinks) ?? []
         mapLinkCount = try container.decodeIfPresent(Int.self, forKey: .mapLinkCount) ?? mapLinks.count

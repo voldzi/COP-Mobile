@@ -39,6 +39,15 @@ final class DriverRoutingTests: XCTestCase {
             XCTAssertEqual(live.detail, "test")
             let status = live.presentation(at: date, receivedAt: date)
             XCTAssertEqual(status.warning == nil, state == "ok")
+            if state == "degraded" {
+                XCTAssertEqual(status.title, "Živá doprava s omezeným pokrytím")
+            }
+            if state == "stale" {
+                XCTAssertEqual(status.title, "Živá doprava je zastaralá")
+            }
+            if state == "failed" {
+                XCTAssertEqual(status.title, "Živá doprava není dostupná")
+            }
             // Freshness ages in memory even when no new response arrives.
             XCTAssertNotNil(live.presentation(at: date.addingTimeInterval(901), receivedAt: date).warning)
         }
@@ -55,6 +64,13 @@ final class DriverRoutingTests: XCTestCase {
     func testUnknownFreshnessDoesNotClaimVerifiedLiveTraffic() throws {
         let live = try CSMJSONCoding.decoder.decode(CSMLiveSpeeds.self, from: Data(#"{"enabled":true,"state":"ok"}"#.utf8))
         XCTAssertNotNil(live.presentation(at: .now, receivedAt: .now).warning)
+    }
+
+    func testDisabledTrafficDoesNotClaimFreshLiveSpeeds() throws {
+        let live = try CSMJSONCoding.decoder.decode(CSMLiveSpeeds.self, from: Data(#"{"enabled":false,"state":"failed"}"#.utf8))
+        let status = live.presentation(at: .now, receivedAt: .now)
+        XCTAssertEqual(status.title, "Živá doprava není dostupná")
+        XCTAssertNotNil(status.warning)
     }
 
     private func decode(_ json: String) throws -> CSMDriverRouteResponse {

@@ -188,7 +188,11 @@ final class CommunicationModel {
             return matrixEncryptionRecoveryStatus.userMessage
         }
         let trust = messagingTrustPresentation
-        return trust.blocksSending ? trust.userMessage : nil
+        guard trust.blocksSending else { return nil }
+        if let issue = MessagingUserFacingIssue.make(errorText: messagingTransportErrorText) {
+            return "\(issue.message) \(issue.recoverySuggestion)"
+        }
+        return trust.userMessage
     }
 
     var selectedConversationRequiresMatrixRecovery: Bool {
@@ -2938,12 +2942,12 @@ final class CommunicationModel {
         _ conversation: Conversation,
         selfIds: Set<String>
     ) -> String {
-        if let canonicalKey = nonEmptyValue(conversation.canonicalKey) {
-            return "canonical:\(canonicalKey)"
-        }
         if conversation.type == .direct,
            let peer = directPeer(in: conversation, selfIds: selfIds) {
             return "direct:\(normalizedMatrixIdentity(peer.userId))"
+        }
+        if let canonicalKey = nonEmptyValue(conversation.canonicalKey) {
+            return "canonical:\(canonicalKey)"
         }
         if conversation.type == .direct {
             return "direct-title:\(normalizedIdentity(conversation.title))"

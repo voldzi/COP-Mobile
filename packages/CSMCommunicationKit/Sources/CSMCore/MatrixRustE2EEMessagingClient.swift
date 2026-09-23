@@ -276,8 +276,8 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
         if result.type == .direct,
            let peer = result.members.first(where: { !ConversationIdentity.matches($0.userId, context.userId) }) {
             result.title = Self.nonEmpty(peer.displayName) ?? result.title
-            result.conversationAvatarDataUrl = peer.avatarDataUrl
-            result.conversationAvatarUrl = peer.avatarUrl
+            result.conversationAvatarDataUrl = peer.avatarDataUrl ?? result.conversationAvatarDataUrl
+            result.conversationAvatarUrl = peer.avatarUrl ?? result.conversationAvatarUrl
         } else if let roomAvatarURL = try? await room.roomInfo().avatarUrl {
             result.conversationAvatarDataUrl = await avatarDataURL(for: roomAvatarURL) ?? result.conversationAvatarDataUrl
             result.conversationAvatarUrl = Self.nonEmpty(roomAvatarURL) ?? result.conversationAvatarUrl
