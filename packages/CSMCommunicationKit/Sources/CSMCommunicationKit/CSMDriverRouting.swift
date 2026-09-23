@@ -14,19 +14,102 @@ struct CSMDriverRouteRequest: Encodable, Sendable {
     let profileId = "car"
     let includeSteps = true
     var alternatives: Int
+    var includeRoadAttributes: Bool?
+    var vehicle: CSMRouteVehicle?
+}
+
+/// Actual recorded dimensions only. Unknown values must remain nil.
+public struct CSMRouteVehicle: Codable, Sendable {
+    public let heightM: Double?
+    public let widthM: Double?
+    public let lengthM: Double?
+    public let weightTonnes: Double?
+
+    public init(heightM: Double? = nil, widthM: Double? = nil, lengthM: Double? = nil, weightTonnes: Double? = nil) {
+        self.heightM = heightM
+        self.widthM = widthM
+        self.lengthM = lengthM
+        self.weightTonnes = weightTonnes
+    }
+
+    var isValid: Bool {
+        let fields = [(heightM, 8.0), (widthM, 5.0), (lengthM, 30.0), (weightTonnes, 100.0)]
+        return fields.contains(where: { $0.0 != nil }) && fields.allSatisfy { field in
+            field.0.map { value in value.isFinite && value > 0 && value <= field.1 } ?? true
+        }
+    }
 }
 
 public struct CSMDriverRouteResponse: Codable, Sendable {
     public let generatedAt: Date?
+    public let coverage: CSMRouteCoverage?
     public let routes: [CSMDriverRoute]
     public let traffic: CSMRouteTraffic?
     public let warnings: [String]
+
+    public var requiresMapKitFallback: Bool {
+        coverage?.state == "outside_coverage" || routes.isEmpty
+    }
 
     public func navigationRoutes() throws -> [CSMDriverRoute] {
         let usable = routes.prefix(3).filter { $0.isNavigable }.sorted { ($0.rank ?? 1) < ($1.rank ?? 1) }
         guard !usable.isEmpty else { throw CSMDriverRoutingError.noNavigableRoute }
         return usable
     }
+}
+
+public struct CSMRoutingDataset: Codable, Sendable {
+    public let version: String
+    public let builtAt: Date
+}
+
+public struct CSMRouteCoverage: Codable, Sendable {
+    /// covered, partial, outside_coverage or unknown.
+    public let state: String
+    public let reason: String?
+    public let routingDataset: CSMRoutingDataset?
+    public let sourceAgeSeconds: Int?
+}
+
+public struct CSMRouteSpeedLimit: Codable, Sendable {
+    public let beginShapeIndex: Int
+    public let endShapeIndex: Int
+    public let direction: String
+    public let valueKph: Double?
+    /// Only explicit is a posted limit. Derived and unknown are not legal certainty.
+    public let status: String
+    public let source: String
+}
+
+public struct CSMRouteRestriction: Codable, Sendable {
+    public let kind: String
+    public let beginShapeIndex: Int
+    public let endShapeIndex: Int
+    /// Current closure data is advisory, never a verified legal prohibition.
+    public let assessment: String
+    public let source: String
+}
+
+public struct CSMRouteRoadAttributes: Codable, Sendable {
+    public let state: String
+    public let reason: String?
+    public let source: String
+    public let routingDataset: CSMRoutingDataset?
+    public let sourceAgeSeconds: Int?
+    public let observedAt: Date
+    public let matchedEdgeCount: Int
+    public let geometryMismatchCount: Int
+    public let knownSpeedLimitCoveragePercent: Double
+    public let vehicleRestrictionsState: String
+    public let speedLimits: [CSMRouteSpeedLimit]
+    public let restrictions: [CSMRouteRestriction]
+}
+
+public struct CSMRouteVehicleAssessment: Codable, Sendable {
+    public let state: String
+    public let providerCosting: String
+    public let appliedFields: [String]
+    public let limitations: [String]
 }
 
 public struct CSMRouteGeometry: Codable, Sendable {
@@ -50,6 +133,8 @@ public struct CSMDriverRoute: Codable, Sendable {
     public let quality: CSMRouteQuality?
     public let traffic: CSMRouteTraffic?
     public let warnings: [String]?
+    public let roadAttributes: CSMRouteRoadAttributes?
+    public let vehicleAssessment: CSMRouteVehicleAssessment?
 
     public var isNavigable: Bool {
         guard geometry.isValid, distanceM.isFinite, distanceM > 0,
@@ -140,23 +225,42 @@ public struct CSMLiveSpeeds: Codable, Sendable {
 
 public enum CSMDriverRoutingError: LocalizedError {
     case invalidCoordinates
+    case invalidVehicle
     case noNavigableRoute
     public var errorDescription: String? {
         switch self {
         case .invalidCoordinates: "Pro výpočet trasy není dostupná platná poloha."
+        case .invalidVehicle: "Rozměry nebo hmotnost vybraného vozidla nejsou platné."
         case .noNavigableRoute: "COP nyní neposkytl úplnou silniční trasu s navigačními pokyny. Zkuste výpočet znovu."
         }
     }
 }
 
 public extension CSMCommunicationRuntime {
-    func drivingRoutes(from: CSMRoutePoint, to: CSMRoutePoint, alternatives: Int = 3) async throws -> CSMDriverRouteResponse {
+    func drivingRoutes(
+        from: CSMRoutePoint,
+        to: CSMRoutePoint,
+        alternatives: Int = 3,
+        includeRoadAttributes: Bool = false,
+        vehicle: CSMRouteVehicle? = nil
+    ) async throws -> CSMDriverRouteResponse {
         guard from.isValid, to.isValid else { throw CSMDriverRoutingError.invalidCoordinates }
+        guard vehicle?.isValid ?? true else { throw CSMDriverRoutingError.invalidVehicle }
         await startIfNeeded()
         let response = try await driverReportService.drivingRoutes(
-            CSMDriverRouteRequest(from: from, to: to, alternatives: min(3, max(1, alternatives)))
+            CSMDriverRouteRequest(
+                from: from,
+                to: to,
+                alternatives: min(3, max(1, alternatives)),
+                includeRoadAttributes: includeRoadAttributes ? true : nil,
+                vehicle: vehicle
+            )
         )
-        _ = try response.navigationRoutes()
+        // Preserve a typed outside-coverage/empty result so the host can start
+        // real MapKit routing rather than losing the reason in a generic error.
+        if !response.requiresMapKitFallback {
+            _ = try response.navigationRoutes()
+        }
         return response
     }
 }

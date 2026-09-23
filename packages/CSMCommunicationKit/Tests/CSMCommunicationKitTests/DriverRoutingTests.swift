@@ -73,6 +73,58 @@ final class DriverRoutingTests: XCTestCase {
         XCTAssertNotNil(status.warning)
     }
 
+    func testOptionalDirectedAttributesStayBoundToTheirRouteAndDecodeOldResponses() throws {
+        let oldResponse = try decode(Self.fixture)
+        XCTAssertNil(oldResponse.coverage)
+        XCTAssertNil(oldResponse.routes[0].roadAttributes)
+
+        let enriched = Self.fixture
+            .replacingOccurrences(of: #""warnings":[],"routes""#, with: #""warnings":[],"coverage":{"state":"covered","routingDataset":{"version":"test-graph","builtAt":"2026-09-20T03:00:00Z"},"sourceAgeSeconds":259200},"routes""#)
+            .replacingOccurrences(of: #""quality":{"mode":"engine_route""#, with: #""roadAttributes":{"state":"ok","source":"valhalla_trace_attributes","observedAt":"2026-09-23T03:00:00Z","matchedEdgeCount":2,"geometryMismatchCount":0,"knownSpeedLimitCoveragePercent":75,"vehicleRestrictionsState":"not_evaluated","speedLimits":[{"beginShapeIndex":0,"endShapeIndex":1,"direction":"along_route","valueKph":50,"status":"explicit","source":"valhalla_graph_osm_maxspeed"},{"beginShapeIndex":1,"endShapeIndex":2,"direction":"along_route","status":"unknown","source":"unknown"}],"restrictions":[]},"vehicleAssessment":{"state":"partially_evaluated","providerCosting":"truck","appliedFields":["heightM"],"limitations":["Incomplete vehicle profile."]},"quality":{"mode":"engine_route""#)
+        let response = try decode(enriched)
+        XCTAssertEqual(response.coverage?.state, "covered")
+        XCTAssertEqual(response.coverage?.routingDataset?.version, "test-graph")
+        XCTAssertEqual(response.routes[0].roadAttributes?.speedLimits[0].valueKph, 50)
+        XCTAssertNil(response.routes[0].roadAttributes?.speedLimits[1].valueKph)
+        XCTAssertEqual(response.routes[0].vehicleAssessment?.state, "partially_evaluated")
+        XCTAssertEqual(try response.navigationRoutes()[0].durationSeconds, 2400)
+    }
+
+    func testOutsideCoverageCanReachMapKitFallback() throws {
+        let response = try decode(#"{"coverage":{"state":"outside_coverage","reason":"No navigable graph route."},"routes":[],"warnings":[]}"#)
+        XCTAssertEqual(response.coverage?.state, "outside_coverage")
+        XCTAssertTrue(response.routes.isEmpty)
+        XCTAssertTrue(response.requiresMapKitFallback)
+    }
+
+    func testVehicleValuesAreValidatedAndOptionalRequestFieldsStayOptional() throws {
+        XCTAssertTrue(CSMRouteVehicle(heightM: 1.8, weightTonnes: 1.9).isValid)
+        XCTAssertFalse(CSMRouteVehicle().isValid)
+        XCTAssertFalse(CSMRouteVehicle(heightM: .nan).isValid)
+        XCTAssertFalse(CSMRouteVehicle(widthM: 6).isValid)
+        let request = CSMDriverRouteRequest(
+            from: CSMRoutePoint(latitude: 50.08, longitude: 14.42),
+            to: CSMRoutePoint(latitude: 50.09, longitude: 14.43),
+            alternatives: 2,
+            includeRoadAttributes: nil,
+            vehicle: nil
+        )
+        let encoded = try CSMJSONCoding.encoder.encode(request)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertNil(json["includeRoadAttributes"])
+        XCTAssertNil(json["vehicle"])
+        let enrichedRequest = CSMDriverRouteRequest(
+            from: request.from,
+            to: request.to,
+            alternatives: 2,
+            includeRoadAttributes: true,
+            vehicle: CSMRouteVehicle(heightM: 1.8, weightTonnes: 1.9)
+        )
+        let enrichedJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: CSMJSONCoding.encoder.encode(enrichedRequest)) as? [String: Any])
+        XCTAssertEqual(enrichedJSON["includeRoadAttributes"] as? Bool, true)
+        XCTAssertEqual((enrichedJSON["vehicle"] as? [String: Double])?["heightM"], 1.8)
+    }
+
     private func decode(_ json: String) throws -> CSMDriverRouteResponse {
         try CSMJSONCoding.decoder.decode(CSMDriverRouteResponse.self, from: Data(json.utf8))
     }

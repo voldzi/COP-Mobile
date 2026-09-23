@@ -458,6 +458,18 @@ inclusive global shape indices, numeric maneuver type/roundabout exit and all
 live-speed fields. Validation permits degraded or absent traffic while requiring
 a real navigable Valhalla route. No SIM credentials or base URL are exposed.
 
+The backward-compatible facade also accepts optional
+`includeRoadAttributes: Bool = false` and `vehicle: CSMRouteVehicle? = nil`.
+Only known, positive and bounded vehicle dimensions are sent; the selected-car
+record must supply them, never a guessed default. `CSMDriverRouteResponse.coverage`
+and each variant's `roadAttributes`/`vehicleAssessment` mirror COP's optional
+directed-route contract. Speed-limit indices belong to that variant's geometry,
+and only `status=explicit` describes a posted limit. Advisory closures and
+provider costing are not legal passability guarantees. An `outside_coverage`
+or empty-route response reaches the host without a generic routing exception so
+Jízda can request a genuine MapKit route (`requiresMapKitFallback`). Nonempty
+invalid routes remain rejected.
+
 The nearby report projection consumes optional `roadEnrichment.clusterId` only
 when state is matched. Grouping happens after active/expiry/radius/access
 filtering, preserves the newest observation and exposes `relatedReportCount`.

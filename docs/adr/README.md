@@ -34,3 +34,4 @@ Use ADRs for important, costly, risky, or hard-to-reverse technical decisions.
 - `0014-personal-team-app-store-identity.md` — VCode-owned App Store team, bundle ID and coordinated server migration
 - `0015-shared-driver-report-transport.md` — bounded Jizda report facade, encrypted outbox and COP-owned workflow
 - `0016-stateless-driver-routing-transport.md` — authenticated COP route DTOs for Jizda; navigation stays outside the kit
+- `0017-optional-directed-road-attributes.md` — optional directed road attributes and vehicle dimensions; typed outside-coverage fallback reaches Jízda
