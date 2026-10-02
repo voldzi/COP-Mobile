@@ -478,3 +478,14 @@ Votes and confidence belong to that observation and are not summed.
 Optional route-step `lanes` preserves numeric `directions`, `active` and `valid`
 provider masks. The transport does not infer missing lanes or own lane advice;
 Jizda validates and presents them in its navigation session.
+
+## Driver measurements (default-off host integration)
+
+COP handoff 22 / OpenAPI at 8c4abb5 defines `cop-driver-measurements-v1`:
+GET/POST/DELETE `/api/v1/driver-measurements/v1/consent` and POST
+`/api/v1/driver-measurements/v1/batches`. CSMCommunicationRuntime exposes
+only typed operation kinds and a minimized batch body, not a generic URL or
+bearer API. Existing configured COP origin and csm-mobile OIDC are reused.
+`driverMeasurementSessionScope` is local-only and never part of a wire payload.
+The response carries status/body/Retry-After; DELETE 202 means pending deletion.
+No SDK call starts automatically; Jizda's gate remains false (ADR 0019).

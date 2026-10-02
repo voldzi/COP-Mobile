@@ -51,3 +51,5 @@ ověřuje ve Swift testech; pozdější Kotlin použije stejný artifact.
   externí brány, které tým ani kód nemůže sám schválit.
 
 Driver routing boundary: [ADR 0016](adr/0016-stateless-driver-routing-transport.md).
+
+Default-off driver measurements: [ADR 0019](adr/0019-consented-driver-measurement-transport.md).

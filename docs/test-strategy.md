@@ -554,3 +554,9 @@ report spatial query propagation to COP, bounded/dateline geometry, inactive and
 expired record filtering, stable sorting, duplicate IDs, and older response
 decoding. The offline fallback UI regression remains in `COPMobileLaunchUITests`:
 its communication button must open chat and expose a separate accessibility node.
+
+`DriverMeasurementBoundaryTests` covers minimized synthetic bodies and fail-closed
+session matching. It deliberately avoids initializing the global push runtime
+in an unhosted package runner (which has no app bundle proxy). Actual OIDC/logout
+and COP 202 deletion acceptance must run in the app on a physical device;
+these pure tests do not establish successful authenticated delivery (ADR 0019).

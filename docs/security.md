@@ -243,3 +243,10 @@ citlivé capability.
 
 Security nález se nesmí skrýt mockem ani feature flagem bez bezpečného runtime
 fallbacku a jasného vlastníka v `open-questions.md`.
+
+Driver measurement calls are purpose-specific, session-scoped and native only.
+The SDK keeps bearer acquisition/refresh internal, blocks preview mode and
+unsafe bases, permits no arbitrary URL, and refuses redirects before forwarding
+credentials. An ephemeral no-cookie/no-cache session leaves no response cache.
+Auth/account change notifications contain no payload. Host collection is
+default-off; COP owns durable consent/deletion, not SDK local state (ADR 0019).
