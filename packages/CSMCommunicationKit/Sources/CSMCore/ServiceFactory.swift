@@ -176,6 +176,10 @@ actor DriverReportService {
         self.api = api
     }
 
+    func drivingCapabilities() async throws -> CSMDriverRoutingCatalog {
+        try await api.drivingCapabilities()
+    }
+
     func drivingRoutes(_ request: CSMDriverRouteRequest) async throws -> CSMDriverRouteResponse {
         try await api.drivingRoutes(request)
     }

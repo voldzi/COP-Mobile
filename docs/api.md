@@ -489,3 +489,5 @@ bearer API. Existing configured COP origin and csm-mobile OIDC are reused.
 `driverMeasurementSessionScope` is local-only and never part of a wire payload.
 The response carries status/body/Retry-After; DELETE 202 means pending deletion.
 No SDK call starts automatically; Jizda's gate remains false (ADR 0019).
+
+The SDK adds optional immutable `CSMRoadTrip`, authenticated `drivingCapabilities()` and strict `drivingRoutes(from:to:trip:alternatives:)`. Strict responses require matching per-variant assessment, current graph/closure validity and complete applied requirements; no Apple fallback. See [routing handoff](routing-handoff.md).

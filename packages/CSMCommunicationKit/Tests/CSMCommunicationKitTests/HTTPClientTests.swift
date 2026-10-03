@@ -132,6 +132,28 @@ final class HTTPClientTests: XCTestCase {
         XCTAssertEqual(encoded["alternatives"] as? Int, 3)
     }
 
+    func testStrictTripAndCapabilitiesStayOnAuthenticatedCOPTransport() async throws {
+        PressureURLProtocol.configure { _ in (200, DriverRoutingTests.fixture) }
+        let api = ProductionCopAPIClient(http: HTTPClient(
+            baseURL: URL(string: "https://cop.test")!, tokenProvider: StaticTestTokenProvider(token: "test-user-token"),
+            session: makeSession(), requiresAuthorization: true))
+        let body = CSMDriverRouteRequest(from: .init(latitude: 50, longitude: 14), to: .init(latitude: 51, longitude: 15),
+            alternatives: 2, includeRoadAttributes: true, trip: RoadTripTests.trip(), avoid: ["road_closure"])
+        _ = try await api.drivingRoutes(body)
+        let request = try XCTUnwrap(PressureURLProtocol.lastRequest)
+        XCTAssertEqual(request.url?.path, "/api/v1/routing/route")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-user-token")
+        let sent = try XCTUnwrap(JSONSerialization.jsonObject(with: PressureURLProtocol.lastRequestBody ?? Data()) as? [String: Any])
+        XCTAssertEqual((sent["trip"] as? [String: Any])?["requestId"] as? String, RoadTripTests.trip().requestId)
+        XCTAssertEqual(sent["avoid"] as? [String], ["road_closure"])
+        XCTAssertNil(sent["vehicle"])
+        PressureURLProtocol.configure { _ in (200, #"{"profiles":[{"profileId":"car"}],"warnings":[]}"#) }
+        let catalog = try await api.drivingCapabilities()
+        XCTAssertNil(catalog.capabilities)
+        XCTAssertEqual(PressureURLProtocol.lastRequest?.url?.path, "/api/v1/routing/profiles")
+        XCTAssertEqual(PressureURLProtocol.lastRequest?.value(forHTTPHeaderField: "Authorization"), "Bearer test-user-token")
+    }
+
     private func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [PressureURLProtocol.self]
@@ -160,10 +182,13 @@ private final class PressureURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) private static var responseHandler: ((Int) -> (Int, String))?
     nonisolated(unsafe) private static var storedRequestCount = 0
     nonisolated(unsafe) private static var storedLastRequest: URLRequest?
+    nonisolated(unsafe) private static var storedLastRequestBody: Data?
 
     static var requestCount: Int {
         lock.withLock { storedRequestCount }
     }
+
+    static var lastRequestBody: Data? { lock.withLock { storedLastRequestBody } }
 
     static var lastRequest: URLRequest? {
         lock.withLock { storedLastRequest }
@@ -173,6 +198,7 @@ private final class PressureURLProtocol: URLProtocol, @unchecked Sendable {
         lock.withLock {
             storedRequestCount = 0
             storedLastRequest = nil
+            storedLastRequestBody = nil
             responseHandler = handler
         }
     }
@@ -181,6 +207,7 @@ private final class PressureURLProtocol: URLProtocol, @unchecked Sendable {
         lock.withLock {
             storedRequestCount = 0
             storedLastRequest = nil
+            storedLastRequestBody = nil
             responseHandler = nil
         }
     }
@@ -190,9 +217,22 @@ private final class PressureURLProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        var body = request.httpBody
+        if body == nil, let stream = request.httpBodyStream {
+            stream.open(); defer { stream.close() }
+            var data = Data(), buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                data.append(contentsOf: buffer.prefix(count))
+            }
+            body = data
+        }
+        let capturedBody = body
         let result: (Int, String)? = Self.lock.withLock {
             Self.storedRequestCount += 1
             Self.storedLastRequest = request
+            Self.storedLastRequestBody = capturedBody
             return Self.responseHandler?(Self.storedRequestCount)
         }
         guard let result,

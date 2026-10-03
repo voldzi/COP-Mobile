@@ -36,3 +36,5 @@ Use ADRs for important, costly, risky, or hard-to-reverse technical decisions.
 - `0016-stateless-driver-routing-transport.md` — authenticated COP route DTOs for Jizda; navigation stays outside the kit
 - `0017-optional-directed-road-attributes.md` — optional directed road attributes and vehicle dimensions; typed outside-coverage fallback reaches Jízda
 - `0019-consented-driver-measurement-transport.md` — purpose-specific OIDC transport, no redirects, default-off host
+
+- [0020 Immutable road-trip transport](0020-immutable-road-trip-transport.md)

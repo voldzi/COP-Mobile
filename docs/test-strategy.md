@@ -560,3 +560,5 @@ session matching. It deliberately avoids initializing the global push runtime
 in an unhosted package runner (which has no app bundle proxy). Actual OIDC/logout
 and COP 202 deletion acceptance must run in the app on a physical device;
 these pure tests do not establish successful authenticated delivery (ADR 0019).
+
+RoadTripTests cover complete kg/m snapshots, invalid values, request identity, per-variant expiry/fallback/partial requirements and old-response rejection. HTTPClientTests inspect the actual authenticated outgoing trip/capability requests. COP verifies canonical hashes against actual wire geometry. Physical routing acceptance remains required as described in routing-handoff.md.

@@ -1,5 +1,9 @@
 import Foundation
 
+public enum CSMRouteAvoid: String, Codable, Sendable {
+    case flood, fire, roadClosure = "road_closure", unpaved, tunnel, bridge
+}
+
 /// COP is the sole network boundary. No provider URLs or credentials are accepted.
 public struct CSMRoutePoint: Codable, Sendable {
     public var lat: Double
@@ -16,6 +20,10 @@ struct CSMDriverRouteRequest: Encodable, Sendable {
     var alternatives: Int
     var includeRoadAttributes: Bool?
     var vehicle: CSMRouteVehicle?
+    var trip: CSMRoadTrip? = nil
+    var avoid: [String]? = nil
+    var via: [CSMRoutePoint]? = nil
+    var departureTime: String? = nil
 }
 
 /// Actual recorded dimensions only. Unknown values must remain nil.
@@ -90,7 +98,24 @@ public struct CSMRouteRestriction: Codable, Sendable {
     public let source: String
 }
 
+public struct CSMRouteTunnelInterval: Codable, Sendable {
+    public let beginShapeIndex: Int
+    public let endShapeIndex: Int
+    public let direction: String
+}
+
+public struct CSMRouteTunnelAttributes: Codable, Sendable {
+    public let state: String
+    public let reason: String?
+    public let routeId: String
+    public let source: String
+    public let routingDataset: CSMRoutingDataset?
+    public let observedAt: Date
+    public let intervals: [CSMRouteTunnelInterval]
+}
+
 public struct CSMRouteRoadAttributes: Codable, Sendable {
+    public let tunnels: CSMRouteTunnelAttributes?
     public let state: String
     public let reason: String?
     public let source: String
@@ -135,6 +160,7 @@ public struct CSMDriverRoute: Codable, Sendable {
     public let warnings: [String]?
     public let roadAttributes: CSMRouteRoadAttributes?
     public let vehicleAssessment: CSMRouteVehicleAssessment?
+    public let assessment: CSMRoadTripAssessment?
 
     public var isNavigable: Bool {
         guard geometry.isValid, distanceM.isFinite, distanceM > 0,
@@ -166,6 +192,7 @@ public struct CSMRouteStep: Codable, Sendable {
     public let roadName: String?
     public let maneuverType: Int?
     public let roundaboutExitCount: Int?
+    public let roundabout: CSMRouteRoundabout?
     public let lanes: [CSMRouteLane]?
     /// Indices in the complete response route geometry, including joined legs.
     public let beginShapeIndex: Int?
@@ -226,10 +253,14 @@ public struct CSMLiveSpeeds: Codable, Sendable {
 public enum CSMDriverRoutingError: LocalizedError {
     case invalidCoordinates
     case invalidVehicle
+    case invalidTrip
+    case safetyRequirementsUnavailable
     case noNavigableRoute
     public var errorDescription: String? {
         switch self {
         case .invalidCoordinates: "Pro výpočet trasy není dostupná platná poloha."
+        case .invalidTrip: "Parametry cesty nejsou úplné nebo platné."
+        case .safetyRequirementsUnavailable: "Server nyní nemůže potvrdit požadovaná omezení cesty. Náhradní neomezená trasa není povolena."
         case .invalidVehicle: "Rozměry nebo hmotnost vybraného vozidla nejsou platné."
         case .noNavigableRoute: "COP nyní neposkytl úplnou silniční trasu s navigačními pokyny. Zkuste výpočet znovu."
         }
@@ -242,9 +273,13 @@ public extension CSMCommunicationRuntime {
         to: CSMRoutePoint,
         alternatives: Int = 3,
         includeRoadAttributes: Bool = false,
-        vehicle: CSMRouteVehicle? = nil
+        vehicle: CSMRouteVehicle? = nil,
+        avoid: [CSMRouteAvoid] = [],
+        via: [CSMRoutePoint] = [],
+        departureTime: Date? = nil
     ) async throws -> CSMDriverRouteResponse {
         guard from.isValid, to.isValid else { throw CSMDriverRoutingError.invalidCoordinates }
+        guard via.count <= 12, via.allSatisfy({ $0.isValid }) else { throw CSMDriverRoutingError.invalidCoordinates }
         guard vehicle?.isValid ?? true else { throw CSMDriverRoutingError.invalidVehicle }
         await startIfNeeded()
         let response = try await driverReportService.drivingRoutes(
@@ -253,7 +288,10 @@ public extension CSMCommunicationRuntime {
                 to: to,
                 alternatives: min(3, max(1, alternatives)),
                 includeRoadAttributes: includeRoadAttributes ? true : nil,
-                vehicle: vehicle
+                vehicle: vehicle,
+                avoid: avoid.isEmpty ? nil : avoid.map(\.rawValue),
+                via: via.isEmpty ? nil : via,
+                departureTime: departureTime.map { ISO8601DateFormatter().string(from: $0) }
             )
         )
         // Preserve a typed outside-coverage/empty result so the host can start

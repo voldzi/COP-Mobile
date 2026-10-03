@@ -2,6 +2,15 @@ import XCTest
 @testable import CSMCommunicationKit
 
 final class DriverRoutingTests: XCTestCase {
+    func testTunnelContractPreservesVariantDatasetAndIndices() throws {
+        let json = #"{"state":"known","routeId":"variant-2","source":"valhalla_trace_attributes.edge.tunnel","observedAt":"2026-09-28T00:00:00Z","routingDataset":{"version":"v1","builtAt":"2026-09-27T00:00:00Z"},"intervals":[{"beginShapeIndex":2,"endShapeIndex":8,"direction":"along_route"}]}"#
+        let value = try CSMJSONCoding.decoder.decode(CSMRouteTunnelAttributes.self, from: Data(json.utf8))
+        XCTAssertEqual(value.routeId, "variant-2")
+        XCTAssertEqual(value.routingDataset?.version, "v1")
+        XCTAssertEqual(value.intervals.first?.endShapeIndex, 8)
+        XCTAssertEqual(value.intervals.first?.direction, "along_route")
+    }
+
     static let fixture = #"{"generatedAt":"2026-09-21T00:00:00Z","warnings":[],"routes":[{"routeId":"test-road","status":"ok","geometry":{"type":"LineString","coordinates":[[14.42,50.08],[14.43,50.085],[14.45,50.1]]},"distanceM":3600,"durationSeconds":2400,"quality":{"mode":"engine_route","engine":"valhalla"},"steps":[{"index":0,"instructionLocalized":{"cs":"Pokračujte po trase."},"distanceM":3600,"durationSeconds":2400,"maneuverType":1,"beginShapeIndex":0,"endShapeIndex":2},{"index":1,"instructionLocalized":{"cs":"Jste v cíli."},"distanceM":0,"durationSeconds":0,"maneuverType":4,"beginShapeIndex":2,"endShapeIndex":2}]}]}"#
 
     func testFullRoutePreservesSIMTimeAndArrivalWhenLiveDataMissing() throws {
