@@ -189,6 +189,25 @@ public extension CSMCommunicationRuntime {
         try await mobilityRequest(path: "/api/v1/private-dispatch/v1/shares/cancel-start", method: "POST", body: try JSONEncoder().encode(request), query: [], expectedScope: expectedScope)
     }
 
+    /// Maps only an authorized private roster participant to existing direct E2EE chat.
+    /// The returned room may be used by the existing explicit native direct-call UI.
+    func dispatchParticipantConversation(groupId: UUID, accountId: UUID, request: CSMDispatchParticipantOpen, expectedScope: String) async throws -> CSMDispatchParticipantReceipt {
+        let result: CSMDispatchParticipantReceipt = try await mobilityRequest(path: "/api/v1/private-dispatch/v1/groups/\(groupId.uuidString.lowercased())/participants/\(accountId.uuidString.lowercased())/conversation", method: "POST", body: try JSONEncoder().encode(request), query: [], expectedScope: expectedScope)
+        guard result.operationId == request.operationId, result.confirmed, result.groupId == groupId, result.accountId == accountId else { throw CSMServiceError.invalidState("Neplatné potvrzení komunikace COP.") }
+        return result
+    }
+    /// Selects the verified conversation in the existing SDK-owned chat surface; never starts a call automatically.
+    func openDispatchParticipantConversation(groupId: UUID, accountId: UUID, operationId: UUID, expectedScope: String) async throws -> CSMDispatchParticipantReceipt {
+        let generation = MobilitySessionGeneration.shared.value
+        let result = try await dispatchParticipantConversation(groupId: groupId, accountId: accountId, request: .init(operationId: operationId), expectedScope: expectedScope)
+        await model.refreshConversations()
+        guard generation == MobilitySessionGeneration.shared.value, mobilitySessionScope() == expectedScope,
+              let conversation = model.visibleConversations.first(where: {$0.conversationId == result.conversationId}) else { throw CSMServiceError.unavailable("Konverzace COP ještě není dostupná.") }
+        await model.selectConversation(conversation)
+        guard generation == MobilitySessionGeneration.shared.value, mobilitySessionScope() == expectedScope else { throw CSMServiceError.authenticationRequired("Účet COP se změnil.") }
+        return result
+    }
+
     private func mobilityRequest<Response: Decodable>(path: String, method: String, body: Data?, query: [URLQueryItem], expectedScope: String) async throws -> Response {
         let generation = MobilitySessionGeneration.shared.value
         guard mobilitySessionScope() == expectedScope else { throw CSMServiceError.authenticationRequired("Účet COP se změnil.") }

@@ -50,3 +50,11 @@ startOperationId:persistedStartUUID) under its original account scope. The serve
 serializes a persistent cancellation tombstone against start and stops any already
 committed share. Confirmed cancellation blocks a late request from reviving
 consent, even across restart. ownedShares supplements this barrier, not replaces it.
+
+Participant chat/call uses dispatchParticipantConversation(groupId,accountId,
+request,expectedScope), with a server-verified active roster and exact encrypted
+direct conversation. openDispatchParticipantConversation selects that result in
+CSMCommunicationHost. Existing explicit startVoiceCall(roomID:) remains separate;
+no call starts automatically and no group room/PTT is created. Voice keeps its
+existing server-authorized LiveKit transport; map encryption is not a claim that
+voice media is server-blind E2EE.

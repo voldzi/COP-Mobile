@@ -1092,3 +1092,17 @@ public struct CSMDispatchStartCancelReceipt: Codable, Sendable {
     public let serverTimestamp: String
     public init(operationId: UUID, startOperationId: UUID, confirmed: Bool, serverTimestamp: String) { self.operationId = operationId; self.startOperationId = startOperationId; self.confirmed = confirmed; self.serverTimestamp = serverTimestamp }
 }
+
+public struct CSMDispatchParticipantOpen: Codable, Sendable {
+    public let operationId: UUID
+    public init(operationId: UUID) { self.operationId = operationId }
+}
+public struct CSMDispatchParticipantReceipt: Codable, Sendable {
+    public let operationId: UUID
+    public let confirmed: Bool
+    public let groupId: UUID
+    public let accountId: UUID
+    public let conversationId: String
+    public let roomId: String
+    public init(operationId: UUID, confirmed: Bool, groupId: UUID, accountId: UUID, conversationId: String, roomId: String) { self.operationId = operationId; self.confirmed = confirmed; self.groupId = groupId; self.accountId = accountId; self.conversationId = conversationId; self.roomId = roomId }
+}
