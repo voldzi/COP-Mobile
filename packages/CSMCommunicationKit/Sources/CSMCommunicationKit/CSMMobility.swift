@@ -183,6 +183,12 @@ public extension CSMCommunicationRuntime {
     }
 
 
+    /// Cancels a possibly timed-out start before/after commit, account-bound and durable.
+    /// Keep the local pending-stop barrier until the exact cancellation receipt is confirmed.
+    func dispatchCancelStart(request: CSMDispatchStartCancel, expectedScope: String) async throws -> CSMDispatchStartCancelReceipt {
+        try await mobilityRequest(path: "/api/v1/private-dispatch/v1/shares/cancel-start", method: "POST", body: try JSONEncoder().encode(request), query: [], expectedScope: expectedScope)
+    }
+
     private func mobilityRequest<Response: Decodable>(path: String, method: String, body: Data?, query: [URLQueryItem], expectedScope: String) async throws -> Response {
         let generation = MobilitySessionGeneration.shared.value
         guard mobilitySessionScope() == expectedScope else { throw CSMServiceError.authenticationRequired("Účet COP se změnil.") }

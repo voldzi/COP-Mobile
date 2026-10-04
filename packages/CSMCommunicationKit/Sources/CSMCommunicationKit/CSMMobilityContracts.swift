@@ -1079,3 +1079,16 @@ public struct CSMDispatchOwnedShares: Codable, Sendable {
         self.serverTimestamp = serverTimestamp
     }
 }
+
+public struct CSMDispatchStartCancel: Codable, Sendable {
+    public let operationId: UUID
+    public let startOperationId: UUID
+    public init(operationId: UUID, startOperationId: UUID) { self.operationId = operationId; self.startOperationId = startOperationId }
+}
+public struct CSMDispatchStartCancelReceipt: Codable, Sendable {
+    public let operationId: UUID
+    public let startOperationId: UUID
+    public let confirmed: Bool
+    public let serverTimestamp: String
+    public init(operationId: UUID, startOperationId: UUID, confirmed: Bool, serverTimestamp: String) { self.operationId = operationId; self.startOperationId = startOperationId; self.confirmed = confirmed; self.serverTimestamp = serverTimestamp }
+}

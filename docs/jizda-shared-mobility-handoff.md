@@ -43,3 +43,10 @@ not independent human device verification. Server restart invalidates all shares
 Toolchain exactpin updated by explicit human approval to Xcode27.1/build27A9269,
 SDK27.1. Test/build evidence and actual deployed COP revision are recorded in COP
 handoff29. Simulator checks never establish physical background/network acceptance.
+
+A timed-out start may commit after a GET snapshot. Before abandoning/recovering a
+pending start, call dispatchCancelStart(operationId:newCancellationUUID,
+startOperationId:persistedStartUUID) under its original account scope. The server
+serializes a persistent cancellation tombstone against start and stops any already
+committed share. Confirmed cancellation blocks a late request from reviving
+consent, even across restart. ownedShares supplements this barrier, not replaces it.
