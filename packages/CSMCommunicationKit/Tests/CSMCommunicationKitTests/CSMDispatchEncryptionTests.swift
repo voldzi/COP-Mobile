@@ -3,6 +3,14 @@ import CryptoKit
 @testable import CSMCommunicationKit
 
 final class CSMDispatchEncryptionTests: XCTestCase {
+    func testLocalTokenBindingRejectsAnotherAccountAndIssuer() throws {
+        let data = try JSONSerialization.data(withJSONObject: ["iss": "https://issuer.example", "sub": "account-a"])
+        let jwt = "header." + data.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "") + ".signature"
+        XCTAssertTrue(mobilityTokenMatchesSelectedActor(jwt, issuer: "https://issuer.example", subject: "account-a"))
+        XCTAssertFalse(mobilityTokenMatchesSelectedActor(jwt, issuer: "https://issuer.example", subject: "account-b"))
+        XCTAssertFalse(mobilityTokenMatchesSelectedActor(jwt, issuer: "https://other.example", subject: "account-a"))
+        XCTAssertFalse(mobilityTokenMatchesSelectedActor("opaque", issuer: "https://issuer.example", subject: "account-a"))
+    }
     func testAuthenticatedRecipientAgreementAndMetadataTampering() throws {
         let sender = Curve25519.KeyAgreement.PrivateKey()
         let receiver = Curve25519.KeyAgreement.PrivateKey()

@@ -193,6 +193,7 @@ public extension CSMCommunicationRuntime {
         let generation = MobilitySessionGeneration.shared.value
         guard mobilitySessionScope() == expectedScope else { throw CSMServiceError.authenticationRequired("Účet COP se změnil.") }
         let configuration = AppConfiguration.fromBundle()
+        guard let selectedSubject = model.actor?.subjectId else { throw CSMServiceError.authenticationRequired("Přihlášení COP vypršelo.") }
         guard !configuration.usePreviewServices, configuration.copBaseURL.scheme == "https",
               configuration.copBaseURL.user == nil, configuration.copBaseURL.password == nil,
               configuration.copBaseURL.query == nil, configuration.copBaseURL.fragment == nil,
@@ -200,7 +201,7 @@ public extension CSMCommunicationRuntime {
             throw CSMServiceError.disabled("Sdílení vyžaduje ověřenou konfiguraci COP.")
         }
         let lifecycle = OIDCTokenLifecycle(issuer: configuration.oidcIssuer, clientId: configuration.oidcClientId, credentialStore: KeychainCredentialStore())
-        guard let token = try await lifecycle.accessToken(), !token.isEmpty, generation == MobilitySessionGeneration.shared.value, mobilitySessionScope() == expectedScope else {
+        guard let token = try await lifecycle.accessToken(), !token.isEmpty, mobilityTokenMatchesSelectedActor(token, issuer: configuration.oidcIssuer.absoluteString, subject: selectedSubject), generation == MobilitySessionGeneration.shared.value, mobilitySessionScope() == expectedScope else {
             throw CSMServiceError.authenticationRequired("Přihlášení COP vypršelo.")
         }
         guard var components = URLComponents(url: configuration.copBaseURL, resolvingAgainstBaseURL: false) else { throw CSMServiceError.invalidState("Neplatná adresa COP.") }
@@ -241,4 +242,14 @@ private final class MobilityNoRedirect: NSObject, URLSessionTaskDelegate, Sendab
             MainActor.assumeIsolated { self?.value = UUID() }
         }
     }
+}
+
+/// Only a local credential/selection binding check. COP verifies the actual JWT signature.
+func mobilityTokenMatchesSelectedActor(_ token: String, issuer: String, subject: String) -> Bool {
+    let parts = token.split(separator: ".", omittingEmptySubsequences: false)
+    guard parts.count == 3 else { return false }
+    var encoded = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+    encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
+    guard let data = Data(base64Encoded: encoded), let claims = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+    return claims["iss"] as? String == issuer && claims["sub"] as? String == subject
 }
