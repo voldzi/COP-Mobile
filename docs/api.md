@@ -478,3 +478,5 @@ Votes and confidence belong to that observation and are not summed.
 Optional route-step `lanes` preserves numeric `directions`, `active` and `valid`
 provider masks. The transport does not infer missing lanes or own lane advice;
 Jizda validates and presents them in its navigation session.
+
+Shared private mobility purpose-scoped SDK and receipts: [handoff](jizda-shared-mobility-handoff.md). No REST server is added to COP Mobile.

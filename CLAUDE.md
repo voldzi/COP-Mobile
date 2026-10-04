@@ -166,7 +166,14 @@ If retrieval scope changes, run:
 - State every check not run and why; never report an emulator or mock as a
   physical-device result.
 
+## Current approved Apple toolchain
+
+For this delivery the explicitly approved pin is Xcode27.1 build27A9269 /
+iOS SDK27.1 (ADR0007 update2026-10-04). Run the exact verifier; do not bypass it.
+The minimum supported OS is unchanged.
+
 ## Compact Instructions
 
 - Preserve the current goal, touched files, commands already run, verification
   status, toolchain state, retrieval availability, and open production gates.
+

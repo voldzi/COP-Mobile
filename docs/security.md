@@ -243,3 +243,5 @@ citlivé capability.
 
 Security nález se nesmí skrýt mockem ani feature flagem bez bezpečného runtime
 fallbacku a jasného vlastníka v `open-questions.md`.
+
+Private Dispatch uses SDK-owned ThisDeviceOnly Keychain keys, recipient authenticated encryption and RAM-only GPS; see [handoff](jizda-shared-mobility-handoff.md).

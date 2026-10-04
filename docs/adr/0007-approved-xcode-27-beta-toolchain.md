@@ -7,13 +7,13 @@ Accepted — 2026-07-11; updated — 2026-09-19
 ## Context
 
 COP Mobile targets iOS/iPadOS 26. The original feasibility phase pinned an
-Xcode 27 beta build. The maintained workstation now provides final Xcode 27.0
-build `27A266a` and iOS SDK 27.0; the superseded beta build is no longer an
+Xcode 27 beta build. The maintained workstation now provides final Xcode 27.1
+build `27A9269` and iOS SDK 27.1; the superseded beta build is no longer an
 appropriate reproducible release baseline.
 
 ## Decision
 
-- Pin builds and tests to Xcode 27.0 build `27A266a` and iOS SDK 27.0.
+- Pin builds and tests to Xcode 27.1 build `27A9269` and iOS SDK 27.1.
 - Keep `IPHONEOS_DEPLOYMENT_TARGET=26.0`; SDK selection does not raise the
   minimum supported system.
 - Enforce the exact pin with `scripts/verify-apple-toolchain.sh`.
@@ -34,3 +34,10 @@ appropriate reproducible release baseline.
   by silently falling back to Xcode 26.
 - App Store/TestFlight submission compatibility must be rechecked before each
   distribution.
+
+## Approved update on 2026-10-04
+
+The human explicitly approved the already installed Xcode 27.1 (27A9269),
+iOS SDK27.1 in Jízda turn 01a10762-dadd-7b70-bc0e-f8ba8d5ecf80.
+No download or deployment-target change is part of this approval. The exact
+verifier remains mandatory; builds and tests must be rerun for this update.

@@ -41,24 +41,28 @@ final class CommunicationModel {
     private(set) var authState: AuthState {
         get { chatSessionStore.snapshot.authState }
         set {
+            let mobilitySessionChanged = authState != newValue
             chatSessionStore.update(
                 authState: newValue,
                 actor: actor,
                 isBusy: isLoading,
                 deviceID: messagingDeviceId
             )
+            if mobilitySessionChanged { NotificationCenter.default.post(name: .csmMobilitySessionChanged, object: nil) }
         }
     }
     private(set) var connectionMode: ConnectionMode = .offline
     private(set) var actor: AuthenticatedActor? {
         get { chatSessionStore.snapshot.actor }
         set {
+            let mobilitySessionChanged = actor?.subjectId != newValue?.subjectId
             chatSessionStore.update(
                 authState: authState,
                 actor: newValue,
                 isBusy: isLoading,
                 deviceID: messagingDeviceId
             )
+            if mobilitySessionChanged { NotificationCenter.default.post(name: .csmMobilitySessionChanged, object: nil) }
         }
     }
     private(set) var policy: MobileNativePolicy?
