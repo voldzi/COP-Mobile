@@ -176,4 +176,3 @@ The minimum supported OS is unchanged.
 
 - Preserve the current goal, touched files, commands already run, verification
   status, toolchain state, retrieval availability, and open production gates.
-
