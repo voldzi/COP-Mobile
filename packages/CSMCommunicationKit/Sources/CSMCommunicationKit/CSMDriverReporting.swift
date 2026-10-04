@@ -5,6 +5,7 @@ public enum CSMDriverReportCategory: String, CaseIterable, Identifiable, Sendabl
     case stoppedVehicle = "stopped_vehicle"
     case trafficAccident = "traffic_accident"
     case trafficCongestion = "traffic_congestion"
+    case policePatrol = "police_patrol"
     case roadBlockage = "road_blockage"
     case hazard
 
@@ -84,6 +85,8 @@ public struct CSMNearbyDriverReport: Identifiable, Sendable {
     public var stillThereCount: Int
     public var notThereCount: Int
     public var currentConfirmation: CSMDriverReportConfirmation?
+    /// Server-confirmed directed edge of an observation, never an instruction to reroute.
+    public var roadBinding: CSMDriverReportRoadBinding? = nil
 
     public init(
         id: String,
@@ -224,7 +227,7 @@ public extension CSMCommunicationRuntime {
         await startIfNeeded()
         let report = CommunityReportDraft(
             id: draft.id.uuidString.lowercased(),
-            category: ReportCategory(rawValue: draft.category.rawValue) ?? .hazard,
+            category: Self.internalCategory(draft.category),
             title: draft.title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
                 ?? Self.defaultDriverReportTitle(draft.category),
             description: draft.detail.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -260,12 +263,25 @@ public extension CSMCommunicationRuntime {
         )
     }
 
+    internal static func internalCategory(_ category: CSMDriverReportCategory) -> ReportCategory {
+        switch category {
+        case .dangerousWeather: .dangerousWeather
+        case .stoppedVehicle: .stoppedVehicle
+        case .trafficAccident: .trafficAccident
+        case .trafficCongestion: .trafficCongestion
+        case .policePatrol: .policePatrol
+        case .roadBlockage: .roadBlockage
+        case .hazard: .hazard
+        }
+    }
+
     private static func defaultDriverReportTitle(_ category: CSMDriverReportCategory) -> String {
         switch category {
         case .dangerousWeather: "Nebezpečné počasí"
         case .stoppedVehicle: "Stojící vozidlo"
         case .trafficAccident: "Dopravní nehoda"
         case .trafficCongestion: "Dopravní kolona"
+        case .policePatrol: "Policejní hlídka"
         case .roadBlockage: "Neprůjezdná komunikace"
         case .hazard: "Nebezpečí na trase"
         }
@@ -273,7 +289,7 @@ public extension CSMCommunicationRuntime {
 
     private static func defaultDriverReportSeverity(_ category: CSMDriverReportCategory) -> AlertSeverity {
         switch category {
-        case .trafficCongestion:
+        case .trafficCongestion, .policePatrol:
             .info
         case .dangerousWeather, .stoppedVehicle, .trafficAccident, .roadBlockage, .hazard:
             .warning
@@ -285,4 +301,11 @@ private extension String {
     var nilIfEmpty: String? {
         isEmpty ? nil : self
     }
+}
+
+/// Only populated for a matched server road enrichment; graph version must match the route before use.
+public struct CSMDriverReportRoadBinding: Sendable {
+    public let routingDataset: String
+    public let directedEdgeID: String
+    public let enrichedAt: Date
 }

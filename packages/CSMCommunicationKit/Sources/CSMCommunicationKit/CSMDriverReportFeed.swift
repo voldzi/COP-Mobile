@@ -73,7 +73,7 @@ enum DriverReportFeedProjector {
                 grouped[key] = existing
                 continue
             }
-            grouped[key] = CSMNearbyDriverReport(
+            var projected = CSMNearbyDriverReport(
                 id: report.reportId, category: category, title: report.title, detail: report.description,
                 latitude: report.location.lat, longitude: report.location.lon, distanceMeters: distance,
                 observedAt: report.observedAt, validUntil: report.validUntil,
@@ -83,9 +83,21 @@ enum DriverReportFeedProjector {
                 notThereCount: report.confirmations.notThereCount,
                 currentConfirmation: report.confirmations.currentActorValue.flatMap { CSMDriverReportConfirmation(rawValue: $0.rawValue) }
             )
+            if let binding = report.roadEnrichment, binding.state == "matched",
+               let dataset = binding.routingDataset, !dataset.isEmpty,
+               let edge = binding.directedEdgeId, !edge.isEmpty,
+               let timestamp = binding.enrichedAt, let enriched = ISO8601DateFormatter().date(from: timestamp) ?? fractionalDate(timestamp) {
+                projected.roadBinding = CSMDriverReportRoadBinding(routingDataset: dataset, directedEdgeID: edge, enrichedAt: enriched)
+            }
+            grouped[key] = projected
         }
         let reports = grouped.values.sorted { $0.distanceMeters == $1.distanceMeters ? $0.id < $1.id : $0.distanceMeters < $1.distanceMeters }
         return CSMDriverReportFeed(reports: reports, fetchedAt: now, mayBeIncomplete: mayBeIncomplete)
+    }
+
+    private static func fractionalDate(_ text: String) -> Date? {
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: text)
     }
 
     private static func distance(_ lat: Double, _ lon: Double, _ otherLat: Double, _ otherLon: Double) -> Double {

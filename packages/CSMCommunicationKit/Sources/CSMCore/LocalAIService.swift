@@ -753,6 +753,8 @@ private extension ReportCategory {
             CSMLocalization.text("localai.fallback.stopped_vehicle", fallback: "Stojící vozidlo")
         case .trafficAccident:
             CSMLocalization.text("localai.fallback.traffic_accident", fallback: "Dopravní nehoda")
+        case .policePatrol:
+            "Policejní hlídka"
         case .trafficCongestion:
             CSMLocalization.text("localai.fallback.traffic_congestion", fallback: "Dopravní kolona")
         case .infrastructureDamage:

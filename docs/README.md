@@ -53,3 +53,5 @@ ověřuje ve Swift testech; pozdější Kotlin použije stejný artifact.
 Driver routing boundary: [ADR 0016](adr/0016-stateless-driver-routing-transport.md).
 
 - [Shared vehicle and private Dispatch SDK](jizda-shared-mobility-handoff.md).
+
+Jízda community police reporting: [public SDK handoff](jizda-community-reports-handoff.md).

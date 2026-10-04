@@ -1496,6 +1496,7 @@ enum ReportCategory: String, Codable, CaseIterable, Identifiable, Sendable {
     case stoppedVehicle = "stopped_vehicle"
     case trafficAccident = "traffic_accident"
     case trafficCongestion = "traffic_congestion"
+    case policePatrol = "police_patrol"
     case infrastructureDamage = "infrastructure_damage"
     case medical
     case utilityOutage = "utility_outage"
@@ -1682,6 +1683,9 @@ struct CommunityReportConfidenceSummary: Decodable, Equatable, Hashable, Sendabl
 struct CommunityRoadEnrichment: Decodable, Equatable, Hashable, Sendable {
     var state: String
     var clusterId: String?
+    var enrichedAt: String?
+    var routingDataset: String?
+    var directedEdgeId: String?
 }
 
 struct CommunityReport: Decodable, Identifiable, Equatable, Hashable, Sendable {
