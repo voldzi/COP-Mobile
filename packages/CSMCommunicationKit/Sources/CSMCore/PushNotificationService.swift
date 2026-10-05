@@ -133,7 +133,7 @@ final class PushNotificationManager: NSObject, PushNotificationManaging, UNUserN
     }
 
     func prepareForRemoteNotifications() async -> MobilePushSnapshot {
-        registerNotificationCategories()
+        await mergeNotificationCategories()
         do {
             _ = try await center.requestAuthorization(options: [.alert, .sound, .badge])
             currentSnapshot.authorization = await currentAuthorization()
@@ -229,6 +229,11 @@ final class PushNotificationManager: NSObject, PushNotificationManaging, UNUserN
     }
 
     private func registerNotificationCategories() {
+        Task { @MainActor [weak self] in await self?.mergeNotificationCategories() }
+    }
+
+    /// Preserve host categories; SDK replaces only its owned identifiers. Never changes the host delegate.
+    func mergeNotificationCategories() async {
         let open = UNNotificationAction(
             identifier: CSMNotificationActionIdentifier.open,
             title: CSMLocalization.text("notification.action.open", fallback: "Otevřít"),
@@ -271,7 +276,14 @@ final class PushNotificationManager: NSObject, PushNotificationManaging, UNUserN
             options: []
         )
 
-        center.setNotificationCategories([safetyAlert, chat, system])
+        let owned: Set<UNNotificationCategory> = [safetyAlert, chat, system]
+        let existing = await center.notificationCategories()
+        center.setNotificationCategories(Self.mergingNotificationCategories(existing: existing, owned: owned))
+    }
+
+    static func mergingNotificationCategories(existing: Set<UNNotificationCategory>, owned: Set<UNNotificationCategory>) -> Set<UNNotificationCategory> {
+        let ownedIDs = Set(owned.map(\.identifier))
+        return Set(existing.filter { !ownedIDs.contains($0.identifier) }).union(owned)
     }
 
     private func emitForegroundFeedback(for payload: CSMRemoteNotificationPayload) {

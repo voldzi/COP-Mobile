@@ -62,3 +62,5 @@ Jízda community police reporting: [public SDK handoff](jizda-community-reports-
 - [ADR 0020](adr/0020-shared-cop-oidc-session.md): shared refresh ownership and same-account restoration without Matrix logout.
 
 - [COP independent mobility availability](cop-dispatch-availability-handoff.md): optional wire-v1 service states, compatible Swift API and fail-closed sharing integration.
+
+- [Mobility invitation notifications](mobility-invitation-notifications-handoff.md): versioned push link, verified runtime listener and explicit host navigation.

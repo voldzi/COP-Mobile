@@ -593,6 +593,24 @@ public final class CSMCommunicationRuntime {
     ) async {
         guard model.authState == .signedIn, !model.isLoading else { return }
         guard alreadyClaimed || PushNotificationManager.shared.claimRemoteNotification(payload) else { return }
+        if let url = payload.deepLink, url.scheme == "csm", url.host == "mobility" {
+            guard payload.deliveryContext.shouldNavigate, let scope = mobilitySessionScope() else { return }
+            do {
+                let invitation = try await mobilityInvitationForNotification(url: url, expectedScope: scope)
+                guard mobilitySessionScope() == scope else { return }
+                if let invitation {
+                    NotificationCenter.default.post(name: .csmMobilityInvitationRequested, object: nil,
+                        userInfo: ["navigation": CSMMobilityInvitationNavigation(invitation: invitation, sessionScope: scope)])
+                } else {
+                    NotificationCenter.default.post(name: .csmMobilityInvitationVerificationFailed, object: nil)
+                }
+            } catch {
+                if mobilitySessionScope() == scope {
+                    NotificationCenter.default.post(name: .csmMobilityInvitationVerificationFailed, object: nil)
+                }
+            }
+            return
+        }
         if let destination = await model.handlePushPayload(payload) {
             NotificationCenter.default.post(
                 name: .csmNavigationDestinationRequested,

@@ -33,7 +33,17 @@ final class COPMobileAccessibilityTests: XCTestCase {
 
     func testConversationWorkspacePassesAccessibilityAudit() throws {
         app.launch()
-        XCTAssertTrue(app.otherElements["chat.workspace"].waitForExistence(timeout: 12))
+        // SwiftUI may expose NavigationStack as a navigation bar/container rather
+        // than XCUIElementTypeOther. Keep the exact workspace identity check.
+        let workspace = app.descendants(matching: .any)["chat.workspace"]
+        let ready = workspace.waitForExistence(timeout: 12)
+        if !ready {
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "Synthetic preview workspace hierarchy"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+        }
+        XCTAssertTrue(ready)
 
         try app.performAccessibilityAudit(
             for: [
