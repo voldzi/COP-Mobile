@@ -535,6 +535,7 @@ final class CommunicationModel {
         messagingBootstrapExpiresAt = nil
         messagingBootstrapIssuedAt = nil
         lastMessagingBootstrap = nil
+            conversationListRefreshGeneration &+= 1
         messagingBootstrapRefreshTask = nil
         messagingBootstrapNetworkRetryNotBefore = nil
         await pushNotifications.updateApplicationBadgeCount(0)
@@ -709,6 +710,7 @@ final class CommunicationModel {
             }
             try? await messagingBootstrapStore?.clear(subjectId: actor.subjectId, deviceId: deviceId)
             lastMessagingBootstrap = nil
+            conversationListRefreshGeneration &+= 1
             messagingBootstrapExpiresAt = nil
             messagingBootstrapIssuedAt = nil
         }
@@ -721,6 +723,7 @@ final class CommunicationModel {
                 status = try await api.messagingStatus()
             }
             let matrixBootstrap = try await api.messagingBootstrap(deviceId: deviceId)
+            guard self.actor?.subjectId == actor.subjectId, authState == .signedIn else { return }
             messagingBootstrapIssuedAt = .now
             messagingBootstrapExpiresAt = Self.resolvedMatrixBootstrapExpiry(matrixBootstrap)
             lastMessagingBootstrap = matrixBootstrap
@@ -1346,7 +1349,10 @@ final class CommunicationModel {
         }
         do {
             let metadataConversations = await enrichedConversationList(try await loadConversationMetadataList())
-            let presentations = await enrichedConversationPresentations(metadataConversations)
+            let actorSubject = actor?.subjectId
+            let identified = await conversationIdentityLookups(metadataConversations, refreshGeneration: refreshGeneration)
+            let presentations = await enrichedConversationPresentations(identified)
+            guard actor?.subjectId == actorSubject else { return }
             guard refreshGeneration == conversationListRefreshGeneration else { return }
             conversations = presentations
             conversationListLoadState = .loaded
@@ -2085,6 +2091,7 @@ final class CommunicationModel {
             await clearCachedMessagingBootstrap(for: actor)
         }
         lastMessagingBootstrap = nil
+            conversationListRefreshGeneration &+= 1
         messagingBootstrapExpiresAt = nil
         messagingBootstrapIssuedAt = nil
         messagingBootstrapNetworkRetryNotBefore = nil
@@ -2665,6 +2672,7 @@ final class CommunicationModel {
             }
             await clearCachedMessagingBootstrap(for: actor)
             lastMessagingBootstrap = nil
+            conversationListRefreshGeneration &+= 1
             messagingBootstrapExpiresAt = nil
             messagingBootstrapIssuedAt = nil
             messagingBootstrapNetworkRetryNotBefore = nil
@@ -2823,6 +2831,29 @@ final class CommunicationModel {
         return prioritizedConversations(enriched)
     }
 
+    private func conversationIdentityLookups(_ values: [Conversation], refreshGeneration: Int) async -> [Conversation] {
+        guard let actor, authState == .signedIn else { return values }
+        let subject = actor.subjectId
+        let ownMatrixID = lastMessagingBootstrap?.userId
+        var result = values
+        for batchStart in stride(from: 0, to: values.count, by: 8) {
+            await withTaskGroup(of: (Int, MessagingIdentityLookup?).self) { group in
+                for index in batchStart..<min(batchStart + 8, values.count) {
+                    let conversation = values[index]
+                    let api = self.api
+                    group.addTask {
+                        let lookup = try? await api.messagingIdentityLookup(conversationId: conversation.conversationId)
+                        return (index, lookup?.verified(for: conversation, actorUserId: subject, matrixUserId: ownMatrixID) == true ? lookup : nil)
+                    }
+                }
+                for await (index, lookup) in group { result[index].identityLookup = lookup }
+            }
+            guard self.actor?.subjectId == subject, authState == .signedIn,
+                  conversationListRefreshGeneration == refreshGeneration else { return values }
+        }
+        return result
+    }
+
     private func enrichedConversationPresentations(_ values: [Conversation]) async -> [Conversation] {
         guard let enricher = messaging as? any MessagingConversationPresentationEnriching else {
             return prioritizedConversations(values)
@@ -2967,9 +2998,7 @@ final class CommunicationModel {
         if let canonicalKey = nonEmptyValue(conversation.canonicalKey) {
             return "canonical:\(canonicalKey)"
         }
-        if conversation.type == .direct {
-            return "direct-title:\(normalizedIdentity(conversation.title))"
-        }
+        if let roomID = conversation.activeMatrixRoomId { return "room:\(roomID)" }
         return "conversation:\(conversation.conversationId)"
     }
 
@@ -2978,7 +3007,12 @@ final class CommunicationModel {
         selfIds: Set<String>
     ) -> Conversation {
         var result = conversation
-        result.members = deduplicatedMembers(conversation.members)
+        let lookup = conversation.identityLookup.flatMap { value in
+            value.conversationId == conversation.conversationId && value.matrixRoomId == conversation.activeMatrixRoomId &&
+                selfIds.contains(value.actorUserId) && value.validUntil > .now ? value : nil
+        }
+        result.identityLookup = lookup
+        result.members = deduplicatedMembers(conversation.members, lookup: lookup)
         if result.type == .direct && !result.members.isEmpty {
             result.memberCount = result.members.count
         }
@@ -3003,11 +3037,11 @@ final class CommunicationModel {
     }
 
     nonisolated private static func deduplicatedMembers(
-        _ members: [ConversationMember]
+        _ members: [ConversationMember], lookup: MessagingIdentityLookup? = nil
     ) -> [ConversationMember] {
         var membersById: [String: ConversationMember] = [:]
         for member in members {
-            let key = ConversationIdentity.canonicalKey(member.userId)
+            let key = lookup?.canonicalKey(member.userId) ?? ConversationIdentity.canonicalKey(member.userId)
             guard !key.isEmpty else { continue }
             if let existing = membersById[key] {
                 membersById[key] = ConversationMember(
@@ -3018,7 +3052,9 @@ final class CommunicationModel {
                     avatarUrl: nonEmptyValue(existing.avatarUrl) ?? nonEmptyValue(member.avatarUrl)
                 )
             } else {
-                membersById[key] = member
+                var canonical = member
+                canonical.userId = key
+                membersById[key] = canonical
             }
         }
         return Array(membersById.values)
@@ -3028,18 +3064,10 @@ final class CommunicationModel {
         in conversation: Conversation,
         selfIds: Set<String>
     ) -> ConversationMember? {
-        let candidates = conversation.members.filter { member in
-            let memberIds = identityVariants(member.userId)
-                .union(member.displayName.map(identityVariants) ?? [])
-            return memberIds.isDisjoint(with: selfIds)
-        }
-        let normalizedTitle = normalizedIdentity(conversation.title)
-        if let titledPeer = candidates.first(where: { member in
-            normalizedIdentity(member.displayName ?? member.userId) == normalizedTitle
-        }) {
-            return titledPeer
-        }
-        return candidates.first
+        guard conversation.members.contains(where: { !identityVariants($0.userId).isDisjoint(with: selfIds) }) else { return nil }
+        let candidates = conversation.members.filter { identityVariants($0.userId).isDisjoint(with: selfIds) }
+        // A name or list order never establishes which person is the peer.
+        return candidates.count == 1 ? candidates[0] : nil
     }
 
     nonisolated private static func mergeConversation(
@@ -3126,10 +3154,6 @@ final class CommunicationModel {
                 let identityKey = ConversationIdentity.canonicalKey(userId)
                 guard !userId.isEmpty else { continue }
                 guard !selfIdentifiers.contains(identityKey) else { continue }
-                if let displayName = member.displayName,
-                   selfIdentifiers.contains(Self.normalizedIdentity(displayName)) {
-                    continue
-                }
 
                 let displayName = member.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let recipient = ConversationRecipient(
@@ -3205,7 +3229,7 @@ final class CommunicationModel {
         _ actor: AuthenticatedActor?,
         matrixUserId: String? = nil
     ) -> Set<String> {
-        let values = [actor?.subjectId, actor?.username, actor?.displayName, matrixUserId].compactMap { $0 }
+        let values = [actor?.subjectId, matrixUserId].compactMap { $0 }
         return values.reduce(into: Set<String>()) { result, value in
             result.formUnion(identityVariants(value))
         }

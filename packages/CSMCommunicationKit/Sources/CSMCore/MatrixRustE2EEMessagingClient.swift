@@ -250,18 +250,24 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
             }
         }
 
+        // Never concatenate COP and Matrix identities using guessed localparts.
+        // Without an authenticated complete map, keep COP's own membership snapshot.
+        guard let lookup = result.identityLookup, lookup.complete, lookup.matrixRoomId == room.id(),
+              lookup.verified(for: conversation, actorUserId: lookup.actorUserId, matrixUserId: context.userId) else {
+            return conversation
+        }
         var membersById: [String: ConversationMember] = [:]
         for member in result.members {
-            let key = ConversationIdentity.canonicalKey(member.userId)
+            let key = lookup.canonicalKey(member.userId)
             guard !key.isEmpty else { continue }
             membersById[key] = member
         }
         for member in matrixMembers {
-            let key = ConversationIdentity.canonicalKey(member.userId)
+            let key = lookup.canonicalKey(member.userId)
             guard !key.isEmpty else { continue }
             let existing = membersById[key]
             membersById[key] = ConversationMember(
-                userId: existing.map { ConversationIdentity.preferredPersistentId($0.userId, member.userId) } ?? member.userId,
+                userId: existing.map { ConversationIdentity.preferredPersistentId($0.userId, member.userId) } ?? key,
                 displayName: existing?.displayName ?? Self.nonEmpty(member.displayName),
                 role: existing?.role ?? (member.isServiceMember ? "bot" : nil),
                 avatarDataUrl: await avatarDataURL(for: member.avatarUrl) ?? existing?.avatarDataUrl,
@@ -273,8 +279,9 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
             ? result.members.count
             : max(result.memberCount, result.members.count)
 
-        if result.type == .direct,
-           let peer = result.members.first(where: { !ConversationIdentity.matches($0.userId, context.userId) }) {
+        let ownID = lookup.canonicalKey(context.userId)
+        let peers = result.members.filter { $0.userId != ownID }
+        if result.type == .direct, peers.count == 1, let peer = peers.first {
             result.title = Self.nonEmpty(peer.displayName) ?? result.title
             result.conversationAvatarDataUrl = peer.avatarDataUrl ?? result.conversationAvatarDataUrl
             result.conversationAvatarUrl = peer.avatarUrl ?? result.conversationAvatarUrl

@@ -22,6 +22,7 @@ protocol CopAPIClientProtocol: Sendable {
     func acknowledgeAlert(alertId: String, note: String?) async throws -> CopAlert
     func messagingStatus() async throws -> MessagingStatus
     func messagingBootstrap(deviceId: String) async throws -> MessagingBootstrap
+    func messagingIdentityLookup(conversationId: String) async throws -> MessagingIdentityLookup
     func startVoiceCall(_ request: CSMVoiceCallStartRequest) async throws -> CSMVoiceCallSession
     func voiceCalls(roomId: String?, activeOnly: Bool, limit: Int) async throws -> [CSMVoiceCall]
     func voiceCall(callId: String) async throws -> CSMVoiceCallSession
@@ -44,6 +45,10 @@ protocol CopAPIClientProtocol: Sendable {
 }
 
 extension CopAPIClientProtocol {
+    func messagingIdentityLookup(conversationId: String) async throws -> MessagingIdentityLookup {
+        throw CSMServiceError.unavailable("Ověřené identity konverzace nejsou dostupné.")
+    }
+
     func drivingRoutes(_ request: CSMDriverRouteRequest) async throws -> CSMDriverRouteResponse {
         throw CSMDriverRoutingError.noNavigableRoute
     }

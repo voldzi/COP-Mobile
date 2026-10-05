@@ -62,3 +62,5 @@ ani Git dependency původní aplikace.
 - [Completed shared ride mileage v2](SHARED_VEHICLE_RIDE_MILEAGE.md): explicit typed intervals, initial seed and known versus calculated mileage.
 
 - [Shared profile, audit and owner recovery](SHARED_VEHICLE_AUDIT_PROFILE.md).
+
+See [verified read-only Matrix identities and caller presentation](VERIFIED_MATRIX_IDENTITIES.md). New host builds must pin the verified release; no host-owned provisioning or guessed identity aliases.

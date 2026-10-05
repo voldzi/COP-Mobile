@@ -41,7 +41,20 @@ public enum CSMVoiceCallAction: String, Codable, Equatable, Sendable {
     case mediaFailed = "media_failed"
 }
 
+public struct CSMVoiceCallPeer: Codable, Equatable, Sendable {
+    public let subjectId: String
+    public let displayName: String?
+    public init(subjectId: String, displayName: String?) { self.subjectId = subjectId; self.displayName = displayName }
+}
+
 public struct CSMVoiceCall: Codable, Equatable, Sendable {
+    public let peer: CSMVoiceCallPeer?
+    /// The shared legacy title may be the callee name. Never use it as an incoming caller.
+    public var presentationTitle: String {
+        let expected = direction == .incoming ? initiatorSubjectId : participantSubjectIds.count == 1 ? participantSubjectIds[0] : nil
+        if let peer, peer.subjectId == expected, let name = peer.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty, name.count <= 160, !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) { return name }
+        return direction == .incoming ? "COP kontakt" : title
+    }
     public let acceptedByEndpointId: String?
     public let callId: String
     public let connectedAt: Date?
@@ -61,6 +74,7 @@ public struct CSMVoiceCall: Codable, Equatable, Sendable {
 
     public init(
         acceptedByEndpointId: String? = nil,
+        peer: CSMVoiceCallPeer? = nil,
         callId: String,
         connectedAt: Date?,
         createdAt: Date,
@@ -78,6 +92,7 @@ public struct CSMVoiceCall: Codable, Equatable, Sendable {
         updatedAt: Date
     ) {
         self.acceptedByEndpointId = acceptedByEndpointId
+        self.peer = peer
         self.callId = callId
         self.connectedAt = connectedAt
         self.createdAt = createdAt

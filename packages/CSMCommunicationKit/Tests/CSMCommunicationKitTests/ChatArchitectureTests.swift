@@ -131,7 +131,7 @@ final class ChatArchitectureTests: XCTestCase {
             memberCount: 2,
             mapLinkCount: 0,
             members: [
-                ConversationMember(userId: "current-user", displayName: "Current User"),
+                ConversationMember(userId: "oidc-current-user", displayName: "Current User"),
                 ConversationMember(userId: "cop.operator", displayName: "COP Operator")
             ],
             mapLinks: [],
@@ -166,7 +166,7 @@ final class ChatArchitectureTests: XCTestCase {
         XCTAssertEqual(normalized.first?.members.count, 2)
     }
 
-    func testHistoricalDirectAliasesMergeByPeerInsteadOfRoomKey() throws {
+    func testUnverifiedHistoricalLocalpartAliasDoesNotMergeWithCOPIdentity() throws {
         let actor = AuthenticatedActor(
             subjectId: "current-user",
             username: "current-user",
@@ -177,8 +177,8 @@ final class ChatArchitectureTests: XCTestCase {
         let second = try JSONDecoder().decode(Conversation.self, from: Data(#"{"conversationId":"new-room","canonicalKey":"direct:current-user:cop.operator","title":"COP Operator","type":"direct","members":[{"userId":"current-user"},{"userId":"cop.operator","avatarUrl":"https://cop.example/operator.png"}]}"#.utf8))
 
         let normalized = CommunicationModel.normalizedConversationList([first, second], actor: actor)
-        XCTAssertEqual(normalized.count, 1)
-        XCTAssertEqual(normalized.first?.avatarUrl, "https://cop.example/operator.png")
+        XCTAssertEqual(normalized.count, 2)
+        XCTAssertTrue(normalized.contains { $0.avatarUrl == "https://cop.example/operator.png" })
     }
 
     func testBlockedSecureChatExplainsAuthenticationFailureWithoutAllowingPlaintext() {

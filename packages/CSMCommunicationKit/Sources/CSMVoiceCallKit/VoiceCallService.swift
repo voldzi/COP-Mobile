@@ -338,6 +338,7 @@ public final class VoiceCallService:
     var answered: Bool
     var muted: Bool
     var participants: [VoiceCallParticipant]
+    var incomingPushTitle: String? = nil
   }
 
   let presentation = VoiceCallPresentationState()
@@ -647,7 +648,8 @@ public final class VoiceCallService:
       registeredWithCallKit: true,
       answered: false,
       muted: false,
-      participants: []
+      participants: [],
+      incomingPushTitle: push.callerDisplayName
     )
     publish(push.uuid)
     startStatePolling(uuid: push.uuid)
@@ -747,8 +749,8 @@ public final class VoiceCallService:
         publish(uuid)
         startStatePolling(uuid: uuid)
         let update = CXCallUpdate()
-        update.localizedCallerName = call.title
-        update.remoteHandle = CXHandle(type: .generic, value: call.title)
+        update.localizedCallerName = call.presentationTitle
+        update.remoteHandle = CXHandle(type: .generic, value: call.presentationTitle)
         update.hasVideo = false
         do {
           try await provider.reportNewIncomingCall(with: uuid, update: update)
@@ -1117,6 +1119,7 @@ public final class VoiceCallService:
       return
     }
     context.call = session.call
+    context.incomingPushTitle = nil
     calls[uuid] = context
     if let media = session.media {
       cachedMedia[session.call.callId] = media
@@ -1172,7 +1175,7 @@ public final class VoiceCallService:
         id: uuid,
         callID: context.call.callId,
         roomID: context.call.roomId,
-        title: context.call.title,
+        title: context.incomingPushTitle ?? context.call.presentationTitle,
         avatarDataURL: context.avatarDataURL,
         direction: direction,
         eligibleParticipants: [],
@@ -1366,6 +1369,7 @@ public final class VoiceCallService:
   ) -> CSMVoiceCall {
     CSMVoiceCall(
       acceptedByEndpointId: call.acceptedByEndpointId,
+      peer: call.peer,
       callId: call.callId,
       connectedAt: connectedAt,
       createdAt: call.createdAt,
@@ -1387,6 +1391,7 @@ public final class VoiceCallService:
   private func replacingTitle(_ call: CSMVoiceCall, title: String) -> CSMVoiceCall {
     CSMVoiceCall(
       acceptedByEndpointId: call.acceptedByEndpointId,
+      peer: call.peer,
       callId: call.callId,
       connectedAt: call.connectedAt,
       createdAt: call.createdAt,

@@ -463,24 +463,13 @@ enum ConversationKind: String, Codable, CaseIterable, Identifiable, Sendable {
 /// treat those transport-specific spellings as separate people.
 enum ConversationIdentity {
     static func canonicalKey(_ value: String) -> String {
-        var normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !normalized.isEmpty else { return "" }
-
-        guard normalized.hasPrefix("@") else { return normalized }
-        normalized.removeFirst()
-        if let serverSeparator = normalized.firstIndex(of: ":") {
-            normalized = String(normalized[..<serverSeparator])
-        }
-        if normalized.hasPrefix("cop_") {
-            normalized.removeFirst(4)
-        }
-        return normalized
+        // Matrix IDs include their server and opaque localpart. No guessed COP aliases.
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func variants(_ value: String) -> Set<String> {
-        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let canonical = canonicalKey(value)
-        return Set([normalized, canonical].filter { !$0.isEmpty })
+        let value = canonicalKey(value)
+        return value.isEmpty ? [] : [value]
     }
 
     static func matches(_ left: String, _ right: String) -> Bool {
@@ -632,6 +621,7 @@ struct ConversationDraft: Codable, Equatable, Hashable, Sendable {
 }
 
 struct Conversation: Codable, Identifiable, Equatable, Hashable, Sendable {
+    var identityLookup: MessagingIdentityLookup? = nil
     var conversationId: String
     var conversationKind: ConversationKind
     var canonicalKey: String?

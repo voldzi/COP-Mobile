@@ -141,6 +141,10 @@ struct ProductionCopAPIClient: CopAPIClientProtocol {
         try await http.get("/api/v1/messaging/status")
     }
 
+    func messagingIdentityLookup(conversationId: String) async throws -> MessagingIdentityLookup {
+        try await http.post("/api/v1/messaging/matrix/identities/lookup", body: ["conversationId": conversationId])
+    }
+
     func messagingBootstrap(deviceId: String) async throws -> MessagingBootstrap {
         try await http.post("/api/v1/messaging/bootstrap", body: MessagingBootstrapRequest(deviceId: deviceId))
     }

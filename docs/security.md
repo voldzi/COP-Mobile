@@ -249,3 +249,5 @@ Private Dispatch uses SDK-owned ThisDeviceOnly Keychain keys, recipient authenti
 ## Shared OIDC refresh and restoration
 
 All published production SDK consumers share a device lifecycle for the configured issuer/client. Refresh commits the rotated credential before releasing waiters. Only `invalid_grant` removes the OIDC credential; temporary failures preserve it. Explicit renewal verifies the original issuer/subject and session revision before saving a new credential. It neither signs out Matrix nor permits an implicit account switch. UI must not offer renewal as a recovery from a network or 503 failure. See [ADR 0020](adr/0020-shared-cop-oidc-session.md).
+
+Identity pairings are conversation/actor/room scoped, short-lived and excluded from Codable caches. No guesses from display names or Matrix localparts; no provisioning fallback. API incoming caller names require exact call.peer binding.
