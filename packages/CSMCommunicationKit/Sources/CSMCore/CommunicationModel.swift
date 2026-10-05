@@ -455,6 +455,20 @@ final class CommunicationModel {
         }
     }
 
+    func recordCOPSessionRestoreFailure(_ error: any Error) {
+        lastError = error.localizedDescription
+    }
+
+    func reauthenticateCOPSession(expectedSubjectID: String) async throws {
+        guard authState == .signedIn, actor?.subjectId == expectedSubjectID else {
+            throw CSMCOPSessionError(.accountChanged)
+        }
+        try await authSession.reauthenticate(expectedSubjectID: expectedSubjectID)
+        guard authState == .signedIn, actor?.subjectId == expectedSubjectID else {
+            throw CSMCOPSessionError(.accountChanged)
+        }
+    }
+
     func switchAccount() async {
         await signOut()
         await signIn(forceAuthentication: true)

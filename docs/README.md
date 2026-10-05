@@ -55,3 +55,8 @@ Driver routing boundary: [ADR 0016](adr/0016-stateless-driver-routing-transport.
 - [Shared vehicle and private Dispatch SDK](jizda-shared-mobility-handoff.md).
 
 Jízda community police reporting: [public SDK handoff](jizda-community-reports-handoff.md).
+
+## COP OIDC and mobility session restoration
+
+- [Shared COP OIDC session and Jízda handoff](cop-oidc-session-handoff.md).
+- [ADR 0020](adr/0020-shared-cop-oidc-session.md): shared refresh ownership and same-account restoration without Matrix logout.

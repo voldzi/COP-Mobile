@@ -554,3 +554,7 @@ report spatial query propagation to COP, bounded/dateline geometry, inactive and
 expired record filtering, stable sorting, duplicate IDs, and older response
 decoding. The offline fallback UI regression remains in `COPMobileLaunchUITests`:
 its communication button must open chat and expose a separate accessibility node.
+
+## OIDC versus Matrix regression
+
+Run `OIDCTokenLifecycleTests` and `COPSessionRestorationTests` in the shared package. They cover concurrent rotation, outage retention, invalid grant, same-account renewal, rejection of another issuer/subject and stale browser results, plus preservation of established chat state. Real iPhone expired-session/browser/network acceptance remains required; simulator mocks do not prove production identity-provider behaviour.

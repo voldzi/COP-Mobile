@@ -43,10 +43,9 @@ enum ServiceFactory {
         }
 
         let keychain = KeychainCredentialStore()
-        let tokenLifecycle = OIDCTokenLifecycle(
+        let tokenLifecycle = DeviceOIDCSession.shared.lifecycle(
             issuer: configuration.oidcIssuer,
-            clientId: configuration.oidcClientId,
-            credentialStore: keychain
+            clientId: configuration.oidcClientId
         )
         let http = HTTPClient(
             baseURL: configuration.copBaseURL,
@@ -105,11 +104,9 @@ enum ServiceFactory {
         if configuration.usePreviewServices {
             return DriverReportService(api: PreviewCopAPIClient())
         }
-        let keychain = KeychainCredentialStore()
-        let tokenLifecycle = OIDCTokenLifecycle(
+        let tokenLifecycle = DeviceOIDCSession.shared.lifecycle(
             issuer: configuration.oidcIssuer,
-            clientId: configuration.oidcClientId,
-            credentialStore: keychain
+            clientId: configuration.oidcClientId
         )
         let http = HTTPClient(
             baseURL: configuration.copBaseURL,

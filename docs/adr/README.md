@@ -35,3 +35,5 @@ Use ADRs for important, costly, risky, or hard-to-reverse technical decisions.
 - `0015-shared-driver-report-transport.md` — bounded Jizda report facade, encrypted outbox and COP-owned workflow
 - `0016-stateless-driver-routing-transport.md` — authenticated COP route DTOs for Jizda; navigation stays outside the kit
 - `0017-optional-directed-road-attributes.md` — optional directed road attributes and vehicle dimensions; typed outside-coverage fallback reaches Jízda
+
+- [0020 - Shared COP OIDC session](0020-shared-cop-oidc-session.md): API refresh ownership and same-account restoration independent of Matrix chat.

@@ -245,3 +245,7 @@ Security nález se nesmí skrýt mockem ani feature flagem bez bezpečného runt
 fallbacku a jasného vlastníka v `open-questions.md`.
 
 Private Dispatch uses SDK-owned ThisDeviceOnly Keychain keys, recipient authenticated encryption and RAM-only GPS; see [handoff](jizda-shared-mobility-handoff.md).
+
+## Shared OIDC refresh and restoration
+
+All published production SDK consumers share a device lifecycle for the configured issuer/client. Refresh commits the rotated credential before releasing waiters. Only `invalid_grant` removes the OIDC credential; temporary failures preserve it. Explicit renewal verifies the original issuer/subject and session revision before saving a new credential. It neither signs out Matrix nor permits an implicit account switch. UI must not offer renewal as a recovery from a network or 503 failure. See [ADR 0020](adr/0020-shared-cop-oidc-session.md).

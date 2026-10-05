@@ -341,9 +341,13 @@ protocol AuthSessionManaging {
     func signIn() async throws
     func signIn(forceAuthentication: Bool) async throws
     func signOut() async throws
+    func reauthenticate(expectedSubjectID: String) async throws
 }
 
 extension AuthSessionManaging {
+    func reauthenticate(expectedSubjectID: String) async throws {
+        throw CSMServiceError.disabled("Obnova přihlášení není v tomto režimu dostupná.")
+    }
     func signIn(forceAuthentication: Bool) async throws {
         try await signIn()
     }

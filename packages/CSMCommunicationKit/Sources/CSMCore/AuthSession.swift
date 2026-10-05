@@ -54,7 +54,6 @@ actor OIDCTokenLifecycle: AccessTokenProviding {
         do {
             return try await refresh(tokens).accessToken
         } catch OIDCTokenRequestError.invalidSession {
-            try? await credentialStore.delete(account: "oidc")
             return nil
         } catch {
             // A timeout, offline device, locked Keychain or an IdP outage is
@@ -88,7 +87,6 @@ actor OIDCTokenLifecycle: AccessTokenProviding {
             _ = try await refresh(tokens)
             return true
         } catch OIDCTokenRequestError.invalidSession {
-            try? await credentialStore.delete(account: "oidc")
             return false
         } catch {
             // Retain the device session during network and server outages.
@@ -114,46 +112,61 @@ actor OIDCTokenLifecycle: AccessTokenProviding {
         !(tokens.refreshToken?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     }
 
-    private func refresh(_ tokens: TokenPair) async throws -> TokenPair {
-        if let refreshTask {
-            return try await refreshTask.value
+    func sessionRevision() -> UInt64 { sessionGeneration }
+
+    /// Reject a different account before replacing the device credential.
+    func saveReauthenticatedTokens(_ tokens: TokenPair, issuer: String, subject: String, revision: UInt64) async throws {
+        guard revision == sessionGeneration else { throw CancellationError() }
+        guard mobilityTokenMatchesSelectedActor(tokens.accessToken, issuer: issuer, subject: subject) else {
+            throw CSMCOPSessionError(.accountChanged)
         }
-        guard let refreshToken = tokens.refreshToken?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !refreshToken.isEmpty
-        else {
+        try await saveTokens(tokens)
+    }
+
+    private func refresh(_ tokens: TokenPair) async throws -> TokenPair {
+        if let refreshTask { return try await refreshTask.value }
+        // Another caller may have loaded an expired credential before the previous
+        // flight committed its rotated token. Never refresh that stale snapshot.
+        guard let current = try await credentialStore.loadTokens() else {
             throw OIDCTokenRequestError.invalidSession
         }
-
-        let discoveryLoader = discoveryLoader
-        let tokenExchanger = tokenExchanger
-        let clientId = clientId
+        if let refreshTask { return try await refreshTask.value }
+        if current.isAccessTokenFresh { return current }
         let generation = sessionGeneration
-        let task = Task {
-            let discovery = try await discoveryLoader.load()
-            return try await tokenExchanger.refresh(
-                refreshToken: refreshToken,
-                clientId: clientId,
-                tokenEndpoint: discovery.tokenEndpoint,
-                subjectId: tokens.subjectId
-            )
-        }
+        let task = Task { try await self.performRefresh(current, generation: generation) }
         refreshTask = task
-
         do {
-            let refreshedTokens = try await task.value
-            guard generation == sessionGeneration else {
-                throw CancellationError()
-            }
+            let result = try await task.value
+            guard generation == sessionGeneration else { throw CancellationError() }
             refreshTask = nil
-            try await credentialStore.saveTokens(refreshedTokens)
-            return refreshedTokens
+            return result
         } catch {
-            if generation == sessionGeneration {
-                refreshTask = nil
-            }
+            if generation == sessionGeneration { refreshTask = nil }
             throw error
         }
     }
+
+    private func performRefresh(_ tokens: TokenPair, generation: UInt64) async throws -> TokenPair {
+        do {
+            guard let refreshToken = tokens.refreshToken, !refreshToken.isEmpty else {
+                throw OIDCTokenRequestError.invalidSession
+            }
+            let discovery = try await discoveryLoader.load()
+            let refreshed = try await tokenExchanger.refresh(refreshToken: refreshToken,
+                clientId: clientId, tokenEndpoint: discovery.tokenEndpoint, subjectId: tokens.subjectId)
+            guard generation == sessionGeneration else { throw CancellationError() }
+            // Commit once, before any waiter receives a token. Joined callers do
+            // not write credentials or clear the shared flight themselves.
+            try await credentialStore.saveTokens(refreshed)
+            guard generation == sessionGeneration else { throw CancellationError() }
+            return refreshed
+        } catch OIDCTokenRequestError.invalidSession {
+            guard generation == sessionGeneration else { throw CancellationError() }
+            try? await credentialStore.delete(account: "oidc")
+            throw OIDCTokenRequestError.invalidSession
+        }
+    }
+
 }
 
 enum AuthState: String, Sendable {
@@ -183,6 +196,7 @@ struct PreviewAuthSession: AuthSessionManaging {
 @MainActor
 final class ProductionOIDCAuthSession: AuthSessionManaging {
     private let clientId: String
+    private let issuer: URL
     private let redirectScheme: String
     private let scope: String
     private let tokenLifecycle: OIDCTokenLifecycle
@@ -202,6 +216,7 @@ final class ProductionOIDCAuthSession: AuthSessionManaging {
         tokenLifecycle: OIDCTokenLifecycle? = nil
     ) {
         self.clientId = clientId
+        self.issuer = issuer
         self.redirectScheme = redirectScheme
         self.scope = scope
         self.tokenLifecycle = tokenLifecycle ?? OIDCTokenLifecycle(
@@ -235,6 +250,16 @@ final class ProductionOIDCAuthSession: AuthSessionManaging {
         )
         let tokens = try await tokenExchanger.exchange(tokenRequest, tokenEndpoint: discovery.tokenEndpoint)
         try await tokenLifecycle.saveTokens(tokens)
+    }
+
+    func reauthenticate(expectedSubjectID: String) async throws {
+        let revision = await tokenLifecycle.sessionRevision()
+        let discovery = try await discoveryLoader.load()
+        let request = try await authenticator.authenticate(discovery: discovery, clientId: clientId,
+            redirectScheme: redirectScheme, scope: scope, anchor: nil, forceAuthentication: true)
+        let tokens = try await tokenExchanger.exchange(request, tokenEndpoint: discovery.tokenEndpoint)
+        try await tokenLifecycle.saveReauthenticatedTokens(tokens, issuer: issuer.absoluteString,
+            subject: expectedSubjectID, revision: revision)
     }
 
     func signOut() async throws {

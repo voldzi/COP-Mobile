@@ -21,6 +21,14 @@ public extension CSMCommunicationRuntime {
     }
     /// Opens the existing PKCE IdP page; registration is available only if the IdP offers it.
     func mobilitySignIn(switchAccount: Bool = false) async {
+        if !switchAccount, model.authState == .signedIn, let scope = mobilitySessionScope() {
+            let status = await mobilityCOPSessionStatus(expectedScope: scope)
+            if status == .authenticationRequired {
+                do { try await mobilityRestoreSession(expectedScope: scope) }
+                catch { model.recordCOPSessionRestoreFailure(error) }
+            }
+            return
+        }
         await signIn(expectedSubjectID: nil, switchAccount: switchAccount)
     }
 
@@ -210,7 +218,7 @@ public extension CSMCommunicationRuntime {
 
     private func mobilityRequest<Response: Decodable>(path: String, method: String, body: Data?, query: [URLQueryItem], expectedScope: String) async throws -> Response {
         let generation = MobilitySessionGeneration.shared.value
-        guard mobilitySessionScope() == expectedScope else { throw CSMServiceError.authenticationRequired("Účet COP se změnil.") }
+        guard mobilitySessionScope() == expectedScope else { throw CSMCOPSessionError(.accountChanged) }
         let configuration = AppConfiguration.fromBundle()
         guard let selectedSubject = model.actor?.subjectId else { throw CSMServiceError.authenticationRequired("Přihlášení COP vypršelo.") }
         guard !configuration.usePreviewServices, configuration.copBaseURL.scheme == "https",
@@ -219,9 +227,13 @@ public extension CSMCommunicationRuntime {
               ["", "/"].contains(configuration.copBaseURL.path) else {
             throw CSMServiceError.disabled("Sdílení vyžaduje ověřenou konfiguraci COP.")
         }
-        let lifecycle = OIDCTokenLifecycle(issuer: configuration.oidcIssuer, clientId: configuration.oidcClientId, credentialStore: KeychainCredentialStore())
-        guard let token = try await lifecycle.accessToken(), !token.isEmpty, mobilityTokenMatchesSelectedActor(token, issuer: configuration.oidcIssuer.absoluteString, subject: selectedSubject), generation == MobilitySessionGeneration.shared.value, mobilitySessionScope() == expectedScope else {
-            throw CSMServiceError.authenticationRequired("Přihlášení COP vypršelo.")
+        let lifecycle = DeviceOIDCSession.shared.lifecycle(issuer: configuration.oidcIssuer, clientId: configuration.oidcClientId)
+        guard let token = try await lifecycle.accessToken(), !token.isEmpty else {
+            throw CSMCOPSessionError(.authenticationRequired)
+        }
+        guard generation == MobilitySessionGeneration.shared.value, mobilitySessionScope() == expectedScope,
+              mobilityTokenMatchesSelectedActor(token, issuer: configuration.oidcIssuer.absoluteString, subject: selectedSubject) else {
+            throw CSMCOPSessionError(.accountChanged)
         }
         guard var components = URLComponents(url: configuration.copBaseURL, resolvingAgainstBaseURL: false) else { throw CSMServiceError.invalidState("Neplatná adresa COP.") }
         components.path = path; components.queryItems = query.isEmpty ? nil : query
@@ -236,8 +248,12 @@ public extension CSMCommunicationRuntime {
         let session = URLSession(configuration: config, delegate: MobilityNoRedirect(), delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
         let (data, response) = try await session.data(for: request)
-        guard generation == MobilitySessionGeneration.shared.value, mobilitySessionScope() == expectedScope, let http = response as? HTTPURLResponse,
-              http.url == url, data.count <= 4_194_304 else { throw CSMServiceError.authenticationRequired("Účet COP se změnil.") }
+        guard generation == MobilitySessionGeneration.shared.value, mobilitySessionScope() == expectedScope else {
+            throw CSMCOPSessionError(.accountChanged)
+        }
+        guard let http = response as? HTTPURLResponse, http.url == url, data.count <= 4_194_304 else {
+            throw CSMCOPSessionError(.invalidResponse)
+        }
         guard (200..<300).contains(http.statusCode) else {
             let error = try? JSONDecoder().decode(CSMMobilityError.self, from: data)
             throw CSMMobilityServiceFailure(statusCode: http.statusCode, code: error?.error.code ?? "MOBILITY_UNAVAILABLE",

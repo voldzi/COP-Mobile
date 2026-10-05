@@ -370,6 +370,7 @@ public final class CSMCommunicationRuntime {
     let model = ServiceFactory.makeCommunicationModel(managesMessagingDeviceRegistration: true)
     let driverReportService = ServiceFactory.makeDriverReportService()
     private(set) var accessState: NativeCommunicationAccessState = .checking
+    var copSessionRestoreTask: Task<Void, any Error>?
     private var started = false
     private var startTask: Task<Void, Never>?
     private var preparationGeneration = 0
