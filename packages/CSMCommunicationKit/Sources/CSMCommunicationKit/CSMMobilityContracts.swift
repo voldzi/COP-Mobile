@@ -60,7 +60,10 @@ public struct CSMMobilityCapabilities: Codable, Sendable {
     public let supportedRefuelingFuelTypes: [String]?
     public let serviceAvailability: CSMMobilityServiceAvailability?
     public let odometerSnapshotVersions: [Int]?
-    public init(contractVersion: CSMMobilityCapabilitiesContractVersion, sharedVehiclesEnabled: Bool, dispatchEnabled: Bool, maxVehicleMembers: Int, maxGroupMembers: Int, registration: CSMMobilityCapabilitiesRegistration, dispatchTransport: CSMMobilityCapabilitiesDispatchTransport, currencies: [CSMMobilityCapabilitiesCurrenciesItem], serverTimestamp: String, invitationDelivery: CSMMobilityCapabilitiesInvitationDelivery, serviceAvailability: CSMMobilityServiceAvailability? = nil, recordDetailsVersions: [Int]? = nil, recordEnergyUnits: [String]? = nil, supportedRefuelingFuelTypes: [String]? = nil, odometerSnapshotVersions: [Int]? = nil) {
+    public let rideDetailsVersions: [Int]?
+    public let initialOdometerSupported: Bool?
+    public let rideInsertPolicy: String?
+    public init(contractVersion: CSMMobilityCapabilitiesContractVersion, sharedVehiclesEnabled: Bool, dispatchEnabled: Bool, maxVehicleMembers: Int, maxGroupMembers: Int, registration: CSMMobilityCapabilitiesRegistration, dispatchTransport: CSMMobilityCapabilitiesDispatchTransport, currencies: [CSMMobilityCapabilitiesCurrenciesItem], serverTimestamp: String, invitationDelivery: CSMMobilityCapabilitiesInvitationDelivery, serviceAvailability: CSMMobilityServiceAvailability? = nil, recordDetailsVersions: [Int]? = nil, recordEnergyUnits: [String]? = nil, supportedRefuelingFuelTypes: [String]? = nil, odometerSnapshotVersions: [Int]? = nil, rideDetailsVersions: [Int]? = nil, initialOdometerSupported: Bool? = nil, rideInsertPolicy: String? = nil) {
         self.contractVersion = contractVersion
         self.sharedVehiclesEnabled = sharedVehiclesEnabled
         self.dispatchEnabled = dispatchEnabled
@@ -76,6 +79,9 @@ public struct CSMMobilityCapabilities: Codable, Sendable {
         self.recordEnergyUnits = recordEnergyUnits
         self.supportedRefuelingFuelTypes = supportedRefuelingFuelTypes
         self.odometerSnapshotVersions = odometerSnapshotVersions
+        self.rideDetailsVersions = rideDetailsVersions
+        self.initialOdometerSupported = initialOdometerSupported
+        self.rideInsertPolicy = rideInsertPolicy
     }
 }
 public enum CSMMobilityAccountContractVersion: String, Codable, Sendable {
@@ -156,7 +162,8 @@ public struct CSMSharedVehicle: Codable, Sendable {
     public let updatedAt: String
     public let deleted: Bool
     public let odometerSnapshot: CSMSharedVehicleOdometerSnapshot?
-    public init(contractVersion: CSMSharedVehicleContractVersion, vehicleId: UUID, details: CSMSharedVehicleDetails, dataRevision: Int, membershipRevision: Int, members: [CSMSharedVehicleMember], createdAt: String, updatedAt: String, deleted: Bool, odometerSnapshot: CSMSharedVehicleOdometerSnapshot? = nil) {
+    public let odometerSnapshotV2: CSMSharedVehicleOdometerSnapshotV2?
+    public init(contractVersion: CSMSharedVehicleContractVersion, vehicleId: UUID, details: CSMSharedVehicleDetails, dataRevision: Int, membershipRevision: Int, members: [CSMSharedVehicleMember], createdAt: String, updatedAt: String, deleted: Bool, odometerSnapshot: CSMSharedVehicleOdometerSnapshot? = nil, odometerSnapshotV2: CSMSharedVehicleOdometerSnapshotV2? = nil) {
         self.contractVersion = contractVersion
         self.vehicleId = vehicleId
         self.details = details
@@ -167,6 +174,7 @@ public struct CSMSharedVehicle: Codable, Sendable {
         self.updatedAt = updatedAt
         self.deleted = deleted
         self.odometerSnapshot = odometerSnapshot
+        self.odometerSnapshotV2 = odometerSnapshotV2
     }
 }
 public enum CSMSharedVehicleListContractVersion: String, Codable, Sendable {
@@ -328,11 +336,13 @@ public struct CSMSharedVehicleRecordDataOdometer: Codable, Sendable {
     public let odometerKm: String
     public let correctionOfRecordId: UUID?
     public let correctionReason: String?
-    public init(kind: CSMSharedVehicleRecordDataOdometerKind, odometerKm: String, correctionOfRecordId: UUID? = nil, correctionReason: String? = nil) {
+    public let initial: Bool?
+    public init(kind: CSMSharedVehicleRecordDataOdometerKind, odometerKm: String, correctionOfRecordId: UUID? = nil, correctionReason: String? = nil, initial: Bool? = nil) {
         self.kind = kind
         self.odometerKm = odometerKm
         self.correctionOfRecordId = correctionOfRecordId
         self.correctionReason = correctionReason
+        self.initial = initial
     }
 }
 
@@ -349,11 +359,13 @@ public struct CSMSharedVehicleRecordDataRideSummary: Codable, Sendable {
     public let distanceKm: String
     public let durationSeconds: Int
     public let purpose: CSMSharedVehicleRecordDataRideSummaryPurpose
-    public init(kind: CSMSharedVehicleRecordDataRideSummaryKind, distanceKm: String, durationSeconds: Int, purpose: CSMSharedVehicleRecordDataRideSummaryPurpose) {
+    public let details: CSMSharedVehicleRideDetails?
+    public init(kind: CSMSharedVehicleRecordDataRideSummaryKind, distanceKm: String, durationSeconds: Int, purpose: CSMSharedVehicleRecordDataRideSummaryPurpose, details: CSMSharedVehicleRideDetails? = nil) {
         self.kind = kind
         self.distanceKm = distanceKm
         self.durationSeconds = durationSeconds
         self.purpose = purpose
+        self.details = details
     }
 }
 
@@ -532,7 +544,8 @@ public struct CSMSharedVehicleReceipt: Codable, Sendable {
     public let recordId: UUID?
     public let confirmed: Bool
     public let odometerSnapshot: CSMSharedVehicleOdometerSnapshot?
-    public init(contractVersion: CSMSharedVehicleReceiptContractVersion, operationId: UUID, vehicleId: UUID, dataRevision: Int, membershipRevision: Int, eventSequence: Int, recordId: UUID? = nil, confirmed: Bool, odometerSnapshot: CSMSharedVehicleOdometerSnapshot? = nil) {
+    public let odometerSnapshotV2: CSMSharedVehicleOdometerSnapshotV2?
+    public init(contractVersion: CSMSharedVehicleReceiptContractVersion, operationId: UUID, vehicleId: UUID, dataRevision: Int, membershipRevision: Int, eventSequence: Int, recordId: UUID? = nil, confirmed: Bool, odometerSnapshot: CSMSharedVehicleOdometerSnapshot? = nil, odometerSnapshotV2: CSMSharedVehicleOdometerSnapshotV2? = nil) {
         self.contractVersion = contractVersion
         self.operationId = operationId
         self.vehicleId = vehicleId
@@ -542,6 +555,7 @@ public struct CSMSharedVehicleReceipt: Codable, Sendable {
         self.recordId = recordId
         self.confirmed = confirmed
         self.odometerSnapshot = odometerSnapshot
+        self.odometerSnapshotV2 = odometerSnapshotV2
     }
 }
 public enum CSMSharedVehicleSyncItemType: String, Codable, Sendable {
@@ -584,7 +598,8 @@ public struct CSMSharedVehicleSync: Codable, Sendable {
     public let membershipRevision: Int
     public let serverTimestamp: String
     public let odometerSnapshot: CSMSharedVehicleOdometerSnapshot?
-    public init(contractVersion: CSMSharedVehicleSyncContractVersion, vehicleId: UUID, items: [CSMSharedVehicleSyncItem], nextCursor: String, hasMore: Bool, dataRevision: Int, membershipRevision: Int, serverTimestamp: String, odometerSnapshot: CSMSharedVehicleOdometerSnapshot? = nil) {
+    public let odometerSnapshotV2: CSMSharedVehicleOdometerSnapshotV2?
+    public init(contractVersion: CSMSharedVehicleSyncContractVersion, vehicleId: UUID, items: [CSMSharedVehicleSyncItem], nextCursor: String, hasMore: Bool, dataRevision: Int, membershipRevision: Int, serverTimestamp: String, odometerSnapshot: CSMSharedVehicleOdometerSnapshot? = nil, odometerSnapshotV2: CSMSharedVehicleOdometerSnapshotV2? = nil) {
         self.contractVersion = contractVersion
         self.vehicleId = vehicleId
         self.items = items
@@ -594,6 +609,7 @@ public struct CSMSharedVehicleSync: Codable, Sendable {
         self.membershipRevision = membershipRevision
         self.serverTimestamp = serverTimestamp
         self.odometerSnapshot = odometerSnapshot
+        self.odometerSnapshotV2 = odometerSnapshotV2
     }
 }
 public enum CSMDispatchMemberRole: String, Codable, Sendable {

@@ -106,6 +106,7 @@ public extension CSMSharedVehicleRecordData {
         switch self {
         case .energy(let value): value.details?.version
         case .service(let value): value.details?.version
+        case .ride_summary(let value): value.details?.version
         default: nil
         }
     }
