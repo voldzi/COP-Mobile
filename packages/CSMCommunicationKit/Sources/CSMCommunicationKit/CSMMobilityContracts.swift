@@ -55,8 +55,11 @@ public struct CSMMobilityCapabilities: Codable, Sendable {
     public let serverTimestamp: String
     public let invitationDelivery: CSMMobilityCapabilitiesInvitationDelivery
     /// Configuration flags are not readiness. nil from an older server means unknown.
+    public let recordDetailsVersions: [Int]?
+    public let recordEnergyUnits: [String]?
+    public let supportedRefuelingFuelTypes: [String]?
     public let serviceAvailability: CSMMobilityServiceAvailability?
-    public init(contractVersion: CSMMobilityCapabilitiesContractVersion, sharedVehiclesEnabled: Bool, dispatchEnabled: Bool, maxVehicleMembers: Int, maxGroupMembers: Int, registration: CSMMobilityCapabilitiesRegistration, dispatchTransport: CSMMobilityCapabilitiesDispatchTransport, currencies: [CSMMobilityCapabilitiesCurrenciesItem], serverTimestamp: String, invitationDelivery: CSMMobilityCapabilitiesInvitationDelivery, serviceAvailability: CSMMobilityServiceAvailability? = nil) {
+    public init(contractVersion: CSMMobilityCapabilitiesContractVersion, sharedVehiclesEnabled: Bool, dispatchEnabled: Bool, maxVehicleMembers: Int, maxGroupMembers: Int, registration: CSMMobilityCapabilitiesRegistration, dispatchTransport: CSMMobilityCapabilitiesDispatchTransport, currencies: [CSMMobilityCapabilitiesCurrenciesItem], serverTimestamp: String, invitationDelivery: CSMMobilityCapabilitiesInvitationDelivery, serviceAvailability: CSMMobilityServiceAvailability? = nil, recordDetailsVersions: [Int]? = nil, recordEnergyUnits: [String]? = nil, supportedRefuelingFuelTypes: [String]? = nil) {
         self.contractVersion = contractVersion
         self.sharedVehiclesEnabled = sharedVehiclesEnabled
         self.dispatchEnabled = dispatchEnabled
@@ -68,6 +71,9 @@ public struct CSMMobilityCapabilities: Codable, Sendable {
         self.serverTimestamp = serverTimestamp
         self.invitationDelivery = invitationDelivery
         self.serviceAvailability = serviceAvailability
+        self.recordDetailsVersions = recordDetailsVersions
+        self.recordEnergyUnits = recordEnergyUnits
+        self.supportedRefuelingFuelTypes = supportedRefuelingFuelTypes
     }
 }
 
@@ -386,11 +392,13 @@ public struct CSMSharedVehicleRecordDataEnergy: Codable, Sendable {
     public let unit: CSMSharedVehicleRecordDataEnergyUnit
     public let quantity: String
     public let amount: CSMSharedVehicleMoney?
-    public init(kind: CSMSharedVehicleRecordDataEnergyKind, unit: CSMSharedVehicleRecordDataEnergyUnit, quantity: String, amount: CSMSharedVehicleMoney? = nil) {
+    public let details: CSMSharedVehicleEnergyDetails?
+    public init(kind: CSMSharedVehicleRecordDataEnergyKind, unit: CSMSharedVehicleRecordDataEnergyUnit, quantity: String, amount: CSMSharedVehicleMoney? = nil, details: CSMSharedVehicleEnergyDetails? = nil) {
         self.kind = kind
         self.unit = unit
         self.quantity = quantity
         self.amount = amount
+        self.details = details
     }
 }
 
@@ -403,11 +411,13 @@ public struct CSMSharedVehicleRecordDataService: Codable, Sendable {
     public let title: String
     public let odometerKm: String?
     public let amount: CSMSharedVehicleMoney?
-    public init(kind: CSMSharedVehicleRecordDataServiceKind, title: String, odometerKm: String? = nil, amount: CSMSharedVehicleMoney? = nil) {
+    public let details: CSMSharedVehicleServiceDetails?
+    public init(kind: CSMSharedVehicleRecordDataServiceKind, title: String, odometerKm: String? = nil, amount: CSMSharedVehicleMoney? = nil, details: CSMSharedVehicleServiceDetails? = nil) {
         self.kind = kind
         self.title = title
         self.odometerKm = odometerKm
         self.amount = amount
+        self.details = details
     }
 }
 
