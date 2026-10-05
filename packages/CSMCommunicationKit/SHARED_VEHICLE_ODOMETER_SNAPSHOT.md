@@ -1,0 +1,9 @@
+# Shared vehicle odometer snapshot v1
+
+Optional `odometerSnapshot` on CSMSharedVehicle, CSMSharedVehicleSync and CSMSharedVehicleReceipt, with default-nil final init parameter. Capabilities optional `odometerSnapshotVersions`, default-nil init parameter; `supportsOdometerSnapshotV1` only signals supported version, not service/role readiness.
+
+Use public CSMSharedVehicleOdometerSnapshot and Source/Status/RecordKind/Reason types. Call `snapshot.knownValueKm(for:currentVehicle.dataRevision)` only after capability1 and current account/vehicle scope checks. It returns nil for unknown/reviewRequired, unsupported version, invalid source/date/decimal, or mismatched revision. Fractional ISO8601 timestamps are supported. Nil/absent is not zero or personal local mileage. Do not derive from sync items, which can be paged or hidden by readCosts. Historical or idempotent replay receipts must not overwrite a newer authoritative revision.
+
+Server derives from all active odometer/energy/service observations atomically and deterministically; exact kilometers are readings, not additive distance. Conflicting/decreasing/future/invalid/cyclic correction state requires review. Deletion/correction recomputes date/source; an older surviving reading is labeled with its actual observation date. Snapshot has no author/price/notes/GPS. Shared readVehicle scope is distinct from cost visibility, and no private CloudKit history is copied or rewritten.
+
+Mandatory SDK check PASS on COP iPhoneDuo:30appunit,5UI,121packageXCTest(1skip),2SwiftTesting,2accessibility audits. Three new checks cover typed/fractional-date/stale revision, unsupported/unknown/review handling and legacy decode. COP contract/publication/image/database/runtime evidence belongs to integration handoff39; actual phone receipt and snapshot acceptance remains separate.
