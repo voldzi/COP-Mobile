@@ -26,6 +26,23 @@ public enum CSMMobilityCapabilitiesInvitationDelivery: String, Codable, Sendable
     case verified_account_inbox = "verified_account_inbox"
 }
 
+public enum CSMMobilitySharedVehiclesAvailability: String, Codable, Sendable {
+    case ready, unavailable, disabled
+}
+public enum CSMMobilityDispatchAvailability: String, Codable, Sendable {
+    case ready, recovering, unavailable, disabled
+}
+public struct CSMMobilityServiceAvailability: Codable, Sendable {
+    public let sharedVehicles: CSMMobilitySharedVehiclesAvailability
+    public let dispatch: CSMMobilityDispatchAvailability
+    public let checkedAt: String
+    public init(sharedVehicles: CSMMobilitySharedVehiclesAvailability, dispatch: CSMMobilityDispatchAvailability, checkedAt: String) {
+        self.sharedVehicles = sharedVehicles
+        self.dispatch = dispatch
+        self.checkedAt = checkedAt
+    }
+}
+
 public struct CSMMobilityCapabilities: Codable, Sendable {
     public let contractVersion: CSMMobilityCapabilitiesContractVersion
     public let sharedVehiclesEnabled: Bool
@@ -37,7 +54,9 @@ public struct CSMMobilityCapabilities: Codable, Sendable {
     public let currencies: [CSMMobilityCapabilitiesCurrenciesItem]
     public let serverTimestamp: String
     public let invitationDelivery: CSMMobilityCapabilitiesInvitationDelivery
-    public init(contractVersion: CSMMobilityCapabilitiesContractVersion, sharedVehiclesEnabled: Bool, dispatchEnabled: Bool, maxVehicleMembers: Int, maxGroupMembers: Int, registration: CSMMobilityCapabilitiesRegistration, dispatchTransport: CSMMobilityCapabilitiesDispatchTransport, currencies: [CSMMobilityCapabilitiesCurrenciesItem], serverTimestamp: String, invitationDelivery: CSMMobilityCapabilitiesInvitationDelivery) {
+    /// Configuration flags are not readiness. nil from an older server means unknown.
+    public let serviceAvailability: CSMMobilityServiceAvailability?
+    public init(contractVersion: CSMMobilityCapabilitiesContractVersion, sharedVehiclesEnabled: Bool, dispatchEnabled: Bool, maxVehicleMembers: Int, maxGroupMembers: Int, registration: CSMMobilityCapabilitiesRegistration, dispatchTransport: CSMMobilityCapabilitiesDispatchTransport, currencies: [CSMMobilityCapabilitiesCurrenciesItem], serverTimestamp: String, invitationDelivery: CSMMobilityCapabilitiesInvitationDelivery, serviceAvailability: CSMMobilityServiceAvailability? = nil) {
         self.contractVersion = contractVersion
         self.sharedVehiclesEnabled = sharedVehiclesEnabled
         self.dispatchEnabled = dispatchEnabled
@@ -48,6 +67,7 @@ public struct CSMMobilityCapabilities: Codable, Sendable {
         self.currencies = currencies
         self.serverTimestamp = serverTimestamp
         self.invitationDelivery = invitationDelivery
+        self.serviceAvailability = serviceAvailability
     }
 }
 
