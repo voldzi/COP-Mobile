@@ -239,6 +239,11 @@ final class ProductionOIDCAuthSession: AuthSessionManaging {
     }
 
     func signIn(forceAuthentication: Bool) async throws {
+        try await signIn(forceAuthentication: forceAuthentication, loginHint: nil)
+    }
+
+    func signIn(forceAuthentication: Bool, loginHint: String?) async throws {
+        let hint = try validatedCOPLoginHint(loginHint)
         let discovery = try await discoveryLoader.load()
         let tokenRequest = try await authenticator.authenticate(
             discovery: discovery,
@@ -246,7 +251,8 @@ final class ProductionOIDCAuthSession: AuthSessionManaging {
             redirectScheme: redirectScheme,
             scope: scope,
             anchor: nil,
-            forceAuthentication: forceAuthentication
+            forceAuthentication: forceAuthentication,
+            loginHint: hint
         )
         let tokens = try await tokenExchanger.exchange(tokenRequest, tokenEndpoint: discovery.tokenEndpoint)
         try await tokenLifecycle.saveTokens(tokens)

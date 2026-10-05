@@ -1,0 +1,13 @@
+# COP self profile / Jízda Já
+
+Public `CSMCOPAccountProfile`: verified issuer/subjectId/displayName/email/emailVerified, canonical COP avatarDataUrl/computed avatarData, revision64hex, updatedAt/serverTimestamp and cop-account-profile-v1 contractVersion. No tokens or account UUID derived from email. Host binds issuer+subject+SDK sessionScope to its existing Passenger.cloudID; human requires a passenger marked Já before login. Never upload another passenger's photo.
+
+APIs: `mobilitySignIn(loginHint: String? = nil, switchAccount: Bool = false)`; `copAccountProfile(expectedScope:)`; `copAccountAvatarSave(imageData:expectedRevision:expectedScope:)`; `copAccountAvatarRemove(expectedRevision:expectedScope:)`. All profile calls return CSMCOPAccountProfile. Use explicit save/remove confirmation, reload and confirm again on HTTP412. Existing error CSMMobilityServiceFailure carries statusCode; no automatic conflict retry.503 means unavailable profile, never invalidate a working chat for mobility/profile outage.
+
+Optional `CSMCommunicationHost(onAuthenticationRequested:)` callback .signIn/.switchAccount routes to host sole profile. Nil preserves existing login/unlock/E2EE behavior. Normal same-account sign-in also refreshes communication bootstrap; account switch remains explicit. PKCE/state/nonce unchanged. Validated email hint≤254UTF8bytes, no controls; neither persisted nor logged, never used as identity. Registration depends on the existing IdP page, not SDK.
+
+Image preparation outside mainActor:≤10MiB input/50Mpix/one frame; fresh≤512px JPEG≤180000bytes without source metadata. Check cancellation and session generation/scope again before transport. Private authenticated transport rejects redirects and stale scope before/after network response; validates returned identity/revision/avatar. Canonical server source is existing COP operatorProfile avatar, not Matrix or IdP avatar. New server writes additionally sanitize≤1024px JPEG/PNG to metadata-freePNG≤512px/180000bytes. LegacyPNG/JPEG/WebP reading remains bounded250000characters. Matrix cache projection is not synchronously rewritten.
+
+Server binding OpenAPI: GET /api/v1/me/profile, PATCH /api/v1/me/profile/avatar, owner from verified OIDC, If-Match quoted revision, body only avatarDataUrl or null. No memory fallback. Existing preference PUT compatibility retained, hence old full-preference clients do not gain the new revision guarantee.
+
+Verified: scripts/check.sh30appunit/5appUI/114packageXCTest(1skip)/2SwiftTesting/2accessibilityaudits; added identity/hint/metadata tests pass. Isolated real PostgreSQL CAS test and6API boundary tests pass on COP. Actual logged-in avatar/login/account-switch device acceptance remains separate; no real user data changed.

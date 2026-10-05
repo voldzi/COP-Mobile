@@ -298,7 +298,8 @@ enum OIDCAuthorizationRequestBuilder {
         nonce: String,
         challenge: String,
         challengeMethod: String,
-        policy: OIDCInteractiveAuthenticationPolicy
+        policy: OIDCInteractiveAuthenticationPolicy,
+        loginHint: String? = nil
     ) throws -> URL {
         guard var components = URLComponents(url: authorizationEndpoint, resolvingAgainstBaseURL: false) else {
             throw CSMServiceError.invalidState("Invalid OIDC authorization endpoint.")
@@ -313,6 +314,9 @@ enum OIDCAuthorizationRequestBuilder {
             URLQueryItem(name: "code_challenge", value: challenge),
             URLQueryItem(name: "code_challenge_method", value: challengeMethod)
         ]
+        if let hint = try validatedCOPLoginHint(loginHint) {
+            components.queryItems?.append(URLQueryItem(name: "login_hint", value: hint))
+        }
         if let prompt = policy.prompt {
             components.queryItems?.append(URLQueryItem(name: "prompt", value: prompt))
         }
@@ -338,7 +342,8 @@ final class OIDCWebAuthenticator: NSObject, ASWebAuthenticationPresentationConte
         redirectScheme: String,
         scope: String,
         anchor: ASPresentationAnchor?,
-        forceAuthentication: Bool = false
+        forceAuthentication: Bool = false,
+        loginHint: String? = nil
     ) async throws -> OIDCTokenRequest {
         let pkce = try PKCEChallenge.generate()
         let redirectURI = "\(redirectScheme)://oauth/callback"
@@ -358,7 +363,8 @@ final class OIDCWebAuthenticator: NSObject, ASWebAuthenticationPresentationConte
             nonce: nonce,
             challenge: pkce.challenge,
             challengeMethod: pkce.method,
-            policy: policy
+            policy: policy,
+            loginHint: loginHint
         )
 
         let callbackURL = try await callbackURL(
@@ -418,3 +424,17 @@ final class OIDCWebAuthenticator: NSObject, ASWebAuthenticationPresentationConte
     }
 }
 #endif
+
+/// Presentation hint only; never an account identifier or credential.
+func validatedCOPLoginHint(_ value: String?) throws -> String? {
+    guard let value else { return nil }
+    let hint = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    if hint.isEmpty { return nil }
+    let parts = hint.split(separator: "@", omittingEmptySubsequences: false)
+    guard hint.utf8.count <= 254, !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+          !hint.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.contains($0) }),
+          parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else {
+        throw CSMServiceError.invalidState("Zadejte platný e-mail pro předvyplnění přihlášení.")
+    }
+    return hint
+}

@@ -441,12 +441,12 @@ final class CommunicationModel {
         )
     }
 
-    func signIn(forceAuthentication: Bool = false) async {
+    func signIn(forceAuthentication: Bool = false, loginHint: String? = nil) async {
         authState = .signingIn
         isLoading = true
         defer { isLoading = false }
         do {
-            try await authSession.signIn(forceAuthentication: forceAuthentication)
+            try await authSession.signIn(forceAuthentication: forceAuthentication, loginHint: loginHint)
             authState = .signedIn
             await bootstrapCommunication()
         } catch {

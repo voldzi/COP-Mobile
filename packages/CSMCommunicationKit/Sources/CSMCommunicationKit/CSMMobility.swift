@@ -14,22 +14,28 @@ public extension Notification.Name {
 }
 
 public extension CSMCommunicationRuntime {
+    internal func copSessionGeneration() -> UUID { MobilitySessionGeneration.shared.value }
     func mobilitySessionScope() -> String? {
         guard model.authState == .signedIn, let actor = model.actor else { return nil }
         let issuer = AppConfiguration.fromBundle().oidcIssuer.absoluteString
         return SHA256.hash(data: Data((issuer + "\0" + actor.subjectId).utf8)).map { String(format: "%02x", $0) }.joined()
     }
     /// Opens the existing PKCE IdP page; registration is available only if the IdP offers it.
-    func mobilitySignIn(switchAccount: Bool = false) async {
+    func mobilitySignIn(loginHint: String? = nil, switchAccount: Bool = false) async {
+        do { _ = try validatedCOPLoginHint(loginHint) }
+        catch { model.recordCOPSessionRestoreFailure(error); return }
         if !switchAccount, model.authState == .signedIn, let scope = mobilitySessionScope() {
             let status = await mobilityCOPSessionStatus(expectedScope: scope)
             if status == .authenticationRequired {
                 do { try await mobilityRestoreSession(expectedScope: scope) }
-                catch { model.recordCOPSessionRestoreFailure(error) }
+                catch { model.recordCOPSessionRestoreFailure(error); return }
             }
+            guard status == .ready || status == .authenticationRequired else { return }
+            await model.refreshSession()
+            refreshAccessState(expectedSubjectID: nil)
             return
         }
-        await signIn(expectedSubjectID: nil, switchAccount: switchAccount)
+        await signIn(expectedSubjectID: nil, switchAccount: switchAccount, loginHint: loginHint)
     }
 
     func mobilityCapabilities(expectedScope: String) async throws -> CSMMobilityCapabilities {
@@ -216,7 +222,7 @@ public extension CSMCommunicationRuntime {
         return result
     }
 
-    private func mobilityRequest<Response: Decodable>(path: String, method: String, body: Data?, query: [URLQueryItem], expectedScope: String) async throws -> Response {
+    func mobilityRequest<Response: Decodable>(path: String, method: String, body: Data?, query: [URLQueryItem], expectedScope: String, ifMatch: String? = nil) async throws -> Response {
         let generation = MobilitySessionGeneration.shared.value
         guard mobilitySessionScope() == expectedScope else { throw CSMCOPSessionError(.accountChanged) }
         let configuration = AppConfiguration.fromBundle()
@@ -243,6 +249,7 @@ public extension CSMCommunicationRuntime {
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        if let ifMatch { request.setValue(ifMatch, forHTTPHeaderField: "If-Match") }
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         let config = URLSessionConfiguration.ephemeral; config.urlCache = nil; config.httpCookieStorage = nil
         let session = URLSession(configuration: config, delegate: MobilityNoRedirect(), delegateQueue: nil)

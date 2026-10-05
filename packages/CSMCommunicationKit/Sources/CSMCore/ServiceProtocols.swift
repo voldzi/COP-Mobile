@@ -340,11 +340,16 @@ protocol AuthSessionManaging {
     func canUseExistingSession() async -> Bool
     func signIn() async throws
     func signIn(forceAuthentication: Bool) async throws
+    func signIn(forceAuthentication: Bool, loginHint: String?) async throws
     func signOut() async throws
     func reauthenticate(expectedSubjectID: String) async throws
 }
 
 extension AuthSessionManaging {
+    func signIn(forceAuthentication: Bool, loginHint: String?) async throws {
+        _ = try validatedCOPLoginHint(loginHint)
+        try await signIn(forceAuthentication: forceAuthentication)
+    }
     func reauthenticate(expectedSubjectID: String) async throws {
         throw CSMServiceError.disabled("Obnova přihlášení není v tomto režimu dostupná.")
     }

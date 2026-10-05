@@ -54,6 +54,11 @@ public enum CSMCommunicationLocationShareError: LocalizedError, Sendable {
 /// The host intentionally exposes a single SwiftUI surface instead of Matrix
 /// credentials or internal service objects. Authentication, encrypted stores,
 /// timeline sync and the offline outbox remain owned by this module.
+public enum CSMCommunicationAuthenticationRequest: Equatable, Sendable {
+    case signIn
+    case switchAccount
+}
+
 public struct CSMCommunicationHost: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var runtime = CSMCommunicationRuntime.shared
@@ -62,6 +67,7 @@ public struct CSMCommunicationHost: View {
         (@MainActor @Sendable () async throws -> CSMCommunicationLocation)?
     private let voipDeviceTokenProvider: (@MainActor @Sendable () async -> String?)?
     private let expectedSubjectID: String?
+    private let onAuthenticationRequested: ((CSMCommunicationAuthenticationRequest) -> Void)?
     private let onClose: (() -> Void)?
     private let onOpenCOP: (() -> Void)?
     private let onStartVoiceCall: ((String, String, [String]?, String?) -> Void)?
@@ -73,6 +79,7 @@ public struct CSMCommunicationHost: View {
         voipDeviceTokenProvider: (@MainActor @Sendable () async -> String?)? = nil,
         expectedSubjectID: String? = nil,
         onClose: (() -> Void)? = nil,
+        onAuthenticationRequested: ((CSMCommunicationAuthenticationRequest) -> Void)? = nil,
         onOpenCOP: (() -> Void)? = nil,
         onStartVoiceCall: ((String, String, [String]?, String?) -> Void)? = nil
     ) {
@@ -81,6 +88,7 @@ public struct CSMCommunicationHost: View {
         self.voipDeviceTokenProvider = voipDeviceTokenProvider
         self.expectedSubjectID = expectedSubjectID
         self.onClose = onClose
+        self.onAuthenticationRequested = onAuthenticationRequested
         self.onOpenCOP = onOpenCOP
         self.onStartVoiceCall = onStartVoiceCall
     }
@@ -114,11 +122,13 @@ public struct CSMCommunicationHost: View {
                     EmbeddedChatSignInRequiredView(
                         onClose: onClose,
                         onSignIn: {
+                            if let onAuthenticationRequested { onAuthenticationRequested(.signIn); return }
                             Task {
                                 await runtime.signIn(expectedSubjectID: expectedSubjectID)
                             }
                         },
                         onSwitchAccount: {
+                            if let onAuthenticationRequested { onAuthenticationRequested(.switchAccount); return }
                             Task {
                                 await runtime.signIn(
                                     expectedSubjectID: expectedSubjectID,
@@ -131,6 +141,7 @@ public struct CSMCommunicationHost: View {
                     EmbeddedChatAccountMismatchView(
                         onClose: onClose,
                         onSwitchAccount: {
+                            if let onAuthenticationRequested { onAuthenticationRequested(.switchAccount); return }
                             Task {
                                 await runtime.signIn(
                                     expectedSubjectID: expectedSubjectID,
@@ -503,7 +514,8 @@ public final class CSMCommunicationRuntime {
 
     func signIn(
         expectedSubjectID: String?,
-        switchAccount: Bool = false
+        switchAccount: Bool = false,
+        loginHint: String? = nil
     ) async {
         preparationGeneration &+= 1
         await startIfNeeded()
@@ -511,11 +523,12 @@ public final class CSMCommunicationRuntime {
             await model.signOut()
         }
         guard model.authState != .signedIn else {
+            await model.refreshSession()
             refreshAccessState(expectedSubjectID: expectedSubjectID)
             return
         }
         accessState = .checking
-        await model.signIn(forceAuthentication: switchAccount)
+        await model.signIn(forceAuthentication: switchAccount, loginHint: loginHint)
         refreshAccessState(expectedSubjectID: expectedSubjectID)
         guard accessState == .ready else { return }
         await model.appDidBecomeActive()
