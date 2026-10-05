@@ -16,6 +16,11 @@ struct CSMDriverRouteRequest: Encodable, Sendable {
     var alternatives: Int
     var includeRoadAttributes: Bool?
     var vehicle: CSMRouteVehicle?
+    var trip: CSMRoadTrip? = nil
+    var avoid: [String]? = nil
+    var via: [CSMRoutePoint]? = nil
+    var departureTime: String? = nil
+    var vehicleProfile: CSMMappedVehicleProfile? = nil
 }
 
 /// Actual recorded dimensions only. Unknown values must remain nil.
@@ -41,6 +46,11 @@ public struct CSMRouteVehicle: Codable, Sendable {
 }
 
 public struct CSMDriverRouteResponse: Codable, Sendable {
+    public let query: CSMRoutingQuery?
+    var knownClosuresVerified = false
+    var mappedProfileVerified = false
+    private enum CodingKeys: String, CodingKey { case query, generatedAt, coverage, routes, traffic, warnings, features }
+    var features: [CSMMappedRouteFeature]? = nil
     public let generatedAt: Date?
     public let coverage: CSMRouteCoverage?
     public let routes: [CSMDriverRoute]
@@ -52,6 +62,8 @@ public struct CSMDriverRouteResponse: Codable, Sendable {
     }
 
     public func navigationRoutes() throws -> [CSMDriverRoute] {
+        try requireCurrentKnownClosures()
+        try requireValidMappedProfile()
         let usable = routes.prefix(3).filter { $0.isNavigable }.sorted { ($0.rank ?? 1) < ($1.rank ?? 1) }
         guard !usable.isEmpty else { throw CSMDriverRoutingError.noNavigableRoute }
         return usable
@@ -90,7 +102,24 @@ public struct CSMRouteRestriction: Codable, Sendable {
     public let source: String
 }
 
+public struct CSMRouteTunnelInterval: Codable, Sendable {
+    public let beginShapeIndex: Int
+    public let endShapeIndex: Int
+    public let direction: String
+}
+
+public struct CSMRouteTunnelAttributes: Codable, Sendable {
+    public let state: String
+    public let reason: String?
+    public let routeId: String
+    public let source: String
+    public let routingDataset: CSMRoutingDataset?
+    public let observedAt: Date
+    public let intervals: [CSMRouteTunnelInterval]
+}
+
 public struct CSMRouteRoadAttributes: Codable, Sendable {
+    public let tunnels: CSMRouteTunnelAttributes?
     public let state: String
     public let reason: String?
     public let source: String
@@ -135,6 +164,9 @@ public struct CSMDriverRoute: Codable, Sendable {
     public let warnings: [String]?
     public let roadAttributes: CSMRouteRoadAttributes?
     public let vehicleAssessment: CSMRouteVehicleAssessment?
+    public let assessment: CSMRoadTripAssessment?
+    public let knownClosures: CSMKnownRoadClosures?
+    public let mappedProfileAssessment: CSMMappedProfileAssessment?
 
     public var isNavigable: Bool {
         guard geometry.isValid, distanceM.isFinite, distanceM > 0,
@@ -166,6 +198,7 @@ public struct CSMRouteStep: Codable, Sendable {
     public let roadName: String?
     public let maneuverType: Int?
     public let roundaboutExitCount: Int?
+    public let roundabout: CSMRouteRoundabout?
     public let lanes: [CSMRouteLane]?
     /// Indices in the complete response route geometry, including joined legs.
     public let beginShapeIndex: Int?
@@ -226,10 +259,18 @@ public struct CSMLiveSpeeds: Codable, Sendable {
 public enum CSMDriverRoutingError: LocalizedError {
     case invalidCoordinates
     case invalidVehicle
+    case invalidTrip
+    case safetyRequirementsUnavailable
+    case invalidKnownClosures
+    case invalidMappedProfile
     case noNavigableRoute
     public var errorDescription: String? {
         switch self {
         case .invalidCoordinates: "Pro výpočet trasy není dostupná platná poloha."
+        case .invalidMappedProfile: "Navigační profil nebyl platně ověřen pro tuto trasu. Náhradní neomezená trasa není povolena."
+        case .invalidTrip: "Parametry cesty nejsou úplné nebo platné."
+        case .safetyRequirementsUnavailable: "Server nyní nemůže potvrdit požadovaná omezení cesty. Náhradní neomezená trasa není povolena."
+        case .invalidKnownClosures: "Ověření známých uzavírek není platné pro tuto trasu. Obnovte výpočet; náhradní trasa bez těchto omezení není povolena."
         case .invalidVehicle: "Rozměry nebo hmotnost vybraného vozidla nejsou platné."
         case .noNavigableRoute: "COP nyní neposkytl úplnou silniční trasu s navigačními pokyny. Zkuste výpočet znovu."
         }
@@ -247,15 +288,15 @@ public extension CSMCommunicationRuntime {
         guard from.isValid, to.isValid else { throw CSMDriverRoutingError.invalidCoordinates }
         guard vehicle?.isValid ?? true else { throw CSMDriverRoutingError.invalidVehicle }
         await startIfNeeded()
-        let response = try await driverReportService.drivingRoutes(
-            CSMDriverRouteRequest(
+        let request = CSMDriverRouteRequest(
                 from: from,
                 to: to,
                 alternatives: min(3, max(1, alternatives)),
                 includeRoadAttributes: includeRoadAttributes ? true : nil,
                 vehicle: vehicle
             )
-        )
+        let raw = try await driverReportService.drivingRoutes(request)
+        let response = try await Task.detached { try raw.verifyingKnownClosures(for: request).verifyingMappedProfile(request) }.value
         // Preserve a typed outside-coverage/empty result so the host can start
         // real MapKit routing rather than losing the reason in a generic error.
         if !response.requiresMapKitFallback {

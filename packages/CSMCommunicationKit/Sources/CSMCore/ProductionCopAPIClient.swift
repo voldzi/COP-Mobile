@@ -3,6 +3,9 @@ import Foundation
 
 struct ProductionCopAPIClient: CopAPIClientProtocol {
     var http: HTTPClient
+    func drivingCapabilities() async throws -> CSMDriverRoutingCatalog {
+        try await http.get("/api/v1/routing/profiles")
+    }
 
     func drivingRoutes(_ request: CSMDriverRouteRequest) async throws -> CSMDriverRouteResponse {
         try await http.post("/api/v1/routing/route", body: request)

@@ -64,3 +64,5 @@ ani Git dependency původní aplikace.
 - [Shared profile, audit and owner recovery](SHARED_VEHICLE_AUDIT_PROFILE.md).
 
 See [verified read-only Matrix identities and caller presentation](VERIFIED_MATRIX_IDENTITIES.md). New host builds must pin the verified release; no host-owned provisioning or guessed identity aliases.
+
+For the full Jízda local dependency use the [complete published integration SDK](JIZDA_COMPLETE_SDK.md); identity-only3f is not sufficient for all previously integrated Jízda APIs.

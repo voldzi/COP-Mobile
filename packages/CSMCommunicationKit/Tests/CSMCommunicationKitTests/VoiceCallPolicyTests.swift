@@ -3,6 +3,15 @@ import XCTest
 
 @testable import CSMVoiceCallKit
 
+final class VoiceCallDistributionPolicyTests: XCTestCase {
+  func testOnlyExplicitGlobalDistributionEnablesSystemCalling() {
+    XCTAssertEqual(VoiceCallDistributionPolicy.mode(for: "global"), .system)
+    XCTAssertEqual(VoiceCallDistributionPolicy.mode(for: "china"), .inApp)
+    XCTAssertEqual(VoiceCallDistributionPolicy.mode(for: nil), .inApp)
+    XCTAssertEqual(VoiceCallDistributionPolicy.mode(for: "unexpected"), .inApp)
+  }
+}
+
 final class VoiceCallPushPayloadTests: XCTestCase {
   func testIncomingVoiceCallPushMatchesCSMMessagingContract() throws {
     let payload = try XCTUnwrap(

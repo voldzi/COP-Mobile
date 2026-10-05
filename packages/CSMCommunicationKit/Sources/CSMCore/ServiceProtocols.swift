@@ -1,6 +1,7 @@
 import Foundation
 
 protocol CopAPIClientProtocol: Sendable {
+    func drivingCapabilities() async throws -> CSMDriverRoutingCatalog
     func drivingRoutes(_ request: CSMDriverRouteRequest) async throws -> CSMDriverRouteResponse
     func bootstrap(seconds: Int) async throws -> MobileBootstrap
     func offlineSnapshot(seconds: Int) async throws -> MobileOfflineSnapshot
@@ -49,6 +50,9 @@ extension CopAPIClientProtocol {
         throw CSMServiceError.unavailable("Ověřené identity konverzace nejsou dostupné.")
     }
 
+    func drivingCapabilities() async throws -> CSMDriverRoutingCatalog {
+        throw CSMDriverRoutingError.safetyRequirementsUnavailable
+    }
     func drivingRoutes(_ request: CSMDriverRouteRequest) async throws -> CSMDriverRouteResponse {
         throw CSMDriverRoutingError.noNavigableRoute
     }

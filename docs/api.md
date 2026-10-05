@@ -486,3 +486,5 @@ Shared private mobility purpose-scoped SDK and receipts: [handoff](jizda-shared-
 `CSMCommunicationRuntime.mobilityCOPSessionStatus(expectedScope:)` checks OIDC availability separately from Matrix chat. `mobilityRestoreSession(expectedScope:)` is an explicit same-account PKCE renewal without Matrix logout. Use `CSMMobilityFailureKind.classify(error)` for credential-free UI classification; HTTP failures retain their status, code and correlation ID. See [the exact interface and acceptance limits](cop-oidc-session-handoff.md). No REST endpoint or wire contract changed.
 
 Consumed additive COP identity lookup and call.peer: [package handoff](../packages/CSMCommunicationKit/VERIFIED_MATRIX_IDENTITIES.md). COP binding OpenAPI remains authoritative.
+
+Whole Jízda integration requires the complete SDK union, not only identity3f: [handoff](../packages/CSMCommunicationKit/JIZDA_COMPLETE_SDK.md).

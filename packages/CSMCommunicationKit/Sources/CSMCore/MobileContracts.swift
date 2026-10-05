@@ -4237,7 +4237,7 @@ struct CSMMessagingDeviceRegistrationRequest: Codable, Equatable, Sendable {
     var appInstanceId: String
     var capabilities: Capabilities
     var deviceToken: String
-    var voipDeviceToken: String
+    var voipDeviceToken: String?
     var locale: String
     var platform: String
     var preferences: Preferences
@@ -4249,6 +4249,7 @@ struct CSMMessagingDeviceRegistrationRequest: Codable, Equatable, Sendable {
         var e2ee: Bool
         var liveActivities: Bool
         var voip: Bool
+        var callPresentation: String
     }
 
     struct Preferences: Codable, Equatable, Sendable {

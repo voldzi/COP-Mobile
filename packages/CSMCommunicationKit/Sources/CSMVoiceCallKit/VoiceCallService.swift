@@ -326,6 +326,7 @@ public final class VoiceCallService:
   NSObject, @preconcurrency CXProviderDelegate, @preconcurrency PKPushRegistryDelegate
 {
   public static let shared = VoiceCallService()
+  public let presentationMode: VoiceCallPresentationMode
 
   public static func recordDiagnostic(_ event: String, result: String? = nil) {
     CallDiagnosticStore.record(event, result: result)
@@ -350,13 +351,13 @@ public final class VoiceCallService:
     presentation.clearError()
   }
 
-  private let provider: CXProvider
-  private let callController = CXCallController()
+  private var provider: CXProvider?
+  private var callController: CXCallController?
   private let logger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "cz.voldzi.copmobile",
     category: "native-voice-call"
   )
-  private var registry: PKPushRegistry!
+  private var registry: PKPushRegistry?
   private var calls: [UUID: CallContext] = [:]
   private var activeRoom: Room?
   private var callStartInFlight = false
@@ -381,25 +382,34 @@ public final class VoiceCallService:
   }
 
   private override init() {
-    let configuration = CXProviderConfiguration()
-    configuration.includesCallsInRecents = false
-    configuration.maximumCallGroups = 1
-    configuration.maximumCallsPerCallGroup = 1
-    configuration.supportedHandleTypes = [.generic]
-    configuration.supportsVideo = false
+    presentationMode = VoiceCallDistributionPolicy.currentMode
     pushTokenState = VoiceCallPushTokenState(
-      cachedToken: VoiceCallPushTokenStore.load()
+      cachedToken: presentationMode == .system ? VoiceCallPushTokenStore.load() : nil
     )
-    provider = CXProvider(configuration: configuration)
     super.init()
 
     AudioManager.shared.audioSession.isAutomaticConfigurationEnabled = false
     try? AudioManager.shared.setEngineAvailability(.none)
 
-    provider.setDelegate(self, queue: .main)
-    registry = PKPushRegistry(queue: .main)
-    registry.delegate = self
-    registry.desiredPushTypes = [.voIP]
+    if presentationMode == .system {
+      let configuration = CXProviderConfiguration()
+      configuration.includesCallsInRecents = false
+      configuration.maximumCallGroups = 1
+      configuration.maximumCallsPerCallGroup = 1
+      configuration.supportedHandleTypes = [.generic]
+      configuration.supportsVideo = false
+      let provider = CXProvider(configuration: configuration)
+      self.provider = provider
+      callController = CXCallController()
+      provider.setDelegate(self, queue: .main)
+      let registry = PKPushRegistry(queue: .main)
+      self.registry = registry
+      registry.delegate = self
+      registry.desiredPushTypes = [.voIP]
+    } else {
+      VoiceCallPushTokenStore.remove()
+      CallDiagnosticStore.record("voice.in-app.no-callkit-pushkit")
+    }
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(proximityStateDidChange),
@@ -412,6 +422,12 @@ public final class VoiceCallService:
       name: AVAudioSession.routeChangeNotification,
       object: AVAudioSession.sharedInstance()
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(audioSessionWasInterrupted(_:)),
+      name: AVAudioSession.interruptionNotification,
+      object: AVAudioSession.sharedInstance()
+    )
     CallDiagnosticStore.record("voice.native.initialized")
     if pushTokenState.cachedToken != nil {
       CallDiagnosticStore.record("pushkit.token.cached-awaiting-confirmation")
@@ -419,6 +435,10 @@ public final class VoiceCallService:
   }
 
   public func prepareForApplicationLaunch() {
+    guard presentationMode == .system, let registry else {
+      CallDiagnosticStore.record("voice.in-app.launch-prepared")
+      return
+    }
     registry.delegate = self
     registry.desiredPushTypes = [.voIP]
     synchronizeCurrentPushToken()
@@ -427,6 +447,9 @@ public final class VoiceCallService:
   }
 
   public func currentPushToken() async throws -> String {
+    guard presentationMode == .system else {
+      throw VoiceCallPushRegistrationError.registrationFailed
+    }
     synchronizeCurrentPushToken()
     if let pushToken = pushTokenState.tokenForServerRegistration {
       return pushToken
@@ -450,24 +473,33 @@ public final class VoiceCallService:
   }
 
   public func currentPushTokenIfAvailable() async -> String? {
+    guard presentationMode == .system else { return nil }
     synchronizeCurrentPushToken()
     return pushTokenState.tokenForServerRegistration
   }
 
   public func applicationDidBecomeActive() {
-    synchronizeCurrentPushToken()
-    recoverPushRegistrationIfNeeded()
+    if presentationMode == .inApp { resumeInAppAudioIfNeeded() }
+    if presentationMode == .system {
+      synchronizeCurrentPushToken()
+      recoverPushRegistrationIfNeeded()
+    }
     foregroundReconciliationTask?.cancel()
     foregroundReconciliationTask = Task { @MainActor [weak self] in
       try? await Task.sleep(for: .milliseconds(350))
       guard !Task.isCancelled, let self else { return }
-      self.synchronizeCurrentPushToken()
+      if self.presentationMode == .system { self.synchronizeCurrentPushToken() }
       await CSMCommunicationNotifications.prepareDeviceRegistration(
         voipDeviceTokenProvider: self.currentPushTokenIfAvailable
       )
       guard !Task.isCancelled else { return }
       await self.reconcileActiveIncomingCalls()
     }
+  }
+
+  public func incomingUserNotificationReceived() {
+    guard presentationMode == .inApp else { return }
+    Task { @MainActor [weak self] in await self?.reconcileActiveIncomingCalls() }
   }
 
   public func startVoiceCall(
@@ -512,9 +544,10 @@ public final class VoiceCallService:
         guard let uuid = UUID(uuidString: session.call.callId) else {
           throw CSMVoiceCallControlError.mediaUnavailable
         }
-        if registerWithSystemCallUI {
+        if registerWithSystemCallUI && self.presentationMode == .system {
           self.requestStartCall(uuid: uuid, title: normalizedTitle)
         } else {
+          try self.activateInAppAudio(action: "start")
           await self.connectMedia(session: session, uuid: uuid)
         }
       } catch {
@@ -525,19 +558,39 @@ public final class VoiceCallService:
 
   func answerActiveCall() {
     guard let call = presentation.activeCall, call.direction == .incoming else { return }
-    requestCallKitAction(CXAnswerCallAction(call: call.id))
+    if presentationMode == .system {
+      requestCallKitAction(CXAnswerCallAction(call: call.id))
+    } else {
+      Task { @MainActor [weak self] in await self?.acceptAndConnect(uuid: call.id) }
+    }
   }
 
   func endActiveCall() {
     guard let call = presentation.activeCall else { return }
-    requestCallKitAction(CXEndCallAction(call: call.id))
+    if presentationMode == .system {
+      requestCallKitAction(CXEndCallAction(call: call.id))
+    } else if let context = calls[call.id] {
+      let action: CSMVoiceCallAction =
+        context.call.direction == .incoming && !context.answered ? .decline
+        : context.call.phase == .ringing && context.call.direction == .outgoing ? .cancel : .end
+      tearDown(uuid: call.id, reportServer: true, action: action)
+    }
   }
 
   func toggleMute() {
     guard let call = presentation.activeCall else { return }
-    requestCallKitAction(
-      CXSetMutedCallAction(call: call.id, muted: !presentation.isMuted)
-    )
+    if presentationMode == .system {
+      requestCallKitAction(CXSetMutedCallAction(call: call.id, muted: !presentation.isMuted))
+    } else if var context = calls[call.id] {
+      context.muted.toggle()
+      calls[call.id] = context
+      presentation.setMuted(context.muted)
+      let muted = context.muted
+      Task { @MainActor [weak self] in
+        guard let room = self?.activeRoom else { return }
+        _ = try? await room.localParticipant.setMicrophone(enabled: !muted)
+      }
+    }
   }
 
   func toggleSpeaker() {
@@ -587,6 +640,10 @@ public final class VoiceCallService:
   }
 
   private func receive(payload: [AnyHashable: Any], completion: @escaping () -> Void) {
+    guard presentationMode == .system, let provider else {
+      completion()
+      return
+    }
     CallDiagnosticStore.record("pushkit.incoming.received")
     guard let push = VoiceCallPushPayload(dictionary: payload) else {
       CallDiagnosticStore.record("pushkit.rejected", result: "invalid-payload")
@@ -682,7 +739,7 @@ public final class VoiceCallService:
   }
 
   private func synchronizeCurrentPushToken() {
-    guard let data = registry.pushToken(for: .voIP) else { return }
+    guard presentationMode == .system, let data = registry?.pushToken(for: .voIP) else { return }
     let token = data.map { String(format: "%02x", $0) }.joined()
     guard !token.isEmpty else { return }
     acceptPushToken(token, source: "registry")
@@ -703,11 +760,12 @@ public final class VoiceCallService:
       try? await Task.sleep(for: .seconds(1))
       guard !Task.isCancelled, let self else { return }
       self.synchronizeCurrentPushToken()
-      guard self.pushTokenState.needsRegistrationRecovery else { return }
+      guard self.presentationMode == .system, self.pushTokenState.needsRegistrationRecovery,
+        let registry = self.registry else { return }
       CallDiagnosticStore.record("pushkit.registration.recovery.started")
-      self.registry.desiredPushTypes = []
+      registry.desiredPushTypes = []
       await Task.yield()
-      self.registry.desiredPushTypes = [.voIP]
+      registry.desiredPushTypes = [.voIP]
       try? await Task.sleep(for: .seconds(12))
       guard !Task.isCancelled else { return }
       self.synchronizeCurrentPushToken()
@@ -741,13 +799,14 @@ public final class VoiceCallService:
         calls[uuid] = CallContext(
           call: call,
           avatarDataURL: nil,
-          registeredWithCallKit: true,
+          registeredWithCallKit: presentationMode == .system,
           answered: false,
           muted: false,
           participants: []
         )
         publish(uuid)
         startStatePolling(uuid: uuid)
+        guard let provider else { continue }
         let update = CXCallUpdate()
         update.localizedCallerName = call.presentationTitle
         update.remoteHandle = CXHandle(type: .generic, value: call.presentationTitle)
@@ -895,6 +954,7 @@ public final class VoiceCallService:
   }
 
   private func requestCallKitAction(_ action: CXAction) {
+    guard presentationMode == .system, let callController else { return }
     callController.request(CXTransaction(action: action)) { [weak self] error in
       guard let error else { return }
       Task { @MainActor in
@@ -952,11 +1012,16 @@ public final class VoiceCallService:
       guard await AVAudioApplication.requestRecordPermission() else {
         throw CSMVoiceCallControlError.mediaUnavailable
       }
+      if presentationMode == .inApp { try activateInAppAudio(action: "answer") }
       let accepted = try await CSMCommunicationRuntime.shared.transitionVoiceCall(
         callID: context.call.callId,
         action: .accept,
         expectedRevision: context.call.revision
       )
+      if var current = calls[uuid] {
+        current.answered = true
+        calls[uuid] = current
+      }
       apply(accepted, uuid: uuid)
       await connectMedia(session: accepted, uuid: uuid)
     } catch {
@@ -966,7 +1031,7 @@ public final class VoiceCallService:
       if let session = try? await CSMCommunicationRuntime.shared.voiceCall(
         callID: context.call.callId
       ), answeredElsewhere(session.call) {
-        provider.reportCall(with: uuid, endedAt: Date(), reason: .answeredElsewhere)
+        provider?.reportCall(with: uuid, endedAt: Date(), reason: .answeredElsewhere)
         tearDown(uuid: uuid, reportServer: false)
         return
       }
@@ -1071,7 +1136,7 @@ public final class VoiceCallService:
     calls[uuid] = context
     publish(uuid)
     if context.call.direction == .outgoing {
-      provider.reportOutgoingCall(with: uuid, connectedAt: Date())
+      provider?.reportOutgoingCall(with: uuid, connectedAt: Date())
     }
     Task { @MainActor [weak self] in
       guard let self, let latest = self.calls[uuid] else { return }
@@ -1114,7 +1179,7 @@ public final class VoiceCallService:
   private func apply(_ session: CSMVoiceCallSession, uuid: UUID) {
     guard var context = calls[uuid] else { return }
     if !context.answered && answeredElsewhere(session.call) {
-      provider.reportCall(with: uuid, endedAt: Date(), reason: .answeredElsewhere)
+      provider?.reportCall(with: uuid, endedAt: Date(), reason: .answeredElsewhere)
       tearDown(uuid: uuid, reportServer: false)
       return
     }
@@ -1125,7 +1190,7 @@ public final class VoiceCallService:
       cachedMedia[session.call.callId] = media
     }
     if session.call.phase.isTerminal {
-      provider.reportCall(
+      provider?.reportCall(
         with: uuid,
         endedAt: session.call.endedAt ?? Date(),
         reason: callKitEndReason(session.call.phase)
@@ -1205,7 +1270,7 @@ public final class VoiceCallService:
     failed.call = replacingPhase(context.call, phase: .failed, connectedAt: nil)
     calls[uuid] = failed
     publish(uuid)
-    provider.reportCall(with: uuid, endedAt: Date(), reason: .failed)
+    provider?.reportCall(with: uuid, endedAt: Date(), reason: .failed)
     Task { @MainActor [weak self] in
       _ = try? await CSMCommunicationRuntime.shared.transitionVoiceCall(
         callID: context.call.callId,
@@ -1244,6 +1309,12 @@ public final class VoiceCallService:
       presentation.clear()
     }
     setProximityMonitoring(false)
+    if presentationMode == .inApp && audioActivated {
+      try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+      try? AudioManager.shared.setEngineAvailability(.none)
+      audioActivated = false
+      presentation.setAudioActive(false)
+    }
 
     if reportServer {
       Task { @MainActor [weak self] in
@@ -1307,6 +1378,23 @@ public final class VoiceCallService:
     }
   }
 
+  private func activateInAppAudio(action: String) throws {
+    let session = AVAudioSession.sharedInstance()
+    try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP])
+    try session.setActive(true)
+    do {
+      try AudioManager.shared.setEngineAvailability(.default)
+    } catch {
+      try? session.setActive(false, options: .notifyOthersOnDeactivation)
+      throw error
+    }
+    audioActivated = true
+    presentation.setAudioActive(true)
+    updateAudioRoute(using: session)
+    updateProximityPolicy()
+    CallDiagnosticStore.record("audio.in-app.activated", result: action)
+  }
+
   @objc private func proximityStateDidChange() {
     presentation.setProximityCovered(
       proximityMonitoringEnabled && UIDevice.current.proximityState
@@ -1315,6 +1403,38 @@ public final class VoiceCallService:
 
   @objc private func audioRouteDidChange() {
     updateAudioRoute(using: AVAudioSession.sharedInstance())
+  }
+
+  @objc private func audioSessionWasInterrupted(_ notification: Notification) {
+    guard presentationMode == .inApp, let value = (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? NSNumber)?.uintValue,
+      let type = AVAudioSession.InterruptionType(rawValue: value), activeRoomCallUUID != nil
+    else { return }
+    switch type {
+    case .began:
+      audioActivated = false
+      presentation.setAudioActive(false)
+      try? AudioManager.shared.setEngineAvailability(.none)
+      microphonePublished = false
+      setProximityMonitoring(false)
+      CallDiagnosticStore.record("audio.in-app.interrupted")
+    case .ended:
+      let optionsValue = (notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? NSNumber)?.uintValue ?? 0
+      let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+      if options.contains(.shouldResume) { resumeInAppAudioIfNeeded() }
+    @unknown default:
+      break
+    }
+  }
+
+  private func resumeInAppAudioIfNeeded() {
+    guard presentationMode == .inApp, !audioActivated, activeRoomCallUUID != nil else { return }
+    do {
+      try activateInAppAudio(action: "resume")
+      Task { @MainActor [weak self] in await self?.publishMicrophoneIfReady() }
+    } catch {
+      CallDiagnosticStore.record("audio.in-app.resume-failed", result: error.localizedDescription)
+      logger.warning("In-app audio resume failed: \(error.localizedDescription, privacy: .public)")
+    }
   }
 
   private func updateProximityPolicy() {

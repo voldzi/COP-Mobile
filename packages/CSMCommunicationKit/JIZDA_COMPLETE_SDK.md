@@ -1,0 +1,15 @@
+# Complete published Jízda integration SDK
+
+This release unifies the verified identity/caller release3f7812df with the existing approved additive Jízda interfaces. The earlier clean3f pin alone is not a complete Jízda dependency: local unpublished routing, measurements and China notification interfaces were missing.
+
+Preserved interfaces: mapped vehicle profiles, strict RoadTrip/known closure capabilities and route contracts, direction-bound geometry data, consent-scoped driver measurements and bounded batch policy, community reporting, mobility invitations/profile/audit/mileage, read-only Matrix identity lookup and viewer-specific call.peer, plus distribution-bound China in-app voice notifications.
+
+No stubs, removed integrations, private Jízda Core or reset of the original dirty checkout. Source is combined in a new clean worktree by a three-way merge from public661027c/3f7812df; only ServiceProtocols required manual conflict resolution, retaining both drivingCapabilities and messagingIdentityLookup defaults. Ten previously untracked additive source/test files are included. Original source/diff hashes are retained to prove it was not changed.
+
+Host integration: use the published whole SDK pin/path. Signed bundle Info.plist must set CSMVoiceDistribution=global for the existing system-call variant, china for its separate Chinese App Store identity. Unknown/absent value fails closed to in-app voice, without CXProvider or PKPushRegistry. Forward ordinary incoming call user notifications through incomingUserNotificationReceived; register the matching installation capability. The host must preserve ordinary APNs and in-app incoming UI. China variants must have their approved bundle identity/background modes and App Review text; this package gate does not prove physical push or App Store acceptance.
+
+Measurements remain shadow_only; publishing the facade does not enable collection or live ETA. State2026-10-05: production collection flag remains disabled, pilot and actual iPhone battery/offline/revocation acceptance stay separate. Routing safety retains strict capability/closure/mapped-profile gates; no Apple/direct fallback on uncertain constrained routes.
+
+Verification: complete mandatory Xcode27.1 gate on the unified source, followed by Jízda Debug/Release/fixtures against the exact pin. Physical GPS, tunnels, China/global calling and consent pilot require real-device evidence; synthetic package tests are insufficient. Results/pins will be recorded after verification.
+
+Complete SDK gate2026-10-05 PASS: exact Xcode27.1(27A9269)/SDK27.1,30appunit,5UI,136packageXCTest (one skipped: private recorded eight-route replay file not present),2SwiftTesting,2accessibility. Seven identity/caller tests remain PASS alongside RoadTrip/closure/mapped-profile/measurement/China policy tests. Original dirty SDK tracked diff hash and all ten untracked source hashes unchanged. Real iPhone calls, GPS/tunnels, battery and China notification delivery were not tested here. Jízda whole Debug/Release/fixtures acceptance must be supplied against this new complete pin; success of COP's package gate alone does not prove Jízda builds.

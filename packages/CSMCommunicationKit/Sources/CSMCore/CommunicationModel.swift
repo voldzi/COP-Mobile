@@ -41,28 +41,30 @@ final class CommunicationModel {
     private(set) var authState: AuthState {
         get { chatSessionStore.snapshot.authState }
         set {
-            let mobilitySessionChanged = authState != newValue
+            let measurementSessionChanged = authState != newValue
             chatSessionStore.update(
                 authState: newValue,
                 actor: actor,
                 isBusy: isLoading,
                 deviceID: messagingDeviceId
             )
-            if mobilitySessionChanged { NotificationCenter.default.post(name: .csmMobilitySessionChanged, object: nil) }
+            if measurementSessionChanged { NotificationCenter.default.post(name: .csmDriverMeasurementSessionChanged, object: nil) }
+            if measurementSessionChanged { NotificationCenter.default.post(name: .csmMobilitySessionChanged, object: nil) }
         }
     }
     private(set) var connectionMode: ConnectionMode = .offline
     private(set) var actor: AuthenticatedActor? {
         get { chatSessionStore.snapshot.actor }
         set {
-            let mobilitySessionChanged = actor?.subjectId != newValue?.subjectId
+            let measurementSessionChanged = actor?.subjectId != newValue?.subjectId
             chatSessionStore.update(
                 authState: authState,
                 actor: newValue,
                 isBusy: isLoading,
                 deviceID: messagingDeviceId
             )
-            if mobilitySessionChanged { NotificationCenter.default.post(name: .csmMobilitySessionChanged, object: nil) }
+            if measurementSessionChanged { NotificationCenter.default.post(name: .csmDriverMeasurementSessionChanged, object: nil) }
+            if measurementSessionChanged { NotificationCenter.default.post(name: .csmMobilitySessionChanged, object: nil) }
         }
     }
     private(set) var policy: MobileNativePolicy?
@@ -991,7 +993,9 @@ final class CommunicationModel {
                 Self.diagnostics.notice("device-registration=waiting_for_apns")
                 return
             }
-            guard let voipToken = await voipDeviceTokenProvider?(), !voipToken.isEmpty else {
+            let systemCalls = Bundle.main.object(forInfoDictionaryKey: "CSMVoiceDistribution") as? String == "global"
+            let voipToken = systemCalls ? await voipDeviceTokenProvider?() : nil
+            guard !systemCalls || (voipToken?.isEmpty == false) else {
                 messagingDeviceRegistrationStatusText = "waiting_for_voip"
                 Self.recordDeviceRegistrationDiagnostic("waiting_for_voip")
                 Self.diagnostics.notice("device-registration=waiting_for_voip")
@@ -999,7 +1003,7 @@ final class CommunicationModel {
             }
 
             do {
-                let tokenFingerprint = Self.tokenFingerprint("\(token):\(voipToken)")
+                let tokenFingerprint = Self.tokenFingerprint("\(token):\(voipToken ?? "in_app")")
                 if let messagingDeviceId,
                    let registeredMessagingDeviceTokenFingerprint,
                    registeredMessagingDeviceTokenFingerprint != tokenFingerprint {
@@ -1046,7 +1050,7 @@ final class CommunicationModel {
                         "platform": response.device.platform ?? "ios",
                         "provider": response.providerId ?? "csm.messaging",
                         "apns": "token-present",
-                        "voip": "token-present"
+                        "voip": systemCalls ? "token-present" : "disabled"
                     ]
                 )
             } catch {
@@ -1126,7 +1130,7 @@ final class CommunicationModel {
 
     private func makeMessagingDeviceRegistrationRequest(
         deviceToken: String,
-        voipDeviceToken: String
+        voipDeviceToken: String?
     ) -> CSMMessagingDeviceRegistrationRequest {
         return CSMMessagingDeviceRegistrationRequest(
             apnsEnvironment: Self.apnsEnvironment,
@@ -1136,7 +1140,8 @@ final class CommunicationModel {
                 criticalAlerts: false,
                 e2ee: true,
                 liveActivities: false,
-                voip: true
+                voip: voipDeviceToken != nil,
+                callPresentation: voipDeviceToken == nil ? "in_app" : "system"
             ),
             deviceToken: deviceToken,
             voipDeviceToken: voipDeviceToken,

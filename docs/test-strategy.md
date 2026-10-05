@@ -560,3 +560,5 @@ its communication button must open chat and expose a separate accessibility node
 Run `OIDCTokenLifecycleTests` and `COPSessionRestorationTests` in the shared package. They cover concurrent rotation, outage retention, invalid grant, same-account renewal, rejection of another issuer/subject and stale browser results, plus preservation of established chat state. Real iPhone expired-session/browser/network acceptance remains required; simulator mocks do not prove production identity-provider behaviour.
 
 Read-only identity and caller presentation changes require isolated two-user/DM/self/peer/push tests plus the exact Xcode27.1 gate. Real-phone calls and server/account acceptance must be recorded separately.
+
+Complete Jízda SDK union gate:136packageXCTest/1private replay skip, plus30appunit/5UI/2SwiftTesting/2accessibility PASS2026-10-05. Actual Jízda host Debug/Release/fixtures and phones are separate.

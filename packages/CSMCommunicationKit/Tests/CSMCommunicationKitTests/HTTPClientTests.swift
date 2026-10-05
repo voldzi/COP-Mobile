@@ -137,6 +137,62 @@ final class HTTPClientTests: XCTestCase {
         configuration.protocolClasses = [PressureURLProtocol.self]
         return URLSession(configuration: configuration)
     }
+
+    func testRoutingSafetyServerFailuresPropagateWithoutRetryOrCoverageFallback() async throws {
+        for (status, code) in [(503, "ROUTING_GRAPH_STALE"), (502, "ROUTING_UPSTREAM_UNAVAILABLE"),
+                               (502, "ROUTING_KNOWN_CLOSURES_INVALID")] {
+            PressureURLProtocol.configure { _ in (status, "{\"error\":{\"code\":\"\(code)\"}}") }
+            let api = ProductionCopAPIClient(http: HTTPClient(baseURL: URL(string: "https://cop.test")!,
+                tokenProvider: StaticTestTokenProvider(token: "synthetic-token"), session: makeSession(), requiresAuthorization: true))
+            let body = CSMDriverRouteRequest(from: .init(latitude: 50, longitude: 14),
+                to: .init(latitude: 51, longitude: 15), alternatives: 3, includeRoadAttributes: true)
+            do {
+                _ = try await api.drivingRoutes(body)
+                XCTFail("Safety server failure must propagate: \(code)")
+            } catch {
+                if let routing = error as? CSMDriverRoutingError, case .noNavigableRoute = routing {
+                    XCTFail("Safety failure must not become a graph-coverage fallback")
+                }
+                XCTAssertTrue(error.localizedDescription.contains(code))
+            }
+            XCTAssertEqual(PressureURLProtocol.requestCount, 1)
+            XCTAssertEqual(PressureURLProtocol.lastRequest?.url?.absoluteString, "https://cop.test/api/v1/routing/route")
+            XCTAssertEqual(PressureURLProtocol.lastRequest?.httpMethod, "POST")
+        }
+    }
+
+    func testRoutingTimeoutPropagatesWithoutRetryOrCoverageFallback() async throws {
+        PressureURLProtocol.configure { _ in (URLError.timedOut.rawValue, "") }
+        let api = ProductionCopAPIClient(http: HTTPClient(baseURL: URL(string: "https://cop.test")!,
+            tokenProvider: StaticTestTokenProvider(token: "synthetic-token"), session: makeSession(), requiresAuthorization: true))
+        do {
+            _ = try await api.drivingRoutes(.init(from: .init(latitude: 50, longitude: 14),
+                to: .init(latitude: 51, longitude: 15), alternatives: 3, includeRoadAttributes: true))
+            XCTFail("Timeout must propagate")
+        } catch {
+            XCTAssertEqual((error as? URLError)?.code, .timedOut)
+            XCTAssertFalse(error is CSMDriverRoutingError)
+        }
+        XCTAssertEqual(PressureURLProtocol.requestCount, 1)
+    }
+
+    func testTypedProfileErrorsNeverRetryAsCar() async throws {
+        for (status, code) in [(422, "ROUTING_TARGET_NOT_ROUTABLE"), (502, "ROUTING_VEHICLE_PROFILE_INVALID"),
+                               (503, "ROUTING_UPSTREAM_UNAVAILABLE")] {
+            PressureURLProtocol.configure { _ in (status, "{\"error\":{\"code\":\"\(code)\",\"message\":\"Synthetic profile failure\"}}") }
+            let api = ProductionCopAPIClient(http: HTTPClient(baseURL: URL(string: "https://cop.test")!,
+                tokenProvider: StaticTestTokenProvider(token: "synthetic-token"), session: makeSession(), requiresAuthorization: true))
+            let request = CSMDriverRouteRequest(from: .init(latitude: 50, longitude: 14),
+                to: .init(latitude: 51, longitude: 15), alternatives: 3, includeRoadAttributes: true,
+                vehicleProfile: .init(intent: "road_legal_4x4"))
+            let encoded = try XCTUnwrap(JSONSerialization.jsonObject(with: CSMJSONCoding.encoder.encode(request)) as? [String: Any])
+            XCTAssertNotNil(encoded["vehicleProfile"]); XCTAssertNil(encoded["vehicle"]); XCTAssertNil(encoded["trip"])
+            do { _ = try await api.drivingRoutes(request); XCTFail("Typed profile failure must propagate") }
+            catch { XCTAssertFalse(error is CSMDriverRoutingError) }
+            XCTAssertEqual(PressureURLProtocol.requestCount, 1)
+            XCTAssertEqual(PressureURLProtocol.lastRequest?.url?.absoluteString, "https://cop.test/api/v1/routing/route")
+        }
+    }
 }
 
 private struct TestResponse: Decodable, Sendable {
@@ -194,6 +250,10 @@ private final class PressureURLProtocol: URLProtocol, @unchecked Sendable {
             Self.storedRequestCount += 1
             Self.storedLastRequest = request
             return Self.responseHandler?(Self.storedRequestCount)
+        }
+        if result?.0 == URLError.timedOut.rawValue {
+            client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
+            return
         }
         guard let result,
               let url = request.url,
