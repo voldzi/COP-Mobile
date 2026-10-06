@@ -25,6 +25,7 @@ final class CommunicationModel {
     let conversationListStore = ConversationListStore()
     let timelineStore = TimelineStore()
     @ObservationIgnored private let timelineSynchronization = TimelineSynchronizationController()
+    @ObservationIgnored private var messagingConfigurationRevision: UInt64 = 0
 
     /// Matrix device-id generation for the native Rust E2EE adapter.
     ///
@@ -505,7 +506,19 @@ final class CommunicationModel {
     }
 
     func signOut() async {
+        // Invalidate before any network await so a deferred bootstrap cannot
+        // restart receive/send work after the user has left this account.
+        authState = .signedOut
+        messagingConfigurationRevision &+= 1
+        timelineSynchronization.stop()
+        // Stop the producer immediately and best-effort end the existing share
+        // through its still-current transport before invalidating that session.
         try? await stopLiveLocationShare()
+        if let invalidating = messaging as? any MessagingSessionInvalidating {
+            try? await invalidating.invalidateMessagingSession()
+        } else {
+            try? await (messaging as? any MessagingLifecycleControlling)?.suspendMessaging()
+        }
         if let messagingDeviceId, let messagingDeviceRegistration {
             try? await messagingDeviceRegistration.deleteDevice(deviceId: messagingDeviceId)
         }
@@ -656,6 +669,11 @@ final class CommunicationModel {
             notificationSubscriptions =
                 Self.readNotificationSubscriptions(subjectId: bootstrap.actor.subjectId) ?? .empty
 
+            // COP identity, policy and any required local unlock are now verified.
+            // Push registration, Matrix setup and badge updates have independent
+            // availability states; they must not keep the host behind an auth
+            // spinner. Runtime preparation still awaits the complete start task.
+            isLoading = false
             await reconcileMatrixDeviceGeneration(for: bootstrap.actor.subjectId)
             await preparePushIfAllowed(by: bootstrap)
             await registerDeviceIfPossible()
@@ -840,13 +858,17 @@ final class CommunicationModel {
     }
 
     @discardableResult
-    private func configureMessagingTransport(with bootstrap: MessagingBootstrap, statusText: String) async -> Bool {
+    func configureMessagingTransport(with bootstrap: MessagingBootstrap, statusText: String) async -> Bool {
         localStoreDiagnosticRevision &+= 1
+        messagingConfigurationRevision &+= 1
+        let transportRevision = messagingConfigurationRevision
+        timelineSynchronization.stop()
         let revision = matrixLocalRecoveryRevision
         do {
             try await messaging.configure(with: bootstrap)
-            guard revision == matrixLocalRecoveryRevision, authState == .signedIn else {
-                try? await (messaging as? any MessagingLifecycleControlling)?.suspendMessaging()
+            guard revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision, authState == .signedIn else {
+                // A superseded operation does not own the current transport.
+                // Sign-out owns lifecycle teardown; never suspend a newer install.
                 return false
             }
             messagingStatusText = MessagingRuntimeStatusResolver.configuredStatus(
@@ -858,12 +880,13 @@ final class CommunicationModel {
             matrixLocalStoreFailure = nil
             matrixLocalStoreFailureScope = nil
             messagingTransportReadyForPusher = true
+            if let selectedConversation { startLiveMessageStream(for: selectedConversation) }
             await refreshMatrixEncryptionRecoveryStatus()
-            guard revision == matrixLocalRecoveryRevision, authState == .signedIn else { return false }
+            guard revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision, authState == .signedIn else { return false }
             await registerMatrixPusherIfPossible()
-            return revision == matrixLocalRecoveryRevision && authState == .signedIn
+            return revision == matrixLocalRecoveryRevision && transportRevision == messagingConfigurationRevision && authState == .signedIn
         } catch {
-            guard revision == matrixLocalRecoveryRevision, authState == .signedIn else { return false }
+            guard revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision, authState == .signedIn else { return false }
             messagingTransportReadyForPusher = false
             if let typed = error as? MatrixLocalStoreError {
                 matrixLocalStoreFailure = typed.failure
@@ -873,7 +896,7 @@ final class CommunicationModel {
                 matrixLocalStoreFailureScope = nil
             }
             await refreshLocalStoreDiagnostic(for: bootstrap)
-            guard revision == matrixLocalRecoveryRevision, authState == .signedIn else { return false }
+            guard revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision, authState == .signedIn else { return false }
             messagingTransportErrorText = error.localizedDescription
             matrixEncryptionRecoveryStatus = .unavailable(error.localizedDescription)
             if bootstrap.e2eeRequired {
@@ -1084,6 +1107,7 @@ final class CommunicationModel {
                 return
             }
 
+            var failureStage = "registration_preparation"
             do {
                 let tokenFingerprint = Self.tokenFingerprint("\(token):\(voipToken ?? "in_app")")
                 if let messagingDeviceId,
@@ -1104,6 +1128,7 @@ final class CommunicationModel {
                    messagingDeviceRegistrationStatusText == "active" {
                     continue
                 }
+                failureStage = "cop_ticket"
                 let ticket = try await api.deviceRegistrationTicket(
                     appInstanceId: request.appInstanceId,
                     bundleId: request.appBundleId
@@ -1111,6 +1136,7 @@ final class CommunicationModel {
                 guard ticket.messagingBaseUrl.host == appConfiguration.messagingBaseURL.host else {
                     throw CSMServiceError.invalidState("Registrační ticket směřuje na neočekávanou službu.")
                 }
+                failureStage = "messaging_registration"
                 let response = try await messagingDeviceRegistration.registerDevice(
                     request,
                     authorizationTicket: ticket.ticket
@@ -1138,11 +1164,10 @@ final class CommunicationModel {
             } catch {
                 messagingDeviceRegistrationStatusText = "failed"
                 lastError = error.localizedDescription
-                Self.recordDeviceRegistrationDiagnostic(
-                    "failed_\(String(describing: type(of: error)))"
-                )
+                let category = (error as? HTTPResponseFailure)?.registrationDiagnostic ?? "transport_or_client_error"
+                Self.recordDeviceRegistrationDiagnostic("failed_\(failureStage)_\(category)")
                 Self.diagnostics.error(
-                    "device-registration=failed error-type=\(String(describing: type(of: error)), privacy: .public)"
+                    "device-registration=failed stage=\(failureStage, privacy: .public) result=\(category, privacy: .public)"
                 )
                 await appendEvent(
                     kind: .messagingDeviceRegistrationFailed,
@@ -1164,7 +1189,9 @@ final class CommunicationModel {
         var forceCurrentAttempt = force
         repeat {
             matrixPusherRegistrationRefreshPending = false
-            guard messagingTransportReadyForPusher else { return }
+            guard authState == .signedIn, messagingTransportReadyForPusher else { return }
+            let revision = matrixLocalRecoveryRevision
+            let transportRevision = messagingConfigurationRevision
             guard let token = pushSnapshot.deviceToken, pushSnapshot.environment != "unavailable" else { return }
             guard let gatewayURL = matrixPushGatewayURL else { return }
 
@@ -1179,6 +1206,8 @@ final class CommunicationModel {
 
             do {
                 try await messaging.registerPusher(pushKey: token, pushGatewayURL: gatewayURL)
+                guard revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision,
+                      authState == .signedIn else { return }
                 registeredMatrixPusherTokenFingerprint = tokenFingerprint
                 registeredMatrixPusherGatewayURL = gatewayURL
                 await appendEvent(
@@ -1191,6 +1220,8 @@ final class CommunicationModel {
                     ]
                 )
             } catch {
+                guard revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision,
+                      authState == .signedIn else { return }
                 lastError = error.localizedDescription
                 await appendEvent(
                     kind: .pushRegistrationUpdated,

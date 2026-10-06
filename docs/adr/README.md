@@ -39,3 +39,5 @@ Use ADRs for important, costly, risky, or hard-to-reverse technical decisions.
 - [0020 - Shared COP OIDC session](0020-shared-cop-oidc-session.md): API refresh ownership and same-account restoration independent of Matrix chat.
 
 - [0021 - Device-scoped Matrix store recovery](0021-device-scoped-matrix-store-recovery.md): atomic key creation, explicit new-device recovery, immutable old stores and physical acceptance.
+
+- [0022 - Exact Matrix delivery and lifecycle](0022-exact-matrix-delivery-and-lifecycle.md): durable scoped acknowledgements, stream fencing and authoritative voice connection.

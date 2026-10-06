@@ -99,7 +99,7 @@ public struct CSMCommunicationHost: View {
                 .ignoresSafeArea()
 
             Group {
-                switch runtime.accessState {
+                switch runtime.surfaceAccessState(expectedSubjectID: expectedSubjectID) {
                 case .ready:
                     ConversationWorkspace(
                         locationShareProvider: locationShareProvider,
@@ -378,7 +378,7 @@ public final class CSMCommunicationRuntime {
 
     // The standalone native communication runtime owns its APNs + PushKit
     // record. Delivery must not depend on a hidden web session being mounted.
-    let model = ServiceFactory.makeCommunicationModel(managesMessagingDeviceRegistration: true)
+    let model: CommunicationModel
     let driverReportService = ServiceFactory.makeDriverReportService()
     private(set) var accessState: NativeCommunicationAccessState = .checking
     var copSessionRestoreTask: Task<Void, any Error>?
@@ -388,7 +388,20 @@ public final class CSMCommunicationRuntime {
     private var deviceRegistrationRefreshTask: Task<Void, Never>?
     private var deviceRegistrationRefreshPending = false
 
-    private init() {}
+    private convenience init() {
+        self.init(model: ServiceFactory.makeCommunicationModel(managesMessagingDeviceRegistration: true))
+    }
+
+    init(model: CommunicationModel) { self.model = model }
+
+    /// The mounted surface observes the current model directly. A process-owned
+    /// warm start can complete before the host mounts or after a superseded
+    /// prepare; a cached checking value must not strand an authenticated user.
+    func surfaceAccessState(expectedSubjectID: String?) -> NativeCommunicationAccessState {
+        NativeCommunicationIdentityPolicy.resolve(authState: model.authState,
+            actorSubjectID: model.actor?.subjectId, expectedSubjectID: expectedSubjectID,
+            isLoading: model.isLoading)
+    }
 
     func configureCurrentLocationProvider(
         _ provider: (@MainActor @Sendable () async -> CSMCommunicationLocation?)?

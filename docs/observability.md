@@ -166,3 +166,7 @@ Testy vloží canary secrets, souřadnice, filename, Unicode text a token-lookin
 hodnoty do všech kritických cest a potvrdí jejich absenci v OSLog, crash reportu,
 metrics labels a exportu. Artifact review navíc ověří, že release neobsahuje
 debug panel, inspector, interní originy ani hardcoded credentials.
+
+## Communication successor diagnostics
+
+New registration diagnostics expose only a fixed stage, HTTP status and allowlisted code, never bodies/URLs/tokens/identities. Voice emits bounded phase/stage and media readiness booleans with a random per-call correlation in the existing 96-entry store. Correlation is not the server call ID. Generic deadline failure is not HTTP503 evidence. Actual recipient delivery requires device evidence; homeserver ACK alone is insufficient. See [handoff](matrix-delivery-acceptance-handoff.md).

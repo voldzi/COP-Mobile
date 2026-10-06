@@ -66,3 +66,5 @@ Jízda community police reporting: [public SDK handoff](jizda-community-reports-
 - [Mobility invitation notifications](mobility-invitation-notifications-handoff.md): versioned push link, verified runtime listener and explicit host navigation.
 
 Matrix crypto store recovery: [ADR 0021](adr/0021-device-scoped-matrix-store-recovery.md) and [Jízda integration/acceptance](matrix-store-recovery-handoff.md).
+
+Matrix delivery successor: [handoff](matrix-delivery-acceptance-handoff.md) and [ADR 0022](adr/0022-exact-matrix-delivery-and-lifecycle.md); physical acceptance remains open.

@@ -126,3 +126,92 @@ final class VoiceCallAudioSessionPolicyTests: XCTestCase {
     )
   }
 }
+
+final class VoiceCallConnectionPolicyTests: XCTestCase {
+  func testRingingInConnectedRoomWaitsForServerExpiryWithoutMediaFailureDeadline() {
+    let stage = VoiceCallConnectionPolicy.stage(serverPhase: .ringing, roomConnected: true,
+      peerPresent: false, answered: false, incoming: false, audioActivated: true, microphonePublished: true)
+    XCTAssertEqual(stage, .waitingForAnswer)
+    XCTAssertFalse(VoiceCallConnectionPolicy.requiresMediaDeadline(stage))
+  }
+  func testSocketFailureBeforeAnswerStillHasBoundedMediaDeadline() {
+    let stage = VoiceCallConnectionPolicy.stage(serverPhase: .ringing, roomConnected: false,
+      peerPresent: false, answered: false, incoming: false, audioActivated: true, microphonePublished: false)
+    XCTAssertEqual(stage, .connectingRoom)
+    XCTAssertTrue(VoiceCallConnectionPolicy.requiresMediaDeadline(stage))
+  }
+  func testAcceptanceStartsSeparateDeadlineAndNeverClaimsConnectionWithoutAudio() {
+    for (audio, mic, peer) in [(false, true, true), (true, false, true), (true, true, false)] {
+      let stage = VoiceCallConnectionPolicy.stage(serverPhase: .accepted, roomConnected: true,
+        peerPresent: peer, answered: true, incoming: true, audioActivated: audio, microphonePublished: mic)
+      XCTAssertEqual(stage, .connectingAcceptedMedia)
+      XCTAssertTrue(VoiceCallConnectionPolicy.requiresMediaDeadline(stage))
+    }
+    XCTAssertEqual(VoiceCallConnectionPolicy.stage(serverPhase: .accepted, roomConnected: true,
+      peerPresent: true, answered: true, incoming: true, audioActivated: true, microphonePublished: true), .waitingForServerAck)
+  }
+  func testLocalMediaReadyWithoutServerAckKeepsBoundedDeadlineEvenWithoutPolling() {
+    let ackPending = VoiceCallConnectionPolicy.stage(serverPhase: .accepted, roomConnected: true,
+      peerPresent: true, answered: true, incoming: false, audioActivated: true, microphonePublished: true)
+    XCTAssertEqual(ackPending, .waitingForServerAck)
+    XCTAssertTrue(VoiceCallConnectionPolicy.requiresMediaDeadline(ackPending))
+    let acknowledged = VoiceCallConnectionPolicy.stage(serverPhase: .connected, roomConnected: true,
+      peerPresent: true, answered: true, incoming: false, audioActivated: true, microphonePublished: true)
+    XCTAssertEqual(acknowledged, .connected)
+    XCTAssertFalse(VoiceCallConnectionPolicy.requiresMediaDeadline(acknowledged))
+    let incomingRinging = VoiceCallConnectionPolicy.stage(serverPhase: .ringing, roomConnected: false,
+      peerPresent: false, answered: false, incoming: true, audioActivated: false, microphonePublished: false)
+    XCTAssertEqual(incomingRinging, .waitingForAnswer)
+    XCTAssertFalse(VoiceCallConnectionPolicy.requiresMediaDeadline(incomingRinging))
+  }
+  func testPeerJoiningBeforeServerAcceptanceDoesNotConnectAndTerminalNeverRestarts() {
+    XCTAssertEqual(VoiceCallConnectionPolicy.stage(serverPhase: .ringing, roomConnected: true,
+      peerPresent: true, answered: false, incoming: false, audioActivated: true, microphonePublished: true), .waitingForAnswer)
+    XCTAssertEqual(VoiceCallConnectionPolicy.stage(serverPhase: .cancelled, roomConnected: true,
+      peerPresent: true, answered: true, incoming: false, audioActivated: true, microphonePublished: true), .terminal)
+  }
+}
+
+@MainActor
+final class VoiceCallConnectionDeadlineTests: XCTestCase {
+  func testPeerDisconnectOrAudioInterruptionCannotDropOrExtendServerAckDeadline() async throws {
+    for refreshCallback in [false, true] {
+      let deadline = VoiceCallConnectionDeadline(duration: .milliseconds(80))
+      let uuid = UUID()
+      var stage: VoiceCallConnectionPolicy.Stage = .waitingForServerAck
+      var failures = 0
+      deadline.update(uuid: uuid, stage: stage, currentStage: { stage }, timedOut: { failures += 1 })
+      try await Task.sleep(for: .milliseconds(45))
+      // This is the same scheduler used by the actual peer-disconnect,
+      // didDeactivate and in-app interruption callbacks. Even a missed refresh
+      // must examine the CURRENT bounded stage when the original budget expires.
+      stage = .connectingAcceptedMedia
+      if refreshCallback {
+        deadline.update(uuid: uuid, stage: stage, currentStage: { stage }, timedOut: { failures += 1 })
+      }
+      try await Task.sleep(for: .milliseconds(55))
+      XCTAssertEqual(failures, 1, "Stage changes cannot cancel or restart the original deadline")
+      deadline.cancel()
+    }
+  }
+  func testConnectedAndTerminalCancelDeadlineAndRingingStartsANewBudgetOnAcceptance() async throws {
+    for stageAfter in [VoiceCallConnectionPolicy.Stage.connected, .terminal, .waitingForAnswer] {
+      let deadline = VoiceCallConnectionDeadline(duration: .milliseconds(40))
+      let uuid = UUID()
+      var current = VoiceCallConnectionPolicy.Stage.waitingForServerAck
+      var failures = 0
+      deadline.update(uuid: uuid, stage: current, currentStage: { current }, timedOut: { failures += 1 })
+      current = stageAfter
+      deadline.update(uuid: uuid, stage: current, currentStage: { current }, timedOut: { failures += 1 })
+      try await Task.sleep(for: .milliseconds(60))
+      XCTAssertEqual(failures, 0)
+      if stageAfter == .waitingForAnswer {
+        current = .connectingAcceptedMedia
+        deadline.update(uuid: uuid, stage: current, currentStage: { current }, timedOut: { failures += 1 })
+        try await Task.sleep(for: .milliseconds(60))
+        XCTAssertEqual(failures, 1)
+      }
+      deadline.cancel()
+    }
+  }
+}

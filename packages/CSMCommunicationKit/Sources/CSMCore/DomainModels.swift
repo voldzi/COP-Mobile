@@ -1088,6 +1088,8 @@ struct ChatMessage: Codable, Identifiable, Equatable, Hashable, Sendable {
     var sentAt: Date
     var deliveryState: MessageDeliveryState
     var isOwnMessage: Bool
+    var matrixTransactionID: String? = nil
+    var requiresExactMatrixAcknowledgement = false
 
     init(
         id: String,
@@ -1206,6 +1208,8 @@ struct ChatMessage: Codable, Identifiable, Equatable, Hashable, Sendable {
         case sentAt
         case deliveryState
         case isOwnMessage
+        case matrixTransactionID
+        case requiresExactMatrixAcknowledgement
     }
 
     init(from decoder: Decoder) throws {
@@ -1225,6 +1229,12 @@ struct ChatMessage: Codable, Identifiable, Equatable, Hashable, Sendable {
         sentAt = try container.decode(Date.self, forKey: .sentAt)
         deliveryState = try container.decode(MessageDeliveryState.self, forKey: .deliveryState)
         isOwnMessage = try container.decode(Bool.self, forKey: .isOwnMessage)
+        matrixTransactionID = try container.decodeIfPresent(String.self, forKey: .matrixTransactionID)
+        requiresExactMatrixAcknowledgement = try container.decodeIfPresent(Bool.self, forKey: .requiresExactMatrixAcknowledgement) ?? false
+        if id.hasPrefix("matrix-unconfirmed-") || id.hasPrefix("matrix-awaiting-") {
+            deliveryState = .pending
+            requiresExactMatrixAcknowledgement = true
+        }
     }
 }
 
@@ -1319,6 +1329,10 @@ extension ChatMessage {
     }
 
     private static func localEcho(_ local: ChatMessage, matches confirmed: ChatMessage) -> Bool {
+        if local.requiresExactMatrixAcknowledgement || confirmed.requiresExactMatrixAcknowledgement {
+            guard let transaction = local.matrixTransactionID, !transaction.isEmpty else { return false }
+            return transaction == confirmed.matrixTransactionID && local.senderId == confirmed.senderId && local.roomId == confirmed.roomId
+        }
         let confirmationDelay = confirmed.sentAt.timeIntervalSince(local.sentAt)
         guard local.body.trimmingCharacters(in: .whitespacesAndNewlines) ==
                 confirmed.body.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -1471,6 +1485,8 @@ struct PendingMessageRecord: Codable, Identifiable, Equatable, Hashable, Sendabl
         guard let nextRetryAt else { return true }
         return nextRetryAt <= .now
     }
+
+    var matrixSubmission: MatrixDraftSubmission? = nil
 
     var stableTransactionId: String {
         transactionId ?? message.id

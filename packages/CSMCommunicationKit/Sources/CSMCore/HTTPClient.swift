@@ -243,9 +243,19 @@ struct HTTPClient: Sendable {
     }
 }
 
-private struct HTTPResponseFailure: LocalizedError, Sendable {
+struct HTTPResponseFailure: LocalizedError, Sendable {
     let statusCode: Int
     let code: String?
+
+    /// Metadata-only registration diagnostics. Never include response messages,
+    /// unknown codes, request URLs, headers, identifiers or registration tickets.
+    var registrationDiagnostic: String {
+        let allowed = ["UNAUTHORIZED", "FORBIDDEN", "VALIDATION_ERROR", "NOT_FOUND",
+                       "AUTH_NOT_CONFIGURED", "OIDC_INTROSPECTION_FAILED", "DEPENDENCY_NOT_READY",
+                       "FST_UNDER_PRESSURE", "RATE_LIMITED", "TOO_MANY_REQUESTS"]
+        let category = code.flatMap { allowed.contains($0) ? $0 : nil } ?? "unknown_code"
+        return "http_\(statusCode)_\(category)"
+    }
 
     var isTransientPressure: Bool {
         statusCode == 503 && code == "FST_UNDER_PRESSURE"

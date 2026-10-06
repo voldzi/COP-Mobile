@@ -106,6 +106,51 @@ struct VoiceCallAudioSessionPolicy {
   }
 }
 
+/// Ringing is governed by the server invitation expiry, not the media timeout.
+struct VoiceCallConnectionPolicy {
+  enum Stage: String, Sendable { case connectingRoom, waitingForAnswer, connectingAcceptedMedia, waitingForServerAck, connected, terminal }
+  static func stage(serverPhase: CSMVoiceCallPhase, roomConnected: Bool, peerPresent: Bool,
+                    answered: Bool, incoming: Bool, audioActivated: Bool, microphonePublished: Bool) -> Stage {
+    if serverPhase.isTerminal { return .terminal }
+    if incoming && !answered && (serverPhase == .created || serverPhase == .ringing) { return .waitingForAnswer }
+    if !roomConnected { return .connectingRoom }
+    if serverPhase == .created || serverPhase == .ringing { return .waitingForAnswer }
+    if peerPresent && (!incoming || answered) && audioActivated && microphonePublished {
+      return serverPhase == .connected ? .connected : .waitingForServerAck
+    }
+    return .connectingAcceptedMedia
+  }
+  static func requiresMediaDeadline(_ stage: Stage) -> Bool {
+    stage == .connectingRoom || stage == .connectingAcceptedMedia || stage == .waitingForServerAck
+  }
+}
+
+/// One absolute budget across bounded setup stages. Changing peer/audio state
+/// cannot cancel the timer or restart its budget while server ACK is unavailable.
+@MainActor
+final class VoiceCallConnectionDeadline {
+  private let duration: Duration
+  private var owner: UUID?
+  private var task: Task<Void, Never>?
+  init(duration: Duration = .seconds(45)) { self.duration = duration }
+  func cancel() { task?.cancel(); task = nil; owner = nil }
+  func update(uuid: UUID, stage: VoiceCallConnectionPolicy.Stage,
+              currentStage: @escaping @MainActor () -> VoiceCallConnectionPolicy.Stage?,
+              timedOut: @escaping @MainActor () -> Void) {
+    guard VoiceCallConnectionPolicy.requiresMediaDeadline(stage) else { cancel(); return }
+    guard owner != uuid else { return }
+    cancel(); owner = uuid
+    task = Task { @MainActor [weak self] in
+      guard let self else { return }
+      try? await Task.sleep(for: duration)
+      guard !Task.isCancelled, owner == uuid else { return }
+      owner = nil; task = nil
+      guard let current = currentStage(), VoiceCallConnectionPolicy.requiresMediaDeadline(current) else { return }
+      timedOut()
+    }
+  }
+}
+
 enum CallDiagnosticStore {
   private static let fileName = "COPCallDiagnostics.json"
   private static let maximumEntries = 96
@@ -340,6 +385,10 @@ public final class VoiceCallService:
     var muted: Bool
     var participants: [VoiceCallParticipant]
     var incomingPushTitle: String? = nil
+    var mediaTransitionInFlight = false
+    var reportedConnected = false
+    var diagnosticCorrelation = String(UUID().uuidString.prefix(8))
+    var lastMediaDiagnostic: String? = nil
   }
 
   let presentation = VoiceCallPresentationState()
@@ -366,7 +415,7 @@ public final class VoiceCallService:
   private var roomConnected = false
   private var microphonePublished = false
   private var statePollingTask: Task<Void, Never>?
-  private var connectionTimeoutTask: Task<Void, Never>?
+  private let connectionDeadline = VoiceCallConnectionDeadline()
   private var pushTokenState: VoiceCallPushTokenState
   private var tokenContinuation: CheckedContinuation<String, any Error>?
   private var tokenTimeoutTask: Task<Void, Never>?
@@ -926,6 +975,7 @@ public final class VoiceCallService:
       // prepared before fulfilling the start/answer action instead.
       try AudioManager.shared.setEngineAvailability(.default)
       audioActivated = true
+      if let uuid = activeRoomCallUUID { refreshConnectionDeadline(uuid: uuid) }
       presentation.setAudioActive(true)
       updateAudioRoute(using: audioSession)
       updateProximityPolicy()
@@ -941,6 +991,7 @@ public final class VoiceCallService:
 
   public func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
     audioActivated = false
+    if let uuid = activeRoomCallUUID { refreshConnectionDeadline(uuid: uuid) }
     presentation.setAudioActive(false)
     try? AudioManager.shared.setEngineAvailability(.none)
     updateProximityPolicy()
@@ -1057,7 +1108,7 @@ public final class VoiceCallService:
       )
     )
     activeRoom = room
-    scheduleConnectionTimeout(uuid: uuid)
+    refreshConnectionDeadline(uuid: uuid)
     do {
       try await room.connect(url: media.serverUrl.absoluteString, token: media.token)
       guard activeRoomCallUUID == uuid, calls[uuid] != nil else {
@@ -1065,6 +1116,7 @@ public final class VoiceCallService:
         return
       }
       roomConnected = true
+      refreshConnectionDeadline(uuid: uuid)
       presentation.clearError()
       await publishMicrophoneIfReady()
       if !room.remoteParticipants.isEmpty {
@@ -1084,6 +1136,8 @@ public final class VoiceCallService:
     do {
       try await room.localParticipant.setMicrophone(enabled: !context.muted)
       microphonePublished = true
+      refreshConnectionDeadline(uuid: uuid)
+      markMediaConnected(uuid: uuid)
     } catch {
       fail(uuid: uuid, error: error)
     }
@@ -1094,6 +1148,7 @@ public final class VoiceCallService:
     switch event {
     case .connected:
       roomConnected = true
+      refreshConnectionDeadline(uuid: uuid)
       Task { @MainActor [weak self] in
         await self?.publishMicrophoneIfReady()
       }
@@ -1103,6 +1158,7 @@ public final class VoiceCallService:
         VoiceCallParticipant(userID: id, displayName: name, connected: true)
       )
       calls[uuid] = context
+      refreshConnectionDeadline(uuid: uuid)
       markMediaConnected(uuid: uuid)
     case .participantDisconnected(let id):
       context.participants = context.participants.map {
@@ -1115,6 +1171,7 @@ public final class VoiceCallService:
           : $0
       }
       calls[uuid] = context
+      refreshConnectionDeadline(uuid: uuid)
       publish(uuid)
     case .disconnected(let detail):
       guard context.call.phase != .ended else { return }
@@ -1129,28 +1186,49 @@ public final class VoiceCallService:
     }
   }
 
+  private func connectionStage(uuid: UUID) -> VoiceCallConnectionPolicy.Stage? {
+    guard let context = calls[uuid] else { return nil }
+    return VoiceCallConnectionPolicy.stage(serverPhase: context.call.phase,
+      roomConnected: activeRoomCallUUID == uuid && roomConnected,
+      peerPresent: activeRoomCallUUID == uuid && activeRoom?.remoteParticipants.isEmpty == false,
+      answered: context.answered, incoming: context.call.direction == .incoming,
+      audioActivated: audioActivated, microphonePublished: microphonePublished)
+  }
+
   private func markMediaConnected(uuid: UUID) {
-    guard var context = calls[uuid], context.call.phase != .connected else { return }
-    connectionTimeoutTask?.cancel()
-    context.call = replacingPhase(context.call, phase: .connected, connectedAt: Date())
-    calls[uuid] = context
-    publish(uuid)
-    if context.call.direction == .outgoing {
-      provider?.reportOutgoingCall(with: uuid, connectedAt: Date())
+    guard var context = calls[uuid], let stage = connectionStage(uuid: uuid),
+      stage == .connected || stage == .waitingForServerAck else { return }
+    refreshConnectionDeadline(uuid: uuid)
+    if context.call.phase == .connected {
+      guard !context.reportedConnected else { return }
+      context.reportedConnected = true
+      calls[uuid] = context
+      publish(uuid)
+      if context.call.direction == .outgoing {
+        provider?.reportOutgoingCall(with: uuid, connectedAt: context.call.connectedAt ?? Date())
+      }
+      return
     }
+    guard !context.mediaTransitionInFlight else { return }
+    context.mediaTransitionInFlight = true
+    calls[uuid] = context
     Task { @MainActor [weak self] in
       guard let self, let latest = self.calls[uuid] else { return }
       do {
         let session = try await CSMCommunicationRuntime.shared.transitionVoiceCall(
-          callID: latest.call.callId,
-          action: .mediaConnected,
+          callID: latest.call.callId, action: .mediaConnected,
           expectedRevision: latest.call.revision
         )
+        guard var current = self.calls[uuid] else { return }
+        current.mediaTransitionInFlight = false
+        self.calls[uuid] = current
         self.apply(session, uuid: uuid)
+        self.markMediaConnected(uuid: uuid)
       } catch {
-        self.logger.notice(
-          "Media-connected state will be reconciled by polling: \(error.localizedDescription, privacy: .public)"
-        )
+        guard var current = self.calls[uuid] else { return }
+        current.mediaTransitionInFlight = false
+        self.calls[uuid] = current
+        self.recordConnectionDiagnostic(uuid: uuid, event: "voice.media.server_ack_pending")
       }
     }
   }
@@ -1198,9 +1276,10 @@ public final class VoiceCallService:
       tearDown(uuid: uuid, reportServer: false)
       return
     }
+    refreshConnectionDeadline(uuid: uuid)
     publish(uuid)
     if (
-      session.call.phase == .accepted || session.call.phase == .connectingMedia
+      session.call.phase == .accepted || session.call.phase == .connectingMedia || session.call.phase == .connected
     ),
       activeRoomCallUUID == uuid,
       activeRoom?.remoteParticipants.isEmpty == false
@@ -1227,7 +1306,7 @@ public final class VoiceCallService:
     case .accepted, .connectingMedia:
       .connecting
     case .connected:
-      .connected
+      connectionStage(uuid: uuid) == .connected ? .connected : .connecting
     case .declined, .missed, .cancelled, .ended:
       .ended
     case .failed:
@@ -1255,7 +1334,7 @@ public final class VoiceCallService:
   }
 
   private func failVisibleCall(_ error: Error) {
-    CallDiagnosticStore.record("voice.start.failed", result: error.localizedDescription)
+    CallDiagnosticStore.record("voice.start.failed", result: "transport_or_media_error")
     logger.error("Voice call start failed: \(error.localizedDescription, privacy: .public)")
     presentation.setError(
       (error as? LocalizedError)?.errorDescription
@@ -1264,7 +1343,7 @@ public final class VoiceCallService:
   }
 
   private func fail(uuid: UUID, error: Error) {
-    CallDiagnosticStore.record("voice.call.failed", result: error.localizedDescription)
+    recordConnectionDiagnostic(uuid: uuid, event: "voice.call.failed")
     guard let context = calls[uuid] else { return }
     var failed = context
     failed.call = replacingPhase(context.call, phase: .failed, connectedAt: nil)
@@ -1291,8 +1370,7 @@ public final class VoiceCallService:
     guard let context = calls.removeValue(forKey: uuid) else { return }
     statePollingTask?.cancel()
     statePollingTask = nil
-    connectionTimeoutTask?.cancel()
-    connectionTimeoutTask = nil
+    connectionDeadline.cancel()
     cachedMedia.removeValue(forKey: context.call.callId)
 
     if activeRoomCallUUID == uuid {
@@ -1339,15 +1417,25 @@ public final class VoiceCallService:
     )
   }
 
-  private func scheduleConnectionTimeout(uuid: UUID) {
-    connectionTimeoutTask?.cancel()
-    connectionTimeoutTask = Task { @MainActor [weak self] in
-      try? await Task.sleep(for: .seconds(45))
-      guard !Task.isCancelled, let self,
-        self.calls[uuid]?.call.phase != .connected
-      else { return }
-      self.fail(uuid: uuid, error: CSMVoiceCallControlError.mediaUnavailable)
-    }
+  private func recordConnectionDiagnostic(uuid: UUID, event: String) {
+    guard var context = calls[uuid], let stage = connectionStage(uuid: uuid) else { return }
+    let result = "c=\(context.diagnosticCorrelation);direction=\(context.call.direction.rawValue);server=\(context.call.phase.rawValue);stage=\(stage.rawValue);room=\(roomConnected);peer=\(activeRoom?.remoteParticipants.isEmpty == false);answered=\(context.answered);audio=\(audioActivated);mic=\(microphonePublished)"
+    if event == "voice.media.state", context.lastMediaDiagnostic == result { return }
+    context.lastMediaDiagnostic = result
+    calls[uuid] = context
+    CallDiagnosticStore.record(event, result: result)
+  }
+
+  private func refreshConnectionDeadline(uuid: UUID) {
+    guard let stage = connectionStage(uuid: uuid) else { return }
+    recordConnectionDiagnostic(uuid: uuid, event: "voice.media.state")
+    connectionDeadline.update(uuid: uuid, stage: stage,
+      currentStage: { [weak self] in self?.connectionStage(uuid: uuid) },
+      timedOut: { [weak self] in
+        guard let self else { return }
+        self.recordConnectionDiagnostic(uuid: uuid, event: "voice.media.timeout")
+        self.fail(uuid: uuid, error: CSMVoiceCallControlError.mediaUnavailable)
+      })
   }
 
   private func prepareAudioSession(action: String) {
@@ -1389,6 +1477,7 @@ public final class VoiceCallService:
       throw error
     }
     audioActivated = true
+    if let uuid = activeRoomCallUUID { refreshConnectionDeadline(uuid: uuid) }
     presentation.setAudioActive(true)
     updateAudioRoute(using: session)
     updateProximityPolicy()
@@ -1415,6 +1504,7 @@ public final class VoiceCallService:
       presentation.setAudioActive(false)
       try? AudioManager.shared.setEngineAvailability(.none)
       microphonePublished = false
+      if let uuid = activeRoomCallUUID { refreshConnectionDeadline(uuid: uuid) }
       setProximityMonitoring(false)
       CallDiagnosticStore.record("audio.in-app.interrupted")
     case .ended:

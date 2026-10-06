@@ -137,3 +137,7 @@ entitlement); takový test je vykázán jako skipped, nikoli PASS.
    potvrdit skutečné dešifrování historie, nejen SDK backupState.
 8. Regrese sdílených vozidel, směrového routingu, reportů/měření a hlasových
    režimů. Žádný reset ostatních doménových dat není součástí tohoto SDK.
+
+## Subsequent delivery successor
+
+For new integrations use the complete published [delivery successor](matrix-delivery-acceptance-handoff.md). The immutable9d recovery release remains historical evidence. Do not downgrade installations with new submission journals to that reader; see successor rollback constraints. Explicit recovery API and preservation requirements above remain applicable.

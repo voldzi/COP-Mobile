@@ -9,6 +9,15 @@ final class HTTPClientTests: XCTestCase {
         super.tearDown()
     }
 
+    func testRegistrationDiagnosticContainsOnlyStatusAndKnownErrorCategory() {
+        XCTAssertEqual(HTTPResponseFailure(statusCode: 401, code: "UNAUTHORIZED").registrationDiagnostic,
+                       "http_401_UNAUTHORIZED")
+        XCTAssertEqual(HTTPResponseFailure(statusCode: 400, code: "PRIVATE_TOKEN_secret").registrationDiagnostic,
+                       "http_400_unknown_code")
+        XCTAssertEqual(HTTPResponseFailure(statusCode: 503, code: nil).registrationDiagnostic,
+                       "http_503_unknown_code")
+    }
+
     func testRetriesOnlyFastifyUnderPressureResponses() async throws {
         PressureURLProtocol.configure { requestNumber in
             if requestNumber < 3 {

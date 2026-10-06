@@ -149,6 +149,8 @@ protocol MessagingBootstrapStoring: Sendable {
 
 protocol MessageOutboxStoring: Sendable {
     func enqueue(_ message: ChatMessage, conversation: Conversation) async throws
+    func enqueueMatrixDraft(_ message: ChatMessage, conversation: Conversation, submission: MatrixDraftSubmission) async throws
+    func updateMatrixSubmission(_ submission: MatrixDraftSubmission, messageId: String, conversationId: String) async throws
     func pendingMessages(for conversationId: String) async throws -> [ChatMessage]
     func pendingRecords(for conversationId: String) async throws -> [PendingMessageRecord]
     func pendingMessageCount() async throws -> Int
@@ -387,4 +389,21 @@ enum CSMServiceError: LocalizedError, Equatable, Sendable {
             message
         }
     }
+}
+
+// A transport cannot queue an SDK send unless its store can durably journal it.
+// Preview/legacy stores fail closed rather than silently ignoring the journal.
+extension MessageOutboxStoring {
+    func enqueueMatrixDraft(_ message: ChatMessage, conversation: Conversation, submission: MatrixDraftSubmission) async throws {
+        throw CSMServiceError.unavailable("Úložiště nepodporuje bezpečnou evidenci odeslání Matrix.")
+    }
+    func updateMatrixSubmission(_ submission: MatrixDraftSubmission, messageId: String, conversationId: String) async throws {
+        throw CSMServiceError.unavailable("Úložiště nepodporuje bezpečnou evidenci odeslání Matrix.")
+    }
+}
+
+protocol MessagingSessionInvalidating: Sendable {
+    /// Invalidates in-flight configuration as well as current receive/send tasks.
+    /// Preserves the crypto store, encrypted history and outbox.
+    func invalidateMessagingSession() async throws
 }

@@ -321,7 +321,7 @@ protocol MessagingSessionAvailability: Sendable {
 }
 
 /// Scope excludes rotating tokens. Private values are never displayed or logged.
-struct MatrixLocalStoreScope: Equatable, Sendable {
+struct MatrixLocalStoreScope: Codable, Equatable, Hashable, Sendable {
     let provider: String
     let homeserver: URL
     let userID: String

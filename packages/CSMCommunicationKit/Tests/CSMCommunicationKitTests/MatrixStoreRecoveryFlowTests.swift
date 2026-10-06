@@ -4,6 +4,105 @@ import XCTest
 
 @MainActor
 final class MatrixStoreRecoveryFlowTests: XCTestCase {
+    func testForegroundTokenRefreshRestartsSelectedConversationEvenIfOldTransportDoesNotFinish() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let api = StoreRecoveryAPI(shortTokenLifetime: true)
+        let live = StreamLifecycleMessaging(finishOnConfigure: false)
+        let model = makeModel(api: api, messaging: live, cache: StoreRecoveryBootstrapCache(), defaults: defaults)
+        await model.start()
+        let conversations = try await api.conversations()
+        let conversation = try XCTUnwrap(conversations.first)
+        await model.selectConversation(conversation)
+        for _ in 0..<200 {
+            if await live.activeCount == 1 { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let before = await live.subscriptionCount
+        await model.appDidBecomeActive()
+        for _ in 0..<200 {
+            if await live.subscriptionCount > before, await live.activeCount == 1 { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let configured = await live.configurationCount
+        XCTAssertGreaterThan(configured, 1)
+        XCTAssertEqual(model.selectedConversation?.conversationId, conversation.conversationId)
+        await live.emit(id: "$after-foreground-refresh", conversation: conversation)
+        for _ in 0..<200 {
+            if model.messages.contains(where: { $0.id == "$after-foreground-refresh" }) { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(model.messages.contains { $0.id == "$after-foreground-refresh" })
+        let active = await live.activeCount
+        XCTAssertEqual(active, 1)
+        await model.signOut()
+    }
+
+    func testSupersededConfigureDoesNotSuspendNewerSelectedStream() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let api = StoreRecoveryAPI()
+        let live = StreamLifecycleMessaging()
+        let model = makeModel(api: api, messaging: live, cache: StoreRecoveryBootstrapCache(), defaults: defaults)
+        await model.start()
+        let conversations = try await api.conversations()
+        let conversation = try XCTUnwrap(conversations.first)
+        await model.selectConversation(conversation)
+        var a = try await api.messagingBootstrap(deviceId: "synthetic-device")
+        a.accessToken = "synthetic-a"
+        var b = a; b.accessToken = "synthetic-b"
+        let pause = StreamConfigurationPause()
+        await live.armConfigurationPause(pause)
+        let old = Task { await model.configureMessagingTransport(with: a, statusText: "online") }
+        await pause.waitUntilEntered()
+        let fresh = await model.configureMessagingTransport(with: b, statusText: "online")
+        XCTAssertTrue(fresh)
+        await pause.release()
+        let staleResult = await old.value
+        XCTAssertFalse(staleResult)
+        let suspends = await live.suspendCount
+        XCTAssertEqual(suspends, 0)
+        for _ in 0..<200 {
+            if await live.activeCount == 1 { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        await live.emit(id: "$newer-still-live", conversation: conversation)
+        for _ in 0..<200 {
+            if model.messages.contains(where: { $0.id == "$newer-still-live" }) { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(model.messages.contains { $0.id == "$newer-still-live" })
+        await model.signOut()
+    }
+
+    func testSignOutInvalidatesDeferredConfigureWithoutRestartingChatOrPusher() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let api = StoreRecoveryAPI()
+        let live = StreamLifecycleMessaging()
+        let push = RecoveryFlowPush(snapshot: MobilePushSnapshot(authorization: .authorized,
+            deviceToken: "synthetic-apns-token", environment: "sandbox", registrationRequestedAt: .now, lastFailure: nil))
+        let model = makeModel(api: api, messaging: live, cache: StoreRecoveryBootstrapCache(), defaults: defaults, push: push)
+        await model.start()
+        let initialPushers = await live.pusherCount
+        XCTAssertGreaterThan(initialPushers, 0, "The signed-in baseline must be able to register a pusher.")
+        let bootstrap = try await api.messagingBootstrap(deviceId: "synthetic-device")
+        let pause = StreamConfigurationPause()
+        await live.armConfigurationPause(pause)
+        let old = Task { await model.configureMessagingTransport(with: bootstrap, statusText: "online") }
+        await pause.waitUntilEntered()
+        await model.signOut()
+        await pause.release()
+        let result = await old.value
+        XCTAssertFalse(result)
+        XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertNil(model.selectedConversation)
+        let active = await live.activeCount
+        let pushers = await live.pusherCount
+        XCTAssertEqual(active, 0)
+        XCTAssertEqual(pushers, initialPushers)
+    }
+
     func test401RefreshesSameDeviceWithoutCryptoRecovery() async throws {
         let api = StoreRecoveryAPI()
         let live = StoreRecoveryMessaging(failure: MatrixAPIError.httpError(401, "M_UNKNOWN_TOKEN"), failOnlyOnce: true)
@@ -222,9 +321,10 @@ final class MatrixStoreRecoveryFlowTests: XCTestCase {
     }
     private func makeModel(api: StoreRecoveryAPI, messaging: any MessagingClientProtocol,
                            cache: StoreRecoveryBootstrapCache, defaults: UserDefaults,
-                           outbox: (any MessageOutboxStoring)? = nil) -> CommunicationModel {
+                           outbox: (any MessageOutboxStoring)? = nil,
+                           push: RecoveryFlowPush? = nil) -> CommunicationModel {
         CommunicationModel(api: api, messaging: messaging, messageOutbox: outbox, messagingBootstrapStore: cache,
-            localAI: DeterministicLocalAIService(), pushNotifications: RecoveryFlowPush(), authSession: RecoveryFlowAuth(),
+            localAI: DeterministicLocalAIService(), pushNotifications: push ?? RecoveryFlowPush(), authSession: RecoveryFlowAuth(),
             securityUnlock: PreviewSecurityUnlock(), matrixRecoveryDefaults: defaults, allowsChatRecoveryWithoutBackup: true)
     }
 }
@@ -296,8 +396,9 @@ private actor RecoveryFlowPause {
     func signOut() async throws {}
 }
 @MainActor private final class RecoveryFlowPush: PushNotificationManaging {
-    var currentSnapshot: MobilePushSnapshot { .unavailable }
-    func prepareForRemoteNotifications() async -> MobilePushSnapshot { .unavailable }
+    var currentSnapshot: MobilePushSnapshot
+    init(snapshot: MobilePushSnapshot = .unavailable) { currentSnapshot = snapshot }
+    func prepareForRemoteNotifications() async -> MobilePushSnapshot { currentSnapshot }
     func recordDeviceToken(_ deviceToken: Data) {}
     func recordRegistrationFailure(_ error: any Error) {}
     func recordRemoteNotification(_ payload: CSMRemoteNotificationPayload) {}
@@ -306,7 +407,10 @@ private actor RecoveryFlowPause {
 private actor StoreRecoveryAPI: CopAPIClientProtocol {
     private var subject: String
     private(set) var requestedDevices: [(String, String)] = []
-    init(subject: String = "account-a") { self.subject = subject }
+    let shortTokenLifetime: Bool
+    init(subject: String = "account-a", shortTokenLifetime: Bool = false) {
+        self.subject = subject; self.shortTokenLifetime = shortTokenLifetime
+    }
     func changeSubject(_ value: String) { subject = value }
     func bootstrap(seconds: Int) async throws -> MobileBootstrap {
         var value = try await PreviewCopAPIClient().bootstrap(seconds: seconds)
@@ -317,6 +421,10 @@ private actor StoreRecoveryAPI: CopAPIClientProtocol {
         requestedDevices.append((subject, deviceId))
         var value = try await PreviewCopAPIClient().messagingBootstrap(deviceId: deviceId)
         value.userId = "@" + subject + ":matrix.test"; value.homeserverBaseUrl = URL(string: "https://matrix.test")!
+        if shortTokenLifetime {
+            value.expiresAt = .now.addingTimeInterval(60)
+            value.accessToken = "synthetic-token-" + String(requestedDevices.count)
+        }
         return value
     }
     func voiceCalls(roomId: String?, activeOnly: Bool, limit: Int) async throws -> [CSMVoiceCall] { [] }

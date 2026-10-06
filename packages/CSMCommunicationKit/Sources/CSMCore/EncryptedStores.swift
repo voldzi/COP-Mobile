@@ -460,12 +460,15 @@ actor EncryptedCommunityOutbox: CommunityOutboxStoring {
 actor EncryptedMessageOutbox: MessageOutboxStoring {
     private let store: EncryptedFileStore<[String: [PendingMessageRecord]]>
     private let outboxId = "message-outbox"
+    private let mutationKey: String
 
     init(
         keychain: KeychainCredentialStore,
         rootDirectory: URL? = nil,
         fixedKeyData: Data? = nil
     ) {
+        let root = rootDirectory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
+        self.mutationKey = "encrypted-outbox:" + MatrixLocalStoreFiles.hash(root.standardizedFileURL.path)
         self.store = EncryptedFileStore(
             directoryName: "MessageOutbox",
             keyAccount: "message-outbox",
@@ -475,7 +478,7 @@ actor EncryptedMessageOutbox: MessageOutboxStoring {
         )
     }
 
-    func enqueue(_ message: ChatMessage, conversation: Conversation) async throws {
+    private func enqueueUnlocked(_ message: ChatMessage, conversation: Conversation) async throws {
         var pending = try await allPendingMessages()
         var roomRecords = pending[conversation.conversationId, default: []]
         roomRecords.removeAll { $0.message.id == message.id }
@@ -487,6 +490,28 @@ actor EncryptedMessageOutbox: MessageOutboxStoring {
             )
         )
         pending[conversation.conversationId] = roomRecords.sorted { $0.queuedAt < $1.queuedAt }
+        try await store.save(pending, id: outboxId)
+    }
+
+    private func enqueueMatrixDraftUnlocked(_ message: ChatMessage, conversation: Conversation, submission: MatrixDraftSubmission) async throws {
+        var pending = try await allPendingMessages()
+        var record = PendingMessageRecord(conversationId: conversation.conversationId, message: message)
+        record.matrixSubmission = submission
+        pending[conversation.conversationId, default: []].append(record)
+        try await store.save(pending, id: outboxId)
+    }
+
+    private func updateMatrixSubmissionUnlocked(_ submission: MatrixDraftSubmission, messageId: String, conversationId: String) async throws {
+        var pending = try await allPendingMessages()
+        guard let index = pending[conversationId]?.firstIndex(where: { $0.message.id == messageId }) else {
+            throw CSMServiceError.invalidState("Čekající zpráva pro evidenci odeslání chybí.")
+        }
+        if let previous = pending[conversationId]![index].matrixSubmission, !submission.canFollow(previous) {
+            throw CSMServiceError.invalidState("Evidence odeslání nesmí změnit vlastníka ani vrátit stav transakce zpět.")
+        }
+        pending[conversationId]![index].message.matrixTransactionID = submission.parts.count == 1 ? submission.parts[0].transactionID : nil
+        pending[conversationId]![index].matrixSubmission = submission
+        pending[conversationId]![index].message.deliveryState = .pending
         try await store.save(pending, id: outboxId)
     }
 
@@ -502,7 +527,7 @@ actor EncryptedMessageOutbox: MessageOutboxStoring {
         try await allPendingMessages().values.reduce(0) { $0 + $1.count }
     }
 
-    func recordAttempt(messageId: String, conversationId: String, error: String, retryAfter: TimeInterval) async throws {
+    private func recordAttemptUnlocked(messageId: String, conversationId: String, error: String, retryAfter: TimeInterval) async throws {
         var pending = try await allPendingMessages()
         let now = Date()
         pending[conversationId, default: []] = pending[conversationId, default: []].map { record in
@@ -520,8 +545,11 @@ actor EncryptedMessageOutbox: MessageOutboxStoring {
         try await store.save(pending, id: outboxId)
     }
 
-    func removeMessage(id: String, conversationId: String) async throws {
+    private func removeMessageUnlocked(id: String, conversationId: String) async throws {
         var pending = try await allPendingMessages()
+        guard !pending[conversationId, default: []].contains(where: { $0.message.id == id && $0.matrixSubmission?.hasUncertainPart == true }) else {
+            throw CSMServiceError.unavailable("Odeslání čeká na potvrzení Matrix; zprávu nelze bezpečně zahodit.")
+        }
         pending[conversationId, default: []].removeAll { $0.message.id == id }
         if pending[conversationId]?.isEmpty == true {
             pending.removeValue(forKey: conversationId)
@@ -530,8 +558,11 @@ actor EncryptedMessageOutbox: MessageOutboxStoring {
     }
 
     @discardableResult
-    func discardPendingMessages(for conversationId: String) async throws -> Int {
+    private func discardPendingMessagesUnlocked(for conversationId: String) async throws -> Int {
         var pending = try await allPendingMessages()
+        guard !pending[conversationId, default: []].contains(where: { $0.matrixSubmission?.hasUncertainPart == true }) else {
+            throw CSMServiceError.unavailable("Fronta obsahuje odeslání čekající na potvrzení Matrix.")
+        }
         let removed = pending[conversationId, default: []].count
         guard removed > 0 else { return 0 }
         pending.removeValue(forKey: conversationId)
@@ -539,8 +570,51 @@ actor EncryptedMessageOutbox: MessageOutboxStoring {
         return removed
     }
 
-    func clear() async throws {
+    private func clearUnlocked() async throws {
         try await store.delete(id: outboxId)
+    }
+
+    func enqueue(_ message: ChatMessage, conversation: Conversation) async throws -> Void {
+        try await MatrixInitializationGate.shared.withExclusive(key: mutationKey) {
+            try await self.enqueueUnlocked(message, conversation: conversation)
+        }
+    }
+
+    func enqueueMatrixDraft(_ message: ChatMessage, conversation: Conversation, submission: MatrixDraftSubmission) async throws -> Void {
+        try await MatrixInitializationGate.shared.withExclusive(key: mutationKey) {
+            try await self.enqueueMatrixDraftUnlocked(message, conversation: conversation, submission: submission)
+        }
+    }
+
+    func updateMatrixSubmission(_ submission: MatrixDraftSubmission, messageId: String, conversationId: String) async throws -> Void {
+        try await MatrixInitializationGate.shared.withExclusive(key: mutationKey) {
+            try await self.updateMatrixSubmissionUnlocked(submission, messageId: messageId, conversationId: conversationId)
+        }
+    }
+
+    func recordAttempt(messageId: String, conversationId: String, error: String, retryAfter: TimeInterval) async throws -> Void {
+        try await MatrixInitializationGate.shared.withExclusive(key: mutationKey) {
+            try await self.recordAttemptUnlocked(messageId: messageId, conversationId: conversationId, error: error, retryAfter: retryAfter)
+        }
+    }
+
+    func removeMessage(id: String, conversationId: String) async throws -> Void {
+        try await MatrixInitializationGate.shared.withExclusive(key: mutationKey) {
+            try await self.removeMessageUnlocked(id: id, conversationId: conversationId)
+        }
+    }
+
+    @discardableResult
+    func discardPendingMessages(for conversationId: String) async throws -> Int {
+        try await MatrixInitializationGate.shared.withExclusive(key: mutationKey) {
+            try await self.discardPendingMessagesUnlocked(for: conversationId)
+        }
+    }
+
+    func clear() async throws -> Void {
+        try await MatrixInitializationGate.shared.withExclusive(key: mutationKey) {
+            try await self.clearUnlocked()
+        }
     }
 
     private func allPendingMessages() async throws -> [String: [PendingMessageRecord]] {

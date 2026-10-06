@@ -948,6 +948,24 @@ actor InMemoryMessageOutbox: MessageOutboxStoring {
         recordsByConversation[conversation.conversationId] = records.sorted { $0.queuedAt < $1.queuedAt }
     }
 
+    func enqueueMatrixDraft(_ message: ChatMessage, conversation: Conversation, submission: MatrixDraftSubmission) throws {
+        var record = PendingMessageRecord(conversationId: conversation.conversationId, message: message)
+        record.matrixSubmission = submission
+        recordsByConversation[conversation.conversationId, default: []].append(record)
+    }
+
+    func updateMatrixSubmission(_ submission: MatrixDraftSubmission, messageId: String, conversationId: String) throws {
+        guard let index = recordsByConversation[conversationId]?.firstIndex(where: { $0.message.id == messageId }) else {
+            throw CSMServiceError.invalidState("Čekající zpráva pro evidenci odeslání chybí.")
+        }
+        if let previous = recordsByConversation[conversationId]![index].matrixSubmission, !submission.canFollow(previous) {
+            throw CSMServiceError.invalidState("Evidence odeslání nesmí změnit vlastníka ani vrátit stav transakce zpět.")
+        }
+        recordsByConversation[conversationId]![index].message.matrixTransactionID = submission.parts.count == 1 ? submission.parts[0].transactionID : nil
+        recordsByConversation[conversationId]![index].matrixSubmission = submission
+        recordsByConversation[conversationId]![index].message.deliveryState = .pending
+    }
+
     func pendingMessages(for conversationId: String) async throws -> [ChatMessage] {
         recordsByConversation[conversationId, default: []].map(\.message)
     }
@@ -977,6 +995,9 @@ actor InMemoryMessageOutbox: MessageOutboxStoring {
     }
 
     func removeMessage(id: String, conversationId: String) async throws {
+        guard !recordsByConversation[conversationId, default: []].contains(where: { $0.message.id == id && $0.matrixSubmission?.hasUncertainPart == true }) else {
+            throw CSMServiceError.unavailable("Odeslání čeká na potvrzení Matrix.")
+        }
         recordsByConversation[conversationId, default: []].removeAll { $0.message.id == id }
         if recordsByConversation[conversationId]?.isEmpty == true {
             recordsByConversation.removeValue(forKey: conversationId)
@@ -985,6 +1006,9 @@ actor InMemoryMessageOutbox: MessageOutboxStoring {
 
     @discardableResult
     func discardPendingMessages(for conversationId: String) async throws -> Int {
+        guard !recordsByConversation[conversationId, default: []].contains(where: { $0.matrixSubmission?.hasUncertainPart == true }) else {
+            throw CSMServiceError.unavailable("Fronta čeká na potvrzení Matrix.")
+        }
         let removed = recordsByConversation[conversationId, default: []].count
         recordsByConversation.removeValue(forKey: conversationId)
         return removed

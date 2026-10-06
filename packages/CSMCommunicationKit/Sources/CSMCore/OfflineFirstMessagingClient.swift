@@ -1,17 +1,20 @@
 import Foundation
 
-actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagnostics, MessagingLifecycleControlling, MessagingLiveMessageStreaming, MessagingLiveLocationSharing, MessagingHistoryPaging, MessagingCachedSnapshotLoading, MessagingConversationPresentationEnriching, MessagingConversationAvatarUpdating, MatrixEncryptionRecoveryManaging, MatrixLocalStoreRecovering, MessagingLocalStoreDiagnosing {
+actor OfflineFirstMessagingClient: MessagingSessionInvalidating, MessagingClientProtocol, MessagingClientDiagnostics, MessagingLifecycleControlling, MessagingLiveMessageStreaming, MessagingLiveLocationSharing, MessagingHistoryPaging, MessagingCachedSnapshotLoading, MessagingConversationPresentationEnriching, MessagingConversationAvatarUpdating, MatrixEncryptionRecoveryManaging, MatrixLocalStoreRecovering, MessagingLocalStoreDiagnosing {
     private let liveClient: any MessagingClientProtocol
+    private let submissionKey = "outbox-send:" + UUID().uuidString
     private let outbox: any MessageOutboxStoring
     private let outboxActor: OutboxActor
     private let history: (any MessageHistoryStoring)?
     private var configurationRevision: UInt64 = 0
+    private var configurationInProgress = false
     private var localRecoveryInProgress = false
     private var isConfigured = false
     private var liveClientReady = false
     private var lastBootstrap: MessagingBootstrap?
     private var localFailure: (scope: MatrixLocalStoreScope, failure: CSMChatLocalStoreFailure)?
     private var lastTransportError: String?
+    private var activeSubmissions: Set<String> = []
 
     init(
         liveClient: any MessagingClientProtocol,
@@ -34,6 +37,8 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
 
         configurationRevision &+= 1
         let revision = configurationRevision
+        configurationInProgress = true
+        defer { if revision == configurationRevision { configurationInProgress = false } }
         let previousBootstrap = lastBootstrap
         let hadReadyLiveClient = liveClientReady
         liveClientReady = false
@@ -106,7 +111,7 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
     func messages(for conversation: Conversation) async throws -> [ChatMessage] {
         let cachedMessages = try await history?.messages(for: conversation.conversationId) ?? []
         guard isConfigured else {
-            let pending = try await outbox.pendingMessages(for: conversation.conversationId)
+            let pending = try await pendingVisibleMessages(for: conversation)
             return merge(liveMessages: cachedMessages, pendingMessages: pending)
         }
 
@@ -141,7 +146,7 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
             }
         }
 
-        let pending = try await outbox.pendingMessages(for: conversation.conversationId)
+        let pending = try await pendingVisibleMessages(for: conversation)
         return merge(liveMessages: liveMessages, pendingMessages: pending)
     }
 
@@ -150,36 +155,47 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
             return Self.singleSnapshotStream(try await messages(for: conversation))
         }
 
+        let scope = lastBootstrap.flatMap(MatrixLocalStoreScope.init)
         return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             let task = Task {
+                defer { continuation.finish() }
                 var reconnectAttempt = 0
                 while !Task.isCancelled {
+                    guard self.isConfigured, self.lastBootstrap.flatMap(MatrixLocalStoreScope.init) == scope else { return }
+                    let revision = self.configurationRevision
                     do {
                         guard let liveStream = try await self.liveMessageStream(for: conversation) else {
-                            continuation.yield(try await self.messages(for: conversation))
-                            continuation.finish()
+                            let snapshot = try await self.messages(for: conversation)
+                            guard revision == self.configurationRevision else { continue }
+                            continuation.yield(snapshot)
                             return
                         }
 
                         reconnectAttempt = 0
                         for await liveMessages in liveStream {
                             guard !Task.isCancelled else { return }
+                            guard revision == self.configurationRevision else { break }
                             let visibleMessages = try await self.visibleMessages(
                                 liveMessages: liveMessages,
-                                conversation: conversation
+                                conversation: conversation, revision: revision
                             )
+                            guard revision == self.configurationRevision else { break }
                             continuation.yield(visibleMessages)
                         }
 
                         guard !Task.isCancelled else { return }
+                        guard revision == self.configurationRevision else { continue }
                         self.recordLiveStreamEnded()
                         if let fallbackMessages = try? await self.messages(for: conversation) {
+                            guard revision == self.configurationRevision else { continue }
                             continuation.yield(fallbackMessages)
                         }
                     } catch {
                         guard !Task.isCancelled else { return }
-                        self.recordLiveStreamFailure(error)
-                        if let fallbackMessages = try? await self.messages(for: conversation) {
+                        guard revision == self.configurationRevision else { continue }
+                        if !self.configurationInProgress { self.recordLiveStreamFailure(error) }
+                        if !self.configurationInProgress, let fallbackMessages = try? await self.messages(for: conversation) {
+                            guard revision == self.configurationRevision else { continue }
                             continuation.yield(fallbackMessages)
                         }
                     }
@@ -222,7 +238,7 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
         } else {
             MessageHistoryPage(messages: [], hasEarlier: false)
         }
-        let pending = try await outbox.pendingMessages(for: conversation.conversationId)
+        let pending = try await pendingVisibleMessages(for: conversation)
         return MessageHistoryPage(
             messages: merge(
                 liveMessages: cached.messages,
@@ -304,6 +320,12 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
             throw CSMServiceError.unavailable(reason)
         }
 
+        if let sender = liveClient as? any MatrixDraftSending {
+            return try await MatrixInitializationGate.shared.withExclusive(key: submissionKey) {
+                try await self.enqueueAndSubmitTrackedDraft(draft, to: conversation, sender: sender)
+            }
+        }
+
         let attemptedAt = Date()
         do {
             let sent = try await liveClient.sendMessage(draft, to: conversation)
@@ -349,8 +371,89 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
         }
     }
 
+    private func enqueueAndSubmitTrackedDraft(_ draft: OutgoingMessageDraft, to conversation: Conversation,
+                                              sender: any MatrixDraftSending) async throws -> ChatMessage {
+        guard isConfigured, liveClientReady, let bootstrap = lastBootstrap,
+              let scope = MatrixLocalStoreScope(bootstrap) else { throw CancellationError() }
+        guard let roomID = conversation.activeMatrixRoomId else { throw MatrixAPIError.missingRoomBinding(conversation.conversationId) }
+        let revision = configurationRevision
+        var pending = makePendingMessage(draft, conversation: conversation)
+        pending.requiresExactMatrixAcknowledgement = true
+        pending.senderId = scope.userID
+        pending.roomId = conversation.activeMatrixRoomId ?? conversation.conversationId
+        let state = MatrixDraftSubmission(scope: scope, draft: draft, roomID: roomID)
+        try await outbox.enqueueMatrixDraft(pending, conversation: conversation, submission: state)
+        guard revision == configurationRevision else { throw CancellationError() }
+        let record = PendingMessageRecord(conversationId: conversation.conversationId, message: pending)
+        return try await submitTrackedRecord(record, draft: draft, submission: state,
+            sender: sender, conversation: conversation, revision: revision)
+    }
+
+    private func persistMatrixSubmission(_ state: MatrixDraftSubmission, record: PendingMessageRecord,
+                                         revision: UInt64) async throws {
+        guard revision == configurationRevision, isConfigured,
+              lastBootstrap.flatMap(MatrixLocalStoreScope.init) == state.scope else { throw CancellationError() }
+        try await outbox.updateMatrixSubmission(state, messageId: record.id, conversationId: record.conversationId)
+        guard revision == configurationRevision else { throw CancellationError() }
+    }
+
+    private func submitTrackedRecord(_ record: PendingMessageRecord, draft: OutgoingMessageDraft,
+                                     submission: MatrixDraftSubmission, sender: any MatrixDraftSending,
+                                     conversation: Conversation, revision: UInt64) async throws -> ChatMessage {
+        activeSubmissions.insert(record.id)
+        defer { activeSubmissions.remove(record.id) }
+        do {
+            let state = try await sender.submitMatrixDraft(draft, to: conversation, submission: submission) { state in
+                try await self.persistMatrixSubmission(state, record: record, revision: revision)
+            }
+            guard revision == configurationRevision else { throw CancellationError() }
+            if state.isConfirmed {
+                var sent = record.message
+                sent.id = state.parts[0].eventID!
+                sent.deliveryState = .sent
+                sent.attachments = sent.attachments.map { var value = $0; value.localOnly = false; return value }
+                try await history?.appendMessage(sent, conversationId: conversation.conversationId)
+                guard revision == configurationRevision else { throw CancellationError() }
+                try await outbox.removeMessage(id: record.id, conversationId: conversation.conversationId)
+                guard revision == configurationRevision else { throw CancellationError() }
+                lastTransportError = nil
+                return sent
+            }
+            // Draft failures belong to the scoped journal, not a transport-wide
+            // banner that could block an unrelated conversation.
+            lastTransportError = nil
+            return record.message
+        } catch {
+            guard revision == configurationRevision else { throw CancellationError() }
+            // The durable journal owns the result, even when the SDK call or
+            // persisting its acknowledgement failed. No fresh transaction here.
+            lastTransportError = nil
+            return record.message
+        }
+    }
+
+    private func pendingVisibleMessages(for conversation: Conversation) async throws -> [ChatMessage] {
+        let records = try await outbox.pendingRecords(for: conversation.conversationId)
+        guard liveClient is any MatrixDraftSending else { return records.map(\.message) }
+        let scope = lastBootstrap.flatMap(MatrixLocalStoreScope.init)
+        return records.filter { $0.matrixSubmission?.scope == scope && scope != nil && $0.matrixSubmission?.roomID == conversation.activeMatrixRoomId }.map(\.message)
+    }
+
     func registerPusher(pushKey: String, pushGatewayURL: URL) async throws {
         try await liveClient.registerPusher(pushKey: pushKey, pushGatewayURL: pushGatewayURL)
+    }
+
+    func invalidateMessagingSession() async throws {
+        configurationRevision &+= 1
+        configurationInProgress = false
+        isConfigured = false
+        liveClientReady = false
+        lastBootstrap = nil
+        if let invalidating = liveClient as? any MessagingSessionInvalidating {
+            try await invalidating.invalidateMessagingSession()
+        } else {
+            try await (liveClient as? any MessagingLifecycleControlling)?.suspendMessaging()
+        }
     }
 
     func resumeMessaging() async throws {
@@ -360,6 +463,7 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
 
     func suspendMessaging() async throws {
         configurationRevision &+= 1
+        configurationInProgress = false
         liveClientReady = false
         guard let lifecycle = liveClient as? any MessagingLifecycleControlling else { return }
         try await lifecycle.suspendMessaging()
@@ -450,11 +554,18 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
     }
 
     func latestTransportError(for conversation: Conversation?) async -> String? {
-        if let conversation,
-           let recordError = try? await outbox.pendingRecords(for: conversation.conversationId)
-            .last(where: { $0.lastError?.isEmpty == false })?
-            .lastError {
-            return recordError
+        let revision = configurationRevision
+        if let conversation, let records = try? await outbox.pendingRecords(for: conversation.conversationId) {
+            guard revision == configurationRevision else { return nil }
+            if liveClient is any MatrixDraftSending {
+                let scope = lastBootstrap.flatMap(MatrixLocalStoreScope.init)
+                if let submission = records.last(where: { $0.matrixSubmission?.scope == scope && scope != nil &&
+                    $0.matrixSubmission?.roomID == conversation.activeMatrixRoomId })?.matrixSubmission {
+                    return submission.failure?.message ?? (submission.hasUncertainPart ? MatrixDraftSubmission.Failure.awaitingAcknowledgement.message : lastTransportError)
+                }
+                return lastTransportError
+            }
+            if let recordError = records.last(where: { $0.lastError?.isEmpty == false })?.lastError { return recordError }
         }
         return lastTransportError
     }
@@ -476,6 +587,10 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
     }
 
     func redactMessage(_ message: ChatMessage, in conversation: Conversation) async throws -> ChatMessage {
+        let records = try await outbox.pendingRecords(for: conversation.conversationId)
+        guard !records.contains(where: { $0.id == message.id && $0.matrixSubmission?.hasUncertainPart == true }) else {
+            throw CSMServiceError.unavailable("Odeslání čeká na potvrzení Matrix; zprávu nelze bezpečně stáhnout.")
+        }
         if isConfigured, liveClientReady {
             do {
                 let updated = try await liveClient.redactMessage(message, in: conversation)
@@ -556,6 +671,12 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
             throw CSMServiceError.unavailable(lastTransportError ?? "Matrix E2EE klient zatim neni pripraven.")
         }
 
+        if let sender = liveClient as? any MatrixDraftSending {
+            return try await MatrixInitializationGate.shared.withExclusive(key: submissionKey) {
+                try await self.synchronizeTrackedDrafts(for: conversation, sender: sender)
+            }
+        }
+
         var result = MessageOutboxSyncResult.empty
         result.delivered += await reconcilePendingMessagesAlreadyConfirmedIfPossible(for: conversation)
         let records = try await outbox.pendingRecords(for: conversation.conversationId)
@@ -634,22 +755,63 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
             body.contains("unable to decrypt")
     }
 
+    private func synchronizeTrackedDrafts(for conversation: Conversation, sender: any MatrixDraftSending) async throws -> MessageOutboxSyncResult {
+        let revision = configurationRevision
+        guard let scope = lastBootstrap.flatMap(MatrixLocalStoreScope.init) else { return .empty }
+        var result = MessageOutboxSyncResult.empty
+        let records = try await outbox.pendingRecords(for: conversation.conversationId)
+        for record in records {
+            guard revision == configurationRevision else { throw CancellationError() }
+            // Unscoped historical sends are not proof that the SDK never queued
+            // them. Retain them for explicit reconciliation; never blind retry.
+            guard let submission = record.matrixSubmission, submission.scope == scope,
+                  submission.roomID == conversation.activeMatrixRoomId else { continue }
+            let reconciled = try await sender.reconcileMatrixDraft(submission, in: conversation)
+            guard revision == configurationRevision else { throw CancellationError() }
+            try await persistMatrixSubmission(reconciled, record: record, revision: revision)
+            if !reconciled.isConfirmed, !reconciled.canResume { continue }
+            let draft = OutgoingMessageDraft(body: record.message.body,
+                attachments: record.message.attachments, replyTo: record.message.replyTo)
+            result.attempted += 1
+            if !reconciled.isConfirmed {
+                let message = try await submitTrackedRecord(record, draft: draft, submission: reconciled,
+                    sender: sender, conversation: conversation, revision: revision)
+                if message.deliveryState == .sent { result.delivered += 1 }
+                continue
+            }
+            var sent = record.message
+            sent.id = reconciled.parts[0].eventID!
+            sent.deliveryState = .sent
+            try await history?.appendMessage(sent, conversationId: conversation.conversationId)
+            guard revision == configurationRevision else { throw CancellationError() }
+            try await outbox.removeMessage(id: record.id, conversationId: conversation.conversationId)
+            guard revision == configurationRevision else { throw CancellationError() }
+            result.delivered += 1
+        }
+        return result
+    }
+
     private func visibleMessages(
         liveMessages: [ChatMessage],
-        conversation: Conversation
+        conversation: Conversation, revision: UInt64
     ) async throws -> [ChatMessage] {
+        guard revision == configurationRevision else { throw CancellationError() }
         let reconciliation = try await removePendingMessagesAlreadyConfirmedByMatrix(
             liveMessages: liveMessages,
             conversation: conversation
         )
+        guard revision == configurationRevision else { throw CancellationError() }
         let cachedMessages = try await history?.messages(for: conversation.conversationId) ?? []
+        guard revision == configurationRevision else { throw CancellationError() }
         let mergedHistory = mergeHistory(
             cachedMessages: cachedMessages,
             liveMessages: reconciliation.messages
         )
         try await history?.saveMessages(mergedHistory, conversationId: conversation.conversationId)
+        guard revision == configurationRevision else { throw CancellationError() }
         lastTransportError = nil
-        let pending = try await outbox.pendingMessages(for: conversation.conversationId)
+        let pending = try await pendingVisibleMessages(for: conversation)
+        guard revision == configurationRevision else { throw CancellationError() }
         return merge(liveMessages: mergedHistory, pendingMessages: pending)
     }
 
@@ -664,6 +826,8 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
     }
 
     private func liveMessageStream(for conversation: Conversation) async throws -> AsyncStream<[ChatMessage]>? {
+        guard !configurationInProgress else { throw CancellationError() }
+        let revision = configurationRevision
         if !liveClientReady {
             try await restoreLiveClientIfPossible()
         }
@@ -671,7 +835,9 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
               let liveStreaming = liveClient as? any MessagingLiveMessageStreaming else {
             return nil
         }
-        return try await liveStreaming.messageSnapshots(for: conversation)
+        let stream = try await liveStreaming.messageSnapshots(for: conversation)
+        guard revision == configurationRevision else { throw CancellationError() }
+        return stream
     }
 
     private static func liveStreamReconnectDelayNanoseconds(attempt: Int) -> UInt64 {
@@ -696,10 +862,35 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
             return PendingMessageReconciliationResult(messages: liveMessages, removedCount: 0)
         }
 
+        if liveClient is any MatrixDraftSending {
+            let revision = configurationRevision
+            guard let scope = lastBootstrap.flatMap(MatrixLocalStoreScope.init) else {
+                return PendingMessageReconciliationResult(messages: liveMessages, removedCount: 0)
+            }
+            var removed = 0
+            for record in records where !activeSubmissions.contains(record.id) {
+                guard var state = record.matrixSubmission, state.scope == scope,
+                      state.roomID == conversation.activeMatrixRoomId else { continue }
+                let previous = state
+                for message in liveMessages where message.isOwnMessage && message.id.hasPrefix("$") &&
+                    message.senderId == scope.userID && message.roomId == (conversation.activeMatrixRoomId ?? conversation.conversationId) {
+                    guard let transaction = message.matrixTransactionID else { continue }
+                    state.confirm(transactionID: transaction, eventID: message.id)
+                }
+                guard revision == configurationRevision else { throw CancellationError() }
+                if state != previous { try await persistMatrixSubmission(state, record: record, revision: revision) }
+                if state.isConfirmed {
+                    try await outbox.removeMessage(id: record.id, conversationId: conversation.conversationId)
+                    guard revision == configurationRevision else { throw CancellationError() }
+                    removed += 1
+                }
+            }
+            return PendingMessageReconciliationResult(messages: liveMessages, removedCount: removed)
+        }
         var unmatchedLiveMessages = liveMessages.filter(Self.canConfirmPendingRecord)
         var reconciledMessages = liveMessages
         var removedCount = 0
-        for record in records where Self.recordMayHaveReachedMatrix(record) {
+        for record in records where record.matrixSubmission == nil && !(liveClient is any MatrixDraftSending) && Self.recordMayHaveReachedMatrix(record) {
             guard let index = unmatchedLiveMessages.firstIndex(where: { Self.liveMessage($0, confirms: record) }) else {
                 continue
             }

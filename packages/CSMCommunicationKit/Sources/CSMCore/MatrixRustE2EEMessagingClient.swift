@@ -16,7 +16,7 @@ import UIKit
 /// the SDK handle Megolm encryption, room key sharing, media encryption and
 /// local crypto state. It deliberately checks encrypted-room state before
 /// sending whenever COP/CSM policy marks the conversation as E2EE-required.
-actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycleControlling, MessagingLiveMessageStreaming, MessagingLiveLocationSharing, MessagingHistoryPaging, MessagingConversationPresentationEnriching, MessagingConversationAvatarUpdating, MatrixEncryptionRecoveryManaging, MatrixLocalStoreRecovering, MessagingSessionAvailability {
+actor MatrixRustE2EEMessagingClient: MatrixDraftSending, MessagingSessionInvalidating, MessagingClientProtocol, MessagingLifecycleControlling, MessagingLiveMessageStreaming, MessagingLiveLocationSharing, MessagingHistoryPaging, MessagingConversationPresentationEnriching, MessagingConversationAvatarUpdating, MatrixEncryptionRecoveryManaging, MatrixLocalStoreRecovering, MessagingSessionAvailability {
     private static let userAgent = "COP Mobile iOS/0.1.2 MatrixRustSDK/26.06.23"
     private static let preflightUserAgent = "COP Mobile iOS/0.1.2 Matrix preflight"
     private static let historyPageSize: UInt16 = 100
@@ -47,6 +47,7 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
     private var syncHandle: TaskHandle?
     private var syncListener: MatrixRustSyncListener?
     private var timelineSubscriptions: [String: MatrixRustTimelineSubscription] = [:]
+    private var timelineGeneration: UInt64 = 0
     private var timelineHasEarlierMessages: [String: Bool] = [:]
     private var avatarDataURLCache: [String: String] = [:]
     private var unavailableAvatarURLs: [String: Date] = [:]
@@ -229,8 +230,9 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
 
     func messages(for conversation: Conversation) async throws -> [ChatMessage] {
         let context = try requireSessionContext()
+        let generation = timelineGeneration
         let room = try await joinedRoom(for: conversation)
-        let subscription = try await timelineSubscription(for: room)
+        let subscription = try await timelineSubscription(for: room, generation: generation)
 
         await loadInitialHistoryPage(subscription, roomID: room.id())
         let items = subscription.listener.snapshot()
@@ -245,31 +247,37 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
 
     func messageSnapshots(for conversation: Conversation) async throws -> AsyncStream<[ChatMessage]> {
         let context = try requireSessionContext()
+        let generation = timelineGeneration
         let room = try await joinedRoom(for: conversation)
-        let subscription = try await timelineSubscription(for: room)
-
+        let subscription = try await timelineSubscription(for: room, generation: generation)
         await loadInitialHistoryPage(subscription, roomID: room.id())
-
         let roomId = room.id()
         let initialPinnedEventIds = await pinnedEventIds(in: room)
+        guard generation == timelineGeneration else { throw CancellationError() }
         return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
-            let observerId = subscription.listener.addObserver { items in
+            let observerId = subscription.listener.addObserver({ items in
                 Task {
-                    let pinnedEventIds = await self.pinnedEventIds(in: room, fallback: initialPinnedEventIds)
-                    let messages = await self.mappedMessages(
-                        from: items,
-                        roomId: roomId,
-                        ownUserId: context.userId,
-                        pinnedEventIds: pinnedEventIds
-                    )
+                    guard let messages = await self.currentSnapshot(
+                        items, room: room, ownUserId: context.userId,
+                        pinned: initialPinnedEventIds, generation: generation
+                    ) else { return }
                     continuation.yield(messages)
                 }
-            }
-
+            }, onInvalidation: { continuation.finish() })
             continuation.onTermination = { _ in
                 subscription.listener.removeObserver(id: observerId)
             }
         }
+    }
+
+    private func currentSnapshot(_ items: [TimelineItem], room: Room, ownUserId: String,
+                                 pinned: Set<String>, generation: UInt64) async -> [ChatMessage]? {
+        guard generation == timelineGeneration else { return nil }
+        let pinnedIDs = await pinnedEventIds(in: room, fallback: pinned)
+        guard generation == timelineGeneration else { return nil }
+        let messages = await mappedMessages(from: items, roomId: room.id(),
+            ownUserId: ownUserId, pinnedEventIds: pinnedIDs)
+        return generation == timelineGeneration ? messages : nil
     }
 
     func hasEarlierMessages(for conversation: Conversation) async -> Bool {
@@ -282,8 +290,9 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
         limit: Int
     ) async throws -> MessageHistoryPage {
         let context = try requireSessionContext()
+        let generation = timelineGeneration
         let room = try await joinedRoom(for: conversation)
-        let subscription = try await timelineSubscription(for: room)
+        let subscription = try await timelineSubscription(for: room, generation: generation)
         let pinned = await pinnedEventIds(in: room)
         let existing = await mappedMessages(
             from: subscription.listener.snapshot(),
@@ -473,7 +482,15 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
     /// accepted at the normal message power level and is already consumed by
     /// the web client. Numeric coordinates deliberately stay in `geo_uri`:
     /// Matrix canonical JSON rejects floating-point values.
-    private func sendWebCompatibleLiveLocation(
+    private func sendWebCompatibleLiveLocation(_ location: GeoPoint,
+                                               session: LiveLocationCompatibilitySession,
+                                               status: String, room: Room) async throws {
+        try await MatrixInitializationGate.shared.withExclusive(key: "send:" + initializationID) {
+            try await self.sendWebCompatibleLiveLocationSerial(location, session: session, status: status, room: room)
+        }
+    }
+
+    private func sendWebCompatibleLiveLocationSerial(
         _ location: GeoPoint,
         session: LiveLocationCompatibilitySession,
         status: String,
@@ -528,68 +545,191 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
     }
 
     private func sendMessageOnce(_ draft: OutgoingMessageDraft, to conversation: Conversation) async throws -> ChatMessage {
+        guard let bootstrap = lastBootstrap, let scope = MatrixLocalStoreScope(bootstrap) else {
+            throw MatrixAPIError.missingBootstrap
+        }
+        let submission = try await submitMatrixDraft(draft, to: conversation,
+            submission: MatrixDraftSubmission(scope: scope, draft: draft, roomID: conversation.activeMatrixRoomId ?? ""), persist: { _ in })
         let context = try requireSessionContext()
-        guard !draft.isEmpty else {
-            throw CSMServiceError.invalidState("Zprava je prazdna.")
-        }
-        if let validationError = MessageAttachmentPolicy.validationError(for: draft) {
-            throw CSMServiceError.invalidState(validationError)
-        }
+        return ChatMessage(id: submission.isConfirmed ? submission.parts[0].eventID! : "matrix-awaiting-" + UUID().uuidString,
+            roomId: conversation.activeMatrixRoomId ?? conversation.conversationId,
+            senderId: context.userId, senderDisplayName: Self.matrixDisplayName(context.userId),
+            body: draft.body, attachments: draft.attachments, replyTo: draft.replyTo,
+            sentAt: .now, deliveryState: submission.isConfirmed ? .sent : .pending, isOwnMessage: true)
+    }
 
+    func submitMatrixDraft(_ draft: OutgoingMessageDraft, to conversation: Conversation,
+                           submission: MatrixDraftSubmission,
+                           persist: @escaping @Sendable (MatrixDraftSubmission) async throws -> Void) async throws -> MatrixDraftSubmission {
+        try await MatrixInitializationGate.shared.withExclusive(key: "send:" + initializationID) {
+            try await self.submitSerialMatrixDraft(draft, to: conversation, submission: submission, persist: persist)
+        }
+    }
+
+    private func submitSerialMatrixDraft(_ draft: OutgoingMessageDraft, to conversation: Conversation,
+                                        submission: MatrixDraftSubmission,
+                                        persist: @escaping @Sendable (MatrixDraftSubmission) async throws -> Void) async throws -> MatrixDraftSubmission {
+        let context = try requireSessionContext()
+        let generation = timelineGeneration
+        guard let bootstrap = lastBootstrap, MatrixLocalStoreScope(bootstrap) == submission.scope,
+              submission.roomID == conversation.activeMatrixRoomId,
+              MatrixDraftSubmission(scope: submission.scope, draft: draft, roomID: submission.roomID).parts.count == submission.parts.count,
+              !draft.isEmpty else { throw CancellationError() }
+        if let invalid = MessageAttachmentPolicy.validationError(for: draft) { throw CSMServiceError.invalidState(invalid) }
+        var result = try await reconcileMatrixDraft(submission, in: conversation)
+        try await persist(result)
+        guard generation == timelineGeneration else { throw CancellationError() }
+        guard result.canResume else { return result }
         let room = try await joinedRoom(for: conversation)
         try await ensureEncryptedRoomIfRequired(room, conversation: conversation, context: context)
-        await enableAllSendQueuesBestEffort(reason: "pre-send")
-        let subscription = try await timelineSubscription(for: room)
-
-        var confirmedEventId: String?
-        if draft.attachments.isEmpty {
-            confirmedEventId = try await sendText(
-                draft.body,
-                replyTo: draft.replyTo,
-                room: room,
-                subscription: subscription
-            )
-        } else {
-            try await sendStructuredDraft(draft, room: room, subscription: subscription)
+        let subscription = try await timelineSubscription(for: room, generation: generation)
+        let safetyOnly = !draft.attachments.isEmpty && draft.attachments.allSatisfy { $0.kind == .safetyStatus }
+        for index in result.parts.indices where result.parts[index].state == .notStarted {
+            try Task.checkCancellation()
+            guard generation == timelineGeneration else { throw CancellationError() }
+            let tracker = MatrixRustSendQueueTracker(roomId: room.id())
+            // The pinned API immediately replays existing queue events during
+            // subscription. Capture their complete IDs before this sole send.
+            let handle = try await room.subscribeToSendQueueUpdates(listener: tracker)
+            defer { handle.cancel() }
+            let baseline = tracker.snapshotTransactionIds()
+            guard generation == timelineGeneration else { throw CancellationError() }
+            // Journal the uncertain state before entering an SDK operation.
+            // A crash in the following gap must never create a second send.
+            result.parts[index].state = .queuing
+            try await persist(result)
+            guard generation == timelineGeneration else { throw CancellationError() }
+            if draft.attachments.isEmpty || safetyOnly {
+                let body = draft.body.isEmpty ? draft.attachments.map(\.title).joined(separator: "\n") : draft.body
+                let content = messageEventContentFromMarkdown(md: body.trimmingCharacters(in: .whitespacesAndNewlines))
+                if let reply = draft.replyTo {
+                    _ = try await subscription.timeline.sendReply(msg: content, eventId: reply.messageId)
+                } else { _ = try await subscription.timeline.send(msg: content) }
+            } else {
+                try await sendAttachment(draft.attachments[index], caption: index == 0 ? draft.body : nil,
+                    replyTo: index == 0 ? draft.replyTo : nil, room: room, subscription: subscription)
+            }
+            let deadline = Date().addingTimeInterval(20)
+            repeat {
+                try Task.checkCancellation()
+                guard generation == timelineGeneration else { throw CancellationError() }
+                if result.parts[index].transactionID == nil,
+                   let transaction = tracker.singleNewTransactionId(excluding: baseline) {
+                    result.parts[index].transactionID = transaction
+                    result.parts[index].state = .queued
+                    try await persist(result)
+                    guard generation == timelineGeneration else { throw CancellationError() }
+                }
+                if let transaction = result.parts[index].transactionID {
+                    if let eventID = tracker.sentEventId(for: transaction), eventID.hasPrefix("$") {
+                        result.confirm(transactionID: transaction, eventID: eventID)
+                        try await persist(result)
+                        break
+                    }
+                    for item in subscription.listener.snapshot() {
+                        guard let event = item.asEvent(), event.isRemote, event.isOwn,
+                              event.sender == result.scope.userID,
+                              Self.exactTransactionID(from: event) == transaction,
+                              let eventID = Self.confirmedEventId(from: event) else { continue }
+                        result.confirm(transactionID: transaction, eventID: eventID)
+                    }
+                    if result.parts[index].state == .confirmed {
+                        try await persist(result)
+                        break
+                    }
+                    if let failure = tracker.failure(for: transaction) {
+                        result.failure = Self.boundedSendFailure(failure.error)
+                        try await persist(result)
+                        return result
+                    }
+                }
+                try await Task.sleep(for: .milliseconds(150))
+            } while Date() < deadline
+            guard generation == timelineGeneration else { throw CancellationError() }
+            guard result.parts[index].state == .confirmed else {
+                logger.notice("matrix-send=awaiting_exact_ack")
+                result.failure = .awaitingAcknowledgement
+                try await persist(result)
+                return result
+            }
         }
+        return result
+    }
 
-        return ChatMessage(
-            id: confirmedEventId ?? "matrix-local-\(UUID().uuidString)",
-            roomId: room.id(),
-            senderId: context.userId,
-            senderDisplayName: Self.matrixDisplayName(context.userId),
-            body: draft.body,
-            attachments: draft.attachments.map { attachment in
-                var sentAttachment = attachment
-                sentAttachment.localOnly = false
-                return sentAttachment
-            },
-            replyTo: draft.replyTo,
-            sentAt: .now,
-            deliveryState: .sent,
-            isOwnMessage: true
-        )
+    private static func boundedSendFailure(_ error: QueueWedgeError) -> MatrixDraftSubmission.Failure {
+        switch error {
+        case .insecureDevices: .untrustedDevices
+        case .identityViolations: .identityChanged
+        case .crossVerificationRequired: .verificationRequired
+        case .missingMediaContent: .missingAttachment
+        case .invalidMimeType: .invalidAttachmentType
+        case .genericApiError: .serviceUnavailable
+        }
+    }
+
+    func reconcileMatrixDraft(_ submission: MatrixDraftSubmission, in conversation: Conversation) async throws -> MatrixDraftSubmission {
+        let generation = timelineGeneration
+        guard let bootstrap = lastBootstrap, MatrixLocalStoreScope(bootstrap) == submission.scope,
+              submission.roomID == conversation.activeMatrixRoomId else { throw CancellationError() }
+        var result = submission
+        guard result.hasUncertainPart else { return result }
+        let room = try await joinedRoom(for: conversation)
+        let subscription = try await timelineSubscription(for: room, generation: generation)
+        let tracker = MatrixRustSendQueueTracker(roomId: room.id())
+        let handle = try await room.subscribeToSendQueueUpdates(listener: tracker)
+        defer { handle.cancel() }
+        guard generation == timelineGeneration else { throw CancellationError() }
+        for part in result.parts {
+            guard let transaction = part.transactionID, let eventID = tracker.sentEventId(for: transaction) else { continue }
+            result.confirm(transactionID: transaction, eventID: eventID)
+        }
+        // On restart an already sent event has left the SDK queue. Only the
+        // server's exact unsigned.transaction_id can confirm that part.
+        for item in subscription.listener.snapshot() {
+            guard let event = item.asEvent(), event.isOwn, event.isRemote,
+                  event.sender == submission.scope.userID,
+                  let eventID = Self.confirmedEventId(from: event),
+                  let json = event.lazyProvider.debugInfo().originalJson,
+                  let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+                  let transaction = (object["unsigned"] as? [String: Any])?["transaction_id"] as? String else { continue }
+            result.confirm(transactionID: transaction, eventID: eventID)
+        }
+        return result
     }
 
     func toggleReaction(_ emoji: String, on message: ChatMessage, in conversation: Conversation) async throws -> ChatMessage {
+        try await MatrixInitializationGate.shared.withExclusive(key: "send:" + initializationID) {
+            try await self.toggleReactionSerial(emoji, on: message, in: conversation)
+        }
+    }
+
+    private func toggleReactionSerial(_ emoji: String, on message: ChatMessage, in conversation: Conversation) async throws -> ChatMessage {
         let key = String(emoji.trimmingCharacters(in: .whitespacesAndNewlines).prefix(8))
         guard !key.isEmpty else { return message }
         guard message.deliveryState != .pending else {
             throw CSMServiceError.invalidState("Reakci na lokalne cekajici zpravu nelze synchronizovat s Matrix.")
         }
 
+        let generation = timelineGeneration
         let room = try await joinedRoom(for: conversation)
-        let subscription = try await timelineSubscription(for: room)
+        let subscription = try await timelineSubscription(for: room, generation: generation)
 
         _ = try await subscription.timeline.toggleReaction(itemId: Self.eventOrTransactionId(for: message.id), key: key)
         return message.applyingReactionToggle(key)
     }
 
     func redactMessage(_ message: ChatMessage, in conversation: Conversation) async throws -> ChatMessage {
+        try await MatrixInitializationGate.shared.withExclusive(key: "send:" + initializationID) {
+            try await self.redactMessageSerial(message, in: conversation)
+        }
+    }
+
+    private func redactMessageSerial(_ message: ChatMessage, in conversation: Conversation) async throws -> ChatMessage {
         guard !message.isDeleted else { return message }
 
+        let generation = timelineGeneration
         let room = try await joinedRoom(for: conversation)
-        let subscription = try await timelineSubscription(for: room)
+        let subscription = try await timelineSubscription(for: room, generation: generation)
         try await subscription.timeline.redactEvent(
             eventOrTransactionId: Self.eventOrTransactionId(for: message.id),
             reason: "CSM message deleted"
@@ -598,6 +738,12 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
     }
 
     func setMessagePinned(_ pinned: Bool, message: ChatMessage, in conversation: Conversation) async throws -> ChatMessage {
+        try await MatrixInitializationGate.shared.withExclusive(key: "send:" + initializationID) {
+            try await self.setMessagePinnedSerial(pinned, message: message, in: conversation)
+        }
+    }
+
+    private func setMessagePinnedSerial(_ pinned: Bool, message: ChatMessage, in conversation: Conversation) async throws -> ChatMessage {
         guard !message.isDeleted else {
             throw CSMServiceError.invalidState("Smazanou zpravu nelze pripnout.")
         }
@@ -605,8 +751,9 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
             throw CSMServiceError.invalidState("Zpravu lze pripnout az po potvrzeni serverem.")
         }
 
+        let generation = timelineGeneration
         let room = try await joinedRoom(for: conversation)
-        let subscription = try await timelineSubscription(for: room)
+        let subscription = try await timelineSubscription(for: room, generation: generation)
         if pinned {
             _ = try await subscription.timeline.pinEvent(eventId: message.id)
         } else {
@@ -615,7 +762,13 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
         return message.settingPinned(pinned)
     }
 
-    func leaveConversation(_ conversation: Conversation) async throws {
+    func leaveConversation(_ conversation: Conversation) async throws -> Void {
+        try await MatrixInitializationGate.shared.withExclusive(key: "send:" + initializationID) {
+            try await self.leaveConversationSerial(conversation)
+        }
+    }
+
+    private func leaveConversationSerial(_ conversation: Conversation) async throws {
         guard conversation.type == .group else {
             throw CSMServiceError.invalidState("Matrix leave je dostupný jen pro skupinové konverzace.")
         }
@@ -665,6 +818,23 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
     func hasUsableMessagingSession(for bootstrap: MessagingBootstrap) async -> Bool {
         guard client != nil, let context = sessionContext else { return false }
         return context.userId == bootstrap.userId && context.deviceId == bootstrap.deviceId && context.homeserverURL == bootstrap.homeserverBaseUrl
+    }
+
+    func invalidateMessagingSession() async throws {
+        configurationRevision &+= 1
+        let revision = configurationRevision
+        cancelTimelineSubscriptions()
+        lastBootstrap = nil
+        try await MatrixInitializationGate.shared.withExclusive(key: "client:" + initializationID) {
+            await self.invalidateConfiguredClient(revision: revision)
+        }
+    }
+
+    private func invalidateConfiguredClient(revision: UInt64) async {
+        guard revision == configurationRevision else { return }
+        if let client { await client.enableAllSendQueues(enable: false) }
+        guard revision == configurationRevision else { return }
+        await stopSyncService()
     }
 
     func resumeMessaging() async throws {
@@ -1109,13 +1279,15 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
         }
     }
 
-    private func timelineSubscription(for room: Room) async throws -> MatrixRustTimelineSubscription {
+    private func timelineSubscription(for room: Room, generation: UInt64) async throws -> MatrixRustTimelineSubscription {
+        guard generation == timelineGeneration else { throw CancellationError() }
         let roomId = room.id()
         if let subscription = timelineSubscriptions[roomId] {
             return subscription
         }
 
         let timeline = try await room.timeline()
+        guard generation == timelineGeneration else { throw CancellationError() }
         let listener = MatrixRustTimelineCache()
         let handle = await timeline.addListener(listener: listener)
         let subscription = MatrixRustTimelineSubscription(
@@ -1123,6 +1295,16 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
             listener: listener,
             handle: handle
         )
+        guard generation == timelineGeneration else {
+            listener.invalidate()
+            handle.cancel()
+            throw CancellationError()
+        }
+        if let existing = timelineSubscriptions[roomId] {
+            listener.invalidate()
+            handle.cancel()
+            return existing
+        }
         timelineSubscriptions[roomId] = subscription
         return subscription
     }
@@ -1172,391 +1354,6 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
 
     // MARK: - Send helpers
 
-    private func sendStructuredDraft(
-        _ draft: OutgoingMessageDraft,
-        room: Room,
-        subscription: MatrixRustTimelineSubscription
-    ) async throws {
-        if !draft.attachments.isEmpty, draft.attachments.allSatisfy({ $0.kind == .safetyStatus }) {
-            let body = draft.body.isEmpty
-                ? draft.attachments.map(\.title).joined(separator: "\n")
-                : draft.body
-            _ = try await sendText(body, replyTo: draft.replyTo, room: room, subscription: subscription)
-            return
-        }
-
-        for (index, attachment) in draft.attachments.enumerated() {
-            let caption = index == 0 ? draft.body : nil
-            let replyTo = index == 0 ? draft.replyTo : nil
-            try await sendAttachment(
-                attachment,
-                caption: caption,
-                replyTo: replyTo,
-                room: room,
-                subscription: subscription
-            )
-        }
-    }
-
-    private func sendText(
-        _ body: String,
-        replyTo: MessageReplyReference?,
-        room: Room,
-        subscription: MatrixRustTimelineSubscription
-    ) async throws -> String? {
-        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        let content = messageEventContentFromMarkdown(md: trimmed)
-        if let replyTo {
-            _ = try await subscription.timeline.sendReply(msg: content, eventId: replyTo.messageId)
-            return nil
-        } else {
-            let queueTracker = MatrixRustSendQueueTracker(roomId: room.id())
-            let roomQueueHandle = try? await room.subscribeToSendQueueUpdates(listener: queueTracker)
-            let matrixClient = try? requireClient()
-            let clientQueueHandle = try? await matrixClient?.subscribeToSendQueueUpdates(listener: queueTracker)
-            if roomQueueHandle == nil, clientQueueHandle == nil {
-                logger.warning("Matrix send queue tracker unavailable for room \(room.id(), privacy: .public); falling back to timeline echo only.")
-            }
-            defer {
-                roomQueueHandle?.cancel()
-                clientQueueHandle?.cancel()
-            }
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            let baselineTimelineItems = subscription.listener.snapshot()
-            let baselineTransactionIds = queueTracker.snapshotTransactionIds()
-            let baselineRemoteEventIds = Self.remoteEventIds(in: baselineTimelineItems)
-            let startedAtMs = Self.currentUnixMilliseconds()
-            let sendHandle = try await subscription.timeline.send(msg: content)
-            return try await waitForSendQueueConfirmation(
-                room: room,
-                subscription: subscription,
-                body: trimmed,
-                startedAtMs: startedAtMs,
-                queueTracker: roomQueueHandle == nil && clientQueueHandle == nil ? nil : queueTracker,
-                queueErrorTracker: nil,
-                baselineTransactionIds: baselineTransactionIds,
-                baselineRemoteEventIds: baselineRemoteEventIds,
-                sendHandle: sendHandle
-            )
-        }
-    }
-
-    private func waitForSendQueueConfirmation(
-        room: Room,
-        subscription: MatrixRustTimelineSubscription,
-        body: String,
-        startedAtMs: UInt64,
-        queueTracker: MatrixRustSendQueueTracker?,
-        queueErrorTracker: MatrixRustSendQueueErrorTracker?,
-        baselineTransactionIds: Set<String>,
-        baselineRemoteEventIds: Set<String>,
-        sendHandle: SendHandle
-    ) async throws -> String {
-        let deadline = Date().addingTimeInterval(20)
-        var attemptedAutomaticRecovery = false
-        var lastFailureDescription: String?
-        var trackedTransactionId: String?
-        var latestMatchingEvent: EventTimelineItem?
-
-        repeat {
-            if let eventId = Self.latestConfirmedOwnEventId(
-                in: subscription.listener.snapshot(),
-                body: body,
-                startedAtMs: startedAtMs,
-                baselineRemoteEventIds: baselineRemoteEventIds
-            ) {
-                return eventId
-            }
-
-            if let event = Self.latestOwnLocalEcho(
-                in: subscription.listener.snapshot(),
-                body: body,
-                startedAtMs: startedAtMs
-            ) {
-                latestMatchingEvent = event
-                trackedTransactionId = trackedTransactionId ?? Self.transactionId(from: event)
-                switch event.localSendState {
-                case .sent(let eventId):
-                    return eventId
-                case .sendingFailed(let error, let isRecoverable):
-                    lastFailureDescription = Self.queueWedgeDescription(error, recoverable: isRecoverable)
-                    if let eventId = await latestConfirmedOwnEventId(
-                        room: room,
-                        subscription: subscription,
-                        body: body,
-                        startedAtMs: startedAtMs,
-                        baselineRemoteEventIds: baselineRemoteEventIds
-                    ) {
-                        return eventId
-                    }
-                    if !attemptedAutomaticRecovery,
-                       try await attemptAutomaticSendQueueRecovery(
-                        error: error,
-                        event: event,
-                        fallbackSendHandle: sendHandle,
-                        room: room
-                       ) {
-                        attemptedAutomaticRecovery = true
-                        lastFailureDescription = nil
-                        await enableAllSendQueuesBestEffort(reason: "trust-recovery")
-                        try await Task.sleep(nanoseconds: 350_000_000)
-                        continue
-                    }
-                    throw CSMServiceError.unavailable(
-                        "Matrix E2EE send queue selhala: \(lastFailureDescription ?? "unknown failure")."
-                    )
-                case .notSentYet:
-                    break
-                case nil:
-                    if let eventId = Self.confirmedEventId(from: event) {
-                        return eventId
-                    }
-                }
-            }
-
-            if trackedTransactionId == nil,
-               let candidate = queueTracker?.singleNewTransactionId(excluding: baselineTransactionIds) {
-                trackedTransactionId = candidate
-            }
-
-            if let trackedTransactionId,
-               let eventId = queueTracker?.sentEventId(for: trackedTransactionId) {
-                return eventId
-            }
-
-            if trackedTransactionId == nil,
-               let eventId = queueTracker?.singleNewSentEventId(excluding: baselineTransactionIds) {
-                return eventId
-            }
-
-            if let trackedTransactionId,
-               let failure = queueTracker?.failure(for: trackedTransactionId) {
-                lastFailureDescription = Self.queueWedgeDescription(failure.error, recoverable: failure.isRecoverable)
-                if let eventId = await latestConfirmedOwnEventId(
-                    room: room,
-                    subscription: subscription,
-                    body: body,
-                    startedAtMs: startedAtMs,
-                    baselineRemoteEventIds: baselineRemoteEventIds
-                ) {
-                    return eventId
-                }
-                if !attemptedAutomaticRecovery,
-                   try await attemptAutomaticSendQueueRecovery(
-                    error: failure.error,
-                    event: latestMatchingEvent,
-                    fallbackSendHandle: sendHandle,
-                    room: room
-                   ) {
-                    attemptedAutomaticRecovery = true
-                    lastFailureDescription = nil
-                    await enableAllSendQueuesBestEffort(reason: "trust-recovery")
-                    try await Task.sleep(nanoseconds: 350_000_000)
-                    continue
-                }
-                throw CSMServiceError.unavailable(
-                    "Matrix E2EE send queue selhala: \(lastFailureDescription ?? "unknown failure")."
-                )
-            }
-
-            if let queueError = queueErrorTracker?.latestErrorDescription() {
-                lastFailureDescription = queueError
-            }
-
-            try await Task.sleep(nanoseconds: 350_000_000)
-        } while Date() < deadline
-
-        if let lastFailureDescription {
-            throw CSMServiceError.unavailable("Matrix E2EE send queue zustala zablokovana: \(lastFailureDescription).")
-        }
-
-        if let eventId = await latestConfirmedOwnEventId(
-            room: room,
-            subscription: subscription,
-            body: body,
-            startedAtMs: startedAtMs,
-            baselineRemoteEventIds: baselineRemoteEventIds
-        ) {
-            return eventId
-        }
-
-        if let eventId = try await attemptTimeoutSendQueueRecovery(
-            room: room,
-            subscription: subscription,
-            body: body,
-            startedAtMs: startedAtMs,
-            queueTracker: queueTracker,
-            queueErrorTracker: queueErrorTracker,
-            baselineTransactionIds: baselineTransactionIds,
-            baselineRemoteEventIds: baselineRemoteEventIds,
-            sendHandle: sendHandle,
-            trackedTransactionId: trackedTransactionId
-        ) {
-            return eventId
-        }
-
-        let aborted = (try? await sendHandle.abort()) ?? false
-        if !aborted {
-            let fallbackEventId = Self.unconfirmedEventId(transactionId: trackedTransactionId)
-            logger.warning(
-                "Matrix send queue confirmation timed out for room \(room.id(), privacy: .public), but the local echo could not be aborted. Treating message as sent with fallback id \(fallbackEventId, privacy: .public)."
-            )
-            return fallbackEventId
-        }
-
-        throw CSMServiceError.unavailable(
-            "Matrix E2EE send queue nepotvrdila odeslani v limitu; lokalni Matrix echo bylo zruseno a zprava zustane v aplikacni sifrovane fronte."
-        )
-    }
-
-    private func attemptTimeoutSendQueueRecovery(
-        room: Room,
-        subscription: MatrixRustTimelineSubscription,
-        body: String,
-        startedAtMs: UInt64,
-        queueTracker: MatrixRustSendQueueTracker?,
-        queueErrorTracker: MatrixRustSendQueueErrorTracker?,
-        baselineTransactionIds: Set<String>,
-        baselineRemoteEventIds: Set<String>,
-        sendHandle: SendHandle,
-        trackedTransactionId: String?
-    ) async throws -> String? {
-        do {
-            try await sendHandle.tryResend()
-            await enableAllSendQueuesBestEffort(reason: "timeout-resend")
-        } catch {
-            logger.warning("Matrix send queue timeout resend skipped for room \(room.id(), privacy: .public): \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
-
-        logger.warning("Matrix send queue timeout reached for room \(room.id(), privacy: .public); forced SDK resend before falling back to local outbox.")
-        var trackedTransactionId = trackedTransactionId
-        let deadline = Date().addingTimeInterval(8)
-
-        repeat {
-            if let eventId = await latestConfirmedOwnEventId(
-                room: room,
-                subscription: subscription,
-                body: body,
-                startedAtMs: startedAtMs,
-                baselineRemoteEventIds: baselineRemoteEventIds
-            ) {
-                return eventId
-            }
-
-            if trackedTransactionId == nil,
-               let candidate = queueTracker?.singleNewTransactionId(excluding: baselineTransactionIds) {
-                trackedTransactionId = candidate
-            }
-
-            if let trackedTransactionId,
-               let eventId = queueTracker?.sentEventId(for: trackedTransactionId) {
-                return eventId
-            }
-
-            if trackedTransactionId == nil,
-               let eventId = queueTracker?.singleNewSentEventId(excluding: baselineTransactionIds) {
-                return eventId
-            }
-
-            if let trackedTransactionId,
-               let failure = queueTracker?.failure(for: trackedTransactionId) {
-                throw CSMServiceError.unavailable(
-                    "Matrix E2EE send queue selhala po obnoveni: \(Self.queueWedgeDescription(failure.error, recoverable: failure.isRecoverable))."
-                )
-            }
-
-            if let queueError = queueErrorTracker?.latestErrorDescription() {
-                throw CSMServiceError.unavailable(
-                    "Matrix E2EE send queue zustala zablokovana po obnoveni: \(queueError)."
-                )
-            }
-
-            try await Task.sleep(nanoseconds: 350_000_000)
-        } while Date() < deadline
-
-        return nil
-    }
-
-    private func latestConfirmedOwnEventId(
-        room: Room,
-        subscription: MatrixRustTimelineSubscription,
-        body: String,
-        startedAtMs: UInt64,
-        baselineRemoteEventIds: Set<String>
-    ) async -> String? {
-        if let eventId = Self.latestOwnRemoteEventId(
-            in: subscription.listener.snapshot(),
-            body: body,
-            startedAtMs: startedAtMs,
-            baselineRemoteEventIds: baselineRemoteEventIds
-        ) {
-            return eventId
-        }
-
-        if let matrixClient = try? requireClient() {
-            await syncOnceBestEffort(using: matrixClient, timeoutMs: 3_000, fullState: false, reason: "send-confirmation")
-        }
-        try? await Task.sleep(nanoseconds: 300_000_000)
-
-        if let eventId = Self.latestOwnRemoteEventId(
-            in: subscription.listener.snapshot(),
-            body: body,
-            startedAtMs: startedAtMs,
-            baselineRemoteEventIds: baselineRemoteEventIds
-        ) {
-            return eventId
-        }
-
-        guard let latestEventId = await subscription.timeline.latestEventId(),
-              let event = try? await subscription.timeline.getEventTimelineItemByEventId(eventId: latestEventId),
-              let confirmedEventId = Self.confirmedOwnEventIdAfterSend(
-                from: event,
-                body: body,
-                startedAtMs: startedAtMs,
-                baselineRemoteEventIds: baselineRemoteEventIds
-              ) else {
-            logger.warning("Matrix send confirmation fallback could not resolve a remote event id for room \(room.id(), privacy: .public).")
-            return nil
-        }
-        if confirmedEventId != latestEventId {
-            logger.warning("Matrix send confirmation resolved event id \(confirmedEventId, privacy: .public) while timeline latest id was \(latestEventId, privacy: .public).")
-        }
-        return confirmedEventId
-    }
-
-    private func attemptAutomaticSendQueueRecovery(
-        error: QueueWedgeError,
-        event: EventTimelineItem?,
-        fallbackSendHandle: SendHandle,
-        room: Room
-    ) async throws -> Bool {
-        let sendHandle = event?.lazyProvider.getSendHandle() ?? fallbackSendHandle
-
-        switch error {
-        case .insecureDevices(let userDeviceMap):
-            guard !userDeviceMap.isEmpty else { return false }
-            try await room.ignoreDeviceTrustAndResend(devices: userDeviceMap, sendHandle: sendHandle)
-            logger.warning(
-                "Matrix send queue auto-recovered insecure device trust wedge in room \(room.id(), privacy: .public), affected users \(userDeviceMap.count, privacy: .public)."
-            )
-            return true
-
-        case .identityViolations(let users):
-            guard !users.isEmpty else { return false }
-            try await room.withdrawVerificationAndResend(userIds: users, sendHandle: sendHandle)
-            logger.warning(
-                "Matrix send queue auto-recovered identity trust wedge in room \(room.id(), privacy: .public), affected users \(users.count, privacy: .public)."
-            )
-            return true
-
-        case .crossVerificationRequired, .missingMediaContent, .invalidMimeType, .genericApiError:
-            return false
-        }
-    }
-
     private func enableAllSendQueuesBestEffort(reason: String) async {
         do {
             let matrixClient = try requireClient()
@@ -1592,7 +1389,9 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
                 .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n")
-            _ = try await sendText(body, replyTo: replyTo, room: room, subscription: subscription)
+            let content = messageEventContentFromMarkdown(md: body)
+            if let replyTo { _ = try await timeline.sendReply(msg: content, eventId: replyTo.messageId) }
+            else { _ = try await timeline.send(msg: content) }
         case .image, .video, .document, .voiceNote, .sticker:
             let fileURL = try await MediaPipelineActor.shared.materializedFile(for: attachment)
             try await sendFileAttachment(
@@ -1637,7 +1436,7 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
                     isAnimated: nil
                 )
             )
-            try await handle.join()
+            _ = handle // Starting an upload is not a Matrix event acknowledgement.
         case .video:
             let handle = try timeline.sendVideo(
                 params: params,
@@ -1653,7 +1452,7 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
                     blurhash: nil
                 )
             )
-            try await handle.join()
+            _ = handle // Starting an upload is not a Matrix event acknowledgement.
         case .voiceNote:
             let handle = try timeline.sendVoiceMessage(
                 params: params,
@@ -1664,7 +1463,7 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
                 ),
                 waveform: []
             )
-            try await handle.join()
+            _ = handle // Starting an upload is not a Matrix event acknowledgement.
         case .document:
             let handle = try timeline.sendFile(
                 params: params,
@@ -1675,7 +1474,7 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
                     thumbnailSource: nil
                 )
             )
-            try await handle.join()
+            _ = handle // Starting an upload is not a Matrix event acknowledgement.
         case .location, .safetyStatus:
             break
         }
@@ -1711,7 +1510,11 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
     }
 
     private func cancelTimelineSubscriptions() {
-        timelineSubscriptions.values.forEach { $0.handle.cancel() }
+        timelineGeneration &+= 1
+        timelineSubscriptions.values.forEach {
+            $0.listener.invalidate()
+            $0.handle.cancel()
+        }
         timelineSubscriptions.removeAll()
     }
 
@@ -1809,6 +1612,20 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
 
     // MARK: - Mapping
 
+    private static func exactTransactionID(from event: EventTimelineItem) -> String? {
+        if case .transactionId(let transaction) = event.eventOrTransactionId { return transaction }
+        guard event.isOwn, event.isRemote,
+              let json = event.lazyProvider.debugInfo().originalJson,
+              let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else { return nil }
+        return (object["unsigned"] as? [String: Any])?["transaction_id"] as? String
+    }
+
+    private static func eventIdentifier(_ event: EventTimelineItem) -> String {
+        switch event.eventOrTransactionId {
+        case .eventId(let id), .transactionId(let id): return id
+        }
+    }
+
     private static func messages(
         from items: [TimelineItem],
         roomId: String,
@@ -1816,7 +1633,14 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
         pinnedEventIds: Set<String>
     ) -> [ChatMessage] {
         let messages = items
-            .compactMap { Self.chatMessage(from: $0, roomId: roomId, ownUserId: ownUserId, pinnedEventIds: pinnedEventIds) }
+            .compactMap { item -> ChatMessage? in
+                guard var message = Self.chatMessage(from: item, roomId: roomId, ownUserId: ownUserId, pinnedEventIds: pinnedEventIds) else { return nil }
+                if message.isOwnMessage, let event = item.asEvent() {
+                    message.requiresExactMatrixAcknowledgement = true
+                    message.matrixTransactionID = Self.exactTransactionID(from: event)
+                }
+                return message
+            }
             .sorted {
                 $0.sentAt == $1.sentAt ? $0.id < $1.id : $0.sentAt < $1.sentAt
             }
@@ -1849,6 +1673,12 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
             }
         }
         for index in mapped.indices {
+            if mapped[index].isOwnMessage {
+                mapped[index].requiresExactMatrixAcknowledgement = true
+                if let event = items.compactMap({ $0.asEvent() }).first(where: { Self.eventIdentifier($0) == mapped[index].id }) {
+                    mapped[index].matrixTransactionID = Self.exactTransactionID(from: event)
+                }
+            }
             mapped[index].senderAvatarUrl = avatarURLsBySender[mapped[index].senderId]
             mapped[index].senderAvatarDataUrl = resolvedBySender[mapped[index].senderId]
         }
@@ -2054,137 +1884,12 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
         }
     }
 
-    private static func latestOwnLocalEcho(
-        in items: [TimelineItem],
-        body: String,
-        startedAtMs: UInt64
-    ) -> EventTimelineItem? {
-        items
-            .compactMap { $0.asEvent() }
-            .filter { event in
-                guard event.isOwn else { return false }
-                guard bodyPreview(from: event.content) == body else { return false }
-
-                if let localCreatedAt = event.localCreatedAt {
-                    return localCreatedAt + 1_500 >= startedAtMs
-                }
-                return event.timestamp + 1_500 >= startedAtMs
-            }
-            .sorted { lhs, rhs in
-                (lhs.localCreatedAt ?? lhs.timestamp) < (rhs.localCreatedAt ?? rhs.timestamp)
-            }
-            .last
-    }
-
-    private static func latestOwnRemoteEventId(
-        in items: [TimelineItem],
-        body: String,
-        startedAtMs: UInt64,
-        baselineRemoteEventIds: Set<String>
-    ) -> String? {
-        latestConfirmedOwnEventId(
-            in: items,
-            body: body,
-            startedAtMs: startedAtMs,
-            baselineRemoteEventIds: baselineRemoteEventIds
-        )
-    }
-
-    private static func latestConfirmedOwnEventId(
-        in items: [TimelineItem],
-        body: String,
-        startedAtMs: UInt64,
-        baselineRemoteEventIds: Set<String>
-    ) -> String? {
-        items
-            .compactMap { $0.asEvent() }
-            .compactMap { event -> (UInt64, String)? in
-                guard let eventId = confirmedOwnEventIdAfterSend(
-                    from: event,
-                    body: body,
-                    startedAtMs: startedAtMs,
-                    baselineRemoteEventIds: baselineRemoteEventIds
-                ) else {
-                    return nil
-                }
-                return (event.localCreatedAt ?? event.timestamp, eventId)
-            }
-            .sorted { $0.0 < $1.0 }
-            .last?
-            .1
-    }
-
-    private static func remoteEventIds(in items: [TimelineItem]) -> Set<String> {
-        Set(
-            items
-                .compactMap { $0.asEvent() }
-                .compactMap(confirmedEventId(from:))
-        )
-    }
-
-    private static func transactionId(from event: EventTimelineItem) -> String? {
-        guard case .transactionId(let transactionId) = event.eventOrTransactionId,
-              !transactionId.isEmpty else {
-            return nil
-        }
-        return transactionId
-    }
-
     private static func confirmedEventId(from event: EventTimelineItem) -> String? {
         guard case .eventId(let eventId) = event.eventOrTransactionId,
               !eventId.isEmpty else {
             return nil
         }
         return eventId
-    }
-
-    private static func confirmedOwnEventIdAfterSend(
-        from event: EventTimelineItem,
-        body: String,
-        startedAtMs: UInt64,
-        baselineRemoteEventIds: Set<String>
-    ) -> String? {
-        guard event.isOwn,
-              let eventId = confirmedEventId(from: event) else {
-            return nil
-        }
-        let eventIsNewInTimeline = !baselineRemoteEventIds.contains(eventId)
-        let eventTimeIsPlausible = Self.eventTimestampIsPlausibleAfterSend(event, startedAtMs: startedAtMs)
-        guard eventIsNewInTimeline || eventTimeIsPlausible else {
-            return nil
-        }
-
-        let preview = bodyPreview(from: event.content)
-        if preview == body {
-            return eventId
-        }
-
-        // Matrix Rust can expose the just-accepted encrypted remote echo before
-        // the local timeline has decrypted it back into the original plaintext
-        // body. At this point Synapse has already returned a server event id, so
-        // keeping a crisis message as local `pending` is misleading. Restrict
-        // this weak confirmation to own, fresh, server-backed echoes only.
-        if event.isRemote, isUndecryptedOwnEchoPreview(preview), eventIsNewInTimeline {
-            return eventId
-        }
-
-        return nil
-    }
-
-    private static func eventTimestampIsPlausibleAfterSend(
-        _ event: EventTimelineItem,
-        startedAtMs: UInt64
-    ) -> Bool {
-        // Prefer the local echo timestamp when the SDK exposes one. Server event
-        // timestamps are generated by Synapse and can be hours behind a phone
-        // whose local clock is wrong; using the baseline event-id set above is
-        // the primary skew-safe confirmation path.
-        let observedAtMs = event.localCreatedAt ?? event.timestamp
-        return observedAtMs + 1_500 >= startedAtMs
-    }
-
-    private static func isUndecryptedOwnEchoPreview(_ preview: String) -> Bool {
-        preview == "Sifrovana zprava" || preview == "Zprava"
     }
 
     private static func queueWedgeDescription(_ error: QueueWedgeError, recoverable: Bool) -> String {
@@ -2359,19 +2064,6 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
         case .transactionId(let transactionId):
             return transactionId.isEmpty ? fallback : transactionId
         }
-    }
-
-    private static func unconfirmedEventId(transactionId: String?) -> String {
-        let safeTransactionId = transactionId?
-            .filter { character in
-                character.isLetter || character.isNumber || character == "-" || character == "_"
-            }
-            .prefix(48)
-
-        if let safeTransactionId, !safeTransactionId.isEmpty {
-            return "matrix-unconfirmed-\(safeTransactionId)"
-        }
-        return "matrix-unconfirmed-\(UUID().uuidString)"
     }
 
     private static func eventOrTransactionId(for messageId: String) -> EventOrTransactionId {
@@ -2686,7 +2378,7 @@ private struct MatrixRustTimelineSubscription {
     var handle: TaskHandle
 }
 
-private struct MatrixRustQueuedSendFailure {
+struct MatrixRustQueuedSendFailure {
     var error: QueueWedgeError
     var isRecoverable: Bool
 }
@@ -2735,7 +2427,7 @@ private extension RecoveryState {
     }
 }
 
-private final class MatrixRustSendQueueTracker: SendQueueListener, SendQueueRoomUpdateListener, @unchecked Sendable {
+final class MatrixRustSendQueueTracker: SendQueueListener, SendQueueRoomUpdateListener, @unchecked Sendable {
     private let lock = NSLock()
     private let roomId: String?
     private var updates: [RoomSendQueueUpdate] = []
@@ -2863,15 +2555,18 @@ private final class MatrixRustSendQueueErrorTracker: SendQueueRoomErrorListener,
     }
 }
 
-private final class MatrixRustTimelineCache: TimelineListener, @unchecked Sendable {
+final class MatrixRustTimelineCache: TimelineListener, @unchecked Sendable {
     private let lock = NSLock()
     private var items: [TimelineItem] = []
     private var observers: [UUID: @Sendable ([TimelineItem]) -> Void] = [:]
+    private var invalidations: [UUID: @Sendable () -> Void] = [:]
+    private var invalidated = false
 
     func onUpdate(diff: [TimelineDiff]) {
         let snapshot: [TimelineItem]
         let callbacks: [@Sendable ([TimelineItem]) -> Void]
         lock.lock()
+        guard !invalidated else { lock.unlock(); return }
         for update in diff {
             apply(update)
         }
@@ -2890,12 +2585,14 @@ private final class MatrixRustTimelineCache: TimelineListener, @unchecked Sendab
         return items
     }
 
-    func addObserver(_ observer: @escaping @Sendable ([TimelineItem]) -> Void) -> UUID {
+    func addObserver(_ observer: @escaping @Sendable ([TimelineItem]) -> Void,
+                     onInvalidation: @escaping @Sendable () -> Void) -> UUID {
         let id = UUID()
-        let snapshot: [TimelineItem]
         lock.lock()
+        guard !invalidated else { lock.unlock(); onInvalidation(); return id }
         observers[id] = observer
-        snapshot = items
+        invalidations[id] = onInvalidation
+        let snapshot = items
         lock.unlock()
         observer(snapshot)
         return id
@@ -2904,7 +2601,21 @@ private final class MatrixRustTimelineCache: TimelineListener, @unchecked Sendab
     func removeObserver(id: UUID) {
         lock.lock()
         observers.removeValue(forKey: id)
+        invalidations.removeValue(forKey: id)
         lock.unlock()
+    }
+
+    /// End every consumer when its SDK timeline is replaced. Merely cancelling
+    /// the Rust handle leaves Swift AsyncStream consumers waiting forever.
+    func invalidate() {
+        lock.lock()
+        guard !invalidated else { lock.unlock(); return }
+        invalidated = true
+        let callbacks = Array(invalidations.values)
+        observers.removeAll()
+        invalidations.removeAll()
+        lock.unlock()
+        callbacks.forEach { $0() }
     }
 
     private func apply(_ update: TimelineDiff) {

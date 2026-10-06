@@ -461,3 +461,7 @@ bezpečnostní a privacy gate.
 The bounded Jizda facade in ADR 0016 shares the authenticated HTTP client and
 route DTO validation. It is stateless: route matching, MapKit rendering,
 progress, alternatives UI, speech and trip lifecycle remain Jizda-owned.
+
+## Exact delivery and lifecycle
+
+Production Matrix sends use an encrypted per-part journal bound to the original account/device/room and complete SDK transaction. Only exact server ACKs produce sent; uncertain or legacy unscoped records remain held. Reconfiguration terminates old timeline streams and fences async cache insertion and snapshots; sign-out invalidates transport without erasing stores. Voice connected requires server connected and native media readiness, with bounded setup/server-ACK stages. See [ADR 0022](adr/0022-exact-matrix-delivery-and-lifecycle.md).

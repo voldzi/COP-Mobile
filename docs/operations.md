@@ -172,3 +172,7 @@ Wi-Fi jako důkaz dostupného COP backendu.
 ## Local encrypted chat recovery
 
 Do not repair AEAD by deleting a Matrix root, replacing its key, increasing device generation or using a server crypto/account reset. The shared UI/API requires confirmation and validates a new device session. Pending/selected device routing survives restart, while original roots and credentials are retained. DEBUG-only Boolean `CSMAllowChatRecoveryWithoutBackup` is the authorized test-build policy; Release always rejects it. Rollback and real-device acceptance are in [the handoff](matrix-store-recovery-handoff.md).
+
+## Matrix journal release and rollback
+
+Pin the complete successor SDK union and over-install without store/account reset. Do not downgrade to a reader that ignores the submission journal while tracked records exist; it may blindly replay them. Preserve pending/crypto/history and issue a forward correction retaining ownership/exact-ACK guards. No server configuration or restart is included. See [acceptance handoff](matrix-delivery-acceptance-handoff.md).
