@@ -2,7 +2,7 @@
 
 ## Integrace
 
-Použijte nový kompletní release této větve `codex/matrix-recovery-diagnostics`,
+Použijte nový kompletní release této větve `codex/matrix-recovery-diagnostics-release`,
 navazující na neměnný `2708100c2e650a0bb3726c7d5b0fa94fd2a3aed9`
 (a celý původní union `108f4c2b125bc75b312dcdc57240cd7842f60182`).
 Pinujte celý veřejný commit obsahující tento dokument, předaný v release zprávě.
@@ -71,8 +71,15 @@ Zmrazený candidate má cílený gate PASS (exit 0): **35 testů, 1 skipped,
 0 selhání**. Log: `/private/tmp/cop-matrix-recovery-diagnostics-targeted-fenced.log`.
 Nové async fixtures ověřují také suspended configure A→B bez předčasného
 verified-open a zpožděný diagnostic read po novém úspěšném configure.
-Kompletní `scripts/check.sh` tohoto candidate zatím čeká na dokončení;
-instalace/publikace není akceptována pouze na základě této cílené sady.
+Kompletní `bash scripts/check.sh` následně skončil **exit 0** beze změny
+SDK či testů: skeleton/toolchain/19 Device fixtures/iOS config/diff PASS;
+COP Mobile unit 30, UI 5, package XCTest 171 (2 skipped), Swift Testing 2,
+accessibility 2, bez selhání. Log
+`/private/tmp/cop-matrix-recovery-diagnostics-check-final.log`. První full gate
+selhal v offline-map→chat UI (zůstal spinner); příčina zdržení není potvrzená.
+Finální release přidává pouze dokumentaci k neměnnému candidate; SDK/apps/scripts
+a fixtures jsou stejné. [Podrobnosti včetně původního selhání a fyzických
+mezer](archive/2026-10-06-matrix-recovery-diagnostics-acceptance.md).
 
 ## Ověření předchozího release
 
