@@ -1,6 +1,6 @@
 import Foundation
 
-actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagnostics, MessagingLifecycleControlling, MessagingLiveMessageStreaming, MessagingLiveLocationSharing, MessagingHistoryPaging, MessagingCachedSnapshotLoading, MessagingConversationPresentationEnriching, MessagingConversationAvatarUpdating, MatrixEncryptionRecoveryManaging, MatrixLocalStoreRecovering {
+actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagnostics, MessagingLifecycleControlling, MessagingLiveMessageStreaming, MessagingLiveLocationSharing, MessagingHistoryPaging, MessagingCachedSnapshotLoading, MessagingConversationPresentationEnriching, MessagingConversationAvatarUpdating, MatrixEncryptionRecoveryManaging, MatrixLocalStoreRecovering, MessagingLocalStoreDiagnosing {
     private let liveClient: any MessagingClientProtocol
     private let outbox: any MessageOutboxStoring
     private let outboxActor: OutboxActor
@@ -10,6 +10,7 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
     private var isConfigured = false
     private var liveClientReady = false
     private var lastBootstrap: MessagingBootstrap?
+    private var localFailure: (scope: MatrixLocalStoreScope, failure: CSMChatLocalStoreFailure)?
     private var lastTransportError: String?
 
     init(
@@ -35,16 +36,24 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
         let revision = configurationRevision
         let previousBootstrap = lastBootstrap
         let hadReadyLiveClient = liveClientReady
+        liveClientReady = false
+        if lastBootstrap.flatMap(MatrixLocalStoreScope.init) != MatrixLocalStoreScope(bootstrap) {
+            localFailure = nil
+        }
         isConfigured = true
         lastBootstrap = bootstrap
         do {
             try await liveClient.configure(with: bootstrap)
             guard revision == configurationRevision, !localRecoveryInProgress else { throw CancellationError() }
             liveClientReady = true
+            localFailure = nil
             lastTransportError = nil
         } catch {
             guard revision == configurationRevision, !localRecoveryInProgress else { throw CancellationError() }
             lastTransportError = error.localizedDescription
+            if let typed = error as? MatrixLocalStoreError, let scope = MatrixLocalStoreScope(bootstrap) {
+                localFailure = (scope, typed.failure)
+            }
             var retainUsableSession = false
             if Self.canKeepExistingLiveReceiveSession(
                 after: error,
@@ -81,7 +90,17 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
         lastBootstrap = bootstrap
         isConfigured = true
         liveClientReady = true
+        localFailure = nil
         lastTransportError = nil
+    }
+
+    func localStoreDiagnostic(for bootstrap: MessagingBootstrap) -> MatrixLocalStoreDiagnostic? {
+        guard let scope = MatrixLocalStoreScope(bootstrap),
+              lastBootstrap.flatMap(MatrixLocalStoreScope.init) == scope else { return nil }
+        return MatrixLocalStoreDiagnostic(
+            failure: localFailure?.scope == scope ? localFailure?.failure : nil,
+            isVerifiedOpen: liveClientReady && !localRecoveryInProgress
+        )
     }
 
     func messages(for conversation: Conversation) async throws -> [ChatMessage] {
@@ -919,15 +938,9 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
     private func restoreLiveClientIfPossible() async throws {
         guard !localRecoveryInProgress else { throw CancellationError() }
         guard let bootstrap = lastBootstrap else { return }
-        do {
-            try await liveClient.configure(with: bootstrap)
-            liveClientReady = true
-            lastTransportError = nil
-        } catch {
-            liveClientReady = false
-            lastTransportError = error.localizedDescription
-            throw error
-        }
+        // Use the same fenced, typed configure path as ordinary startup. A
+        // caught retry error must remain available as structured diagnostics.
+        try await configure(with: bootstrap)
     }
 
     private static func canKeepExistingLiveReceiveSession(

@@ -62,6 +62,7 @@ final class CommunicationModel {
                 matrixLocalRecoveryRevision &+= 1
                 lastMessagingBootstrap = nil
                 matrixLocalStoreFailure = nil
+                matrixLocalStoreFailureScope = nil
                 matrixLocalRecoveryErrorText = nil
                 messagingTransportReadyForPusher = false
             }
@@ -177,6 +178,8 @@ final class CommunicationModel {
     private var messagingBootstrapIssuedAt: Date?
     private var lastMessagingBootstrap: MessagingBootstrap?
     private(set) var matrixLocalStoreFailure: CSMChatLocalStoreFailure?
+    private var matrixLocalStoreFailureScope: MatrixLocalStoreScope?
+    @ObservationIgnored private var localStoreDiagnosticRevision: UInt64 = 0
     private(set) var matrixLocalRecoveryWorking = false
     private(set) var matrixLocalRecoveryErrorText: String?
     @ObservationIgnored private var matrixLocalRecoveryRevision: UInt64 = 0
@@ -838,6 +841,7 @@ final class CommunicationModel {
 
     @discardableResult
     private func configureMessagingTransport(with bootstrap: MessagingBootstrap, statusText: String) async -> Bool {
+        localStoreDiagnosticRevision &+= 1
         let revision = matrixLocalRecoveryRevision
         do {
             try await messaging.configure(with: bootstrap)
@@ -849,8 +853,10 @@ final class CommunicationModel {
                 bootstrap: bootstrap,
                 serverStatus: statusText
             )
+            localStoreDiagnosticRevision &+= 1
             messagingTransportErrorText = nil
             matrixLocalStoreFailure = nil
+            matrixLocalStoreFailureScope = nil
             messagingTransportReadyForPusher = true
             await refreshMatrixEncryptionRecoveryStatus()
             guard revision == matrixLocalRecoveryRevision, authState == .signedIn else { return false }
@@ -859,7 +865,15 @@ final class CommunicationModel {
         } catch {
             guard revision == matrixLocalRecoveryRevision, authState == .signedIn else { return false }
             messagingTransportReadyForPusher = false
-            matrixLocalStoreFailure = (error as? MatrixLocalStoreError)?.failure
+            if let typed = error as? MatrixLocalStoreError {
+                matrixLocalStoreFailure = typed.failure
+                matrixLocalStoreFailureScope = MatrixLocalStoreScope(bootstrap)
+            } else if let scope = matrixLocalStoreFailureScope, scope != MatrixLocalStoreScope(bootstrap) {
+                matrixLocalStoreFailure = nil
+                matrixLocalStoreFailureScope = nil
+            }
+            await refreshLocalStoreDiagnostic(for: bootstrap)
+            guard revision == matrixLocalRecoveryRevision, authState == .signedIn else { return false }
             messagingTransportErrorText = error.localizedDescription
             matrixEncryptionRecoveryStatus = .unavailable(error.localizedDescription)
             if bootstrap.e2eeRequired {
@@ -1601,8 +1615,10 @@ final class CommunicationModel {
                 try? await (messaging as? any MessagingLifecycleControlling)?.suspendMessaging()
                 throw CancellationError()
             }
+            localStoreDiagnosticRevision &+= 1
             messagingTransportErrorText = nil
             matrixLocalStoreFailure = nil
+            matrixLocalStoreFailureScope = nil
             messagingStatusText = "online"
             messagingTransportReadyForPusher = true
             conversationListRefreshGeneration &+= 1
@@ -4354,6 +4370,7 @@ final class CommunicationModel {
     }
 
     private func refreshPendingMessageCount() async {
+        await refreshLocalStoreDiagnostic()
         guard let messageOutbox else {
             pendingMessageCount = messages.filter { $0.isOwnMessage && $0.deliveryState == .pending }.count
             return
@@ -4385,7 +4402,28 @@ final class CommunicationModel {
 
     private func latestMessagingTransportError(for conversation: Conversation?) async -> String? {
         guard let diagnostics = messaging as? any MessagingClientDiagnostics else { return nil }
+        await refreshLocalStoreDiagnostic()
         return await diagnostics.latestTransportError(for: conversation)
+    }
+
+    private func refreshLocalStoreDiagnostic(for expectedBootstrap: MessagingBootstrap? = nil) async {
+        guard let bootstrap = expectedBootstrap ?? lastMessagingBootstrap,
+              let diagnostics = messaging as? any MessagingLocalStoreDiagnosing else { return }
+        localStoreDiagnosticRevision &+= 1
+        let diagnosticRevision = localStoreDiagnosticRevision
+        let revision = matrixLocalRecoveryRevision
+        let scope = MatrixLocalStoreScope(bootstrap)
+        let snapshot = await diagnostics.localStoreDiagnostic(for: bootstrap)
+        guard diagnosticRevision == localStoreDiagnosticRevision,
+              revision == matrixLocalRecoveryRevision, authState == .signedIn,
+              lastMessagingBootstrap.flatMap(MatrixLocalStoreScope.init) == scope else { return }
+        if let failure = snapshot?.failure {
+            matrixLocalStoreFailure = failure
+            matrixLocalStoreFailureScope = scope
+        } else if snapshot?.isVerifiedOpen == true {
+            matrixLocalStoreFailure = nil
+            matrixLocalStoreFailureScope = nil
+        }
     }
 
     /// Records only an event category in the unified log.

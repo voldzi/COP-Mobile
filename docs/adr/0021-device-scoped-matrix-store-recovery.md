@@ -54,6 +54,17 @@ uměl smazat Matrix root a použít stejné deviceId.
     reset ani skryté launch argumenty. Nový testovací device nemusí být důvěryhodný
     pro ostatní zařízení; příjem jejich klíčů vyžaduje fyzickou E2EE akceptaci.
 
+11. Typovaná diagnostika místního store prochází offline transportem až do modelu.
+    Rozsah je provider/homeserver/Matrix user/device, nikoli rotující token.
+    Pozdější HTTP či síťová chyba již potvrzenou chybu store nemaže. Změna
+    rozsahu nebo úspěšné ověřené otevření/obnova ji vymaže; textové řetězce
+    síťových chyb se nepovažují za důkaz porušení šifrování. Implicitní reopen
+    používá stejnou revision-fenced configure cestu jako běžná inicializace.
+12. Stejná explicitní obnova je dostupná v banneru, composeru, Stavu chatu
+    a nabídce konverzace pouze pro typovanou chybu s permitsRecovery. Přechod
+    ze Stavu chatu nejprve zavře jeho sheet; obnova se otevře po onDismiss.
+    Žádná z těchto vstupních akcí sama nepotvrzuje obnovu ani nemaže data.
+
 ## Důsledky a hranice
 
 Žádná změna REST, účetních dat, AI, mobilního routingu, CallKitu ani serverové

@@ -254,6 +254,104 @@ final class MatrixLocalStoreTests: XCTestCase {
         catch { XCTAssertTrue(error is URLError) }
     }
 
+    func testTypedFailureSurvivesHTTPAndNetworkErrorsUntilVerifiedOpen() async throws {
+        let live = ConfigurableStoreMessagingClient()
+        let wrapper = OfflineFirstMessagingClient(liveClient: live, outbox: InMemoryMessageOutbox())
+        let original = bootstrap()
+        await live.failNext(.cipherMismatch)
+        do { try await wrapper.configure(with: original); XCTFail("Must fail") } catch {}
+        for status in [401, 429, 503] {
+            await live.failNextHTTP(status)
+            do { try await wrapper.configure(with: original); XCTFail("Must preserve HTTP classification") }
+            catch { guard case let MatrixAPIError.httpError(actual, _) = error else { return XCTFail("Not HTTP") }; XCTAssertEqual(actual, status) }
+            let diagnostic = await wrapper.localStoreDiagnostic(for: original)
+            XCTAssertEqual(diagnostic?.failure, .cipherMismatch)
+            XCTAssertEqual(diagnostic?.isVerifiedOpen, false)
+        }
+        await live.failNextTransient(keepUsableSession: false)
+        do { try await wrapper.configure(with: original); XCTFail("Must fail") } catch { XCTAssertTrue(error is URLError) }
+        let offline = await wrapper.localStoreDiagnostic(for: original)
+        XCTAssertEqual(offline?.failure, .cipherMismatch)
+        try await wrapper.configure(with: original)
+        let healthy = await wrapper.localStoreDiagnostic(for: original)
+        XCTAssertNil(healthy?.failure)
+        XCTAssertEqual(healthy?.isVerifiedOpen, true)
+    }
+
+    func testImplicitReopenPreservesTypedDiagnosticDespiteCachedMessageFallback() async throws {
+        let live = ConfigurableStoreMessagingClient()
+        let wrapper = OfflineFirstMessagingClient(liveClient: live, outbox: InMemoryMessageOutbox())
+        let original = bootstrap()
+        await live.failNextTransient(keepUsableSession: false)
+        do { try await wrapper.configure(with: original); XCTFail("Must fail") } catch {}
+        await live.failNext(.missingKey)
+        let conversations = try await PreviewCopAPIClient().conversations()
+        let conversation = try XCTUnwrap(conversations.first)
+        let cached = try await wrapper.messages(for: conversation)
+        XCTAssertTrue(cached.isEmpty)
+        let diagnostic = await wrapper.localStoreDiagnostic(for: original)
+        XCTAssertEqual(diagnostic?.failure, .missingKey)
+        XCTAssertEqual(diagnostic?.isVerifiedOpen, false)
+    }
+
+    func testSuspendedConfigureDoesNotClaimNewScopeIsAlreadyOpen() async throws {
+        let barrier = StoreAvailabilityBarrier(response: true)
+        let live = PausedStoreConfigureMessaging(barrier: barrier)
+        let wrapper = OfflineFirstMessagingClient(liveClient: live, outbox: InMemoryMessageOutbox())
+        let original = bootstrap()
+        try await wrapper.configure(with: original)
+        var other = original; other.userId = "@b:matrix.test"
+        let configuring = Task { try await wrapper.configure(with: other) }
+        await barrier.waitUntilEntered()
+        let opening = await wrapper.localStoreDiagnostic(for: other)
+        XCTAssertEqual(opening?.isVerifiedOpen, false)
+        let stale = await wrapper.localStoreDiagnostic(for: original)
+        XCTAssertNil(stale)
+        await barrier.release()
+        try await configuring.value
+        let opened = await wrapper.localStoreDiagnostic(for: other)
+        XCTAssertEqual(opened?.isVerifiedOpen, true)
+    }
+
+    func testDiagnosticCannotLeakAcrossAccountsDevicesOrHomeservers() async throws {
+        let live = ConfigurableStoreMessagingClient()
+        let wrapper = OfflineFirstMessagingClient(liveClient: live, outbox: InMemoryMessageOutbox())
+        let original = bootstrap()
+        for variant in 0..<3 {
+            await live.failNext(.cipherMismatch)
+            do { try await wrapper.configure(with: original); XCTFail("Must fail") } catch {}
+            var other = original
+            if variant == 0 { other.userId = "@b:matrix.test" }
+            if variant == 1 { other.deviceId = "OTHER" }
+            if variant == 2 { other.homeserverBaseUrl = URL(string: "https://other.matrix.test")! }
+            await live.failNextHTTP(503)
+            do { try await wrapper.configure(with: other); XCTFail("Must fail") } catch {}
+            let stale = await wrapper.localStoreDiagnostic(for: original)
+            let current = await wrapper.localStoreDiagnostic(for: other)
+            XCTAssertNil(stale)
+            XCTAssertNil(current?.failure)
+            await live.failNextHTTP(503)
+            do { try await wrapper.configure(with: original); XCTFail("Must fail") } catch {}
+            let returned = await wrapper.localStoreDiagnostic(for: original)
+            XCTAssertNil(returned?.failure, "A previous scope must not resurrect an old diagnostic")
+        }
+    }
+
+    func testFreshHTTPFailureNeverInventsLocalCorruptionAndLockedStoreCannotReset() async throws {
+        let live = ConfigurableStoreMessagingClient()
+        let wrapper = OfflineFirstMessagingClient(liveClient: live, outbox: InMemoryMessageOutbox())
+        let original = bootstrap()
+        await live.failNextHTTP(503)
+        do { try await wrapper.configure(with: original); XCTFail("Must fail") } catch {}
+        let network = await wrapper.localStoreDiagnostic(for: original)
+        XCTAssertNil(network?.failure)
+        await live.failNext(.deviceLocked)
+        do { try await wrapper.configure(with: original); XCTFail("Must fail") } catch {}
+        let locked = await wrapper.localStoreDiagnostic(for: original)
+        XCTAssertEqual(locked?.failure, .deviceLocked)
+        XCTAssertFalse(MatrixLocalStoreError(failure: try XCTUnwrap(locked?.failure)).permitsRecovery)
+    }
+
     func testOfflineWrapperKeepsOnlyActuallyUsableSessionDuringTransientFailure() async throws {
         let live = ConfigurableStoreMessagingClient()
         let wrapper = OfflineFirstMessagingClient(liveClient: live, outbox: InMemoryMessageOutbox())
@@ -462,6 +560,7 @@ private actor ConfigurableStoreMessagingClient: MessagingClientProtocol, Messagi
     private var keepsSession = false
     func failNext(_ reason: CSMChatLocalStoreFailure) { failure = MatrixLocalStoreError(failure: reason); keepsSession = false }
     func failNextTransient(keepUsableSession: Bool) { failure = URLError(.notConnectedToInternet); keepsSession = keepUsableSession }
+    func failNextHTTP(_ status: Int) { failure = MatrixAPIError.httpError(status, "synthetic"); keepsSession = false }
     func configure(with bootstrap: MessagingBootstrap) throws {
         if let failure { self.failure = nil; if !keepsSession { configured = nil }; throw failure }
         configured = bootstrap
@@ -549,6 +648,16 @@ private actor RacingStoreMessaging: MessagingClientProtocol, MessagingSessionAva
         if configurations == 2 { throw URLError(.notConnectedToInternet) }
     }
     func hasUsableMessagingSession(for bootstrap: MessagingBootstrap) async -> Bool { await barrier.enterAndWait() }
+    func messages(for conversation: Conversation) -> [ChatMessage] { [] }
+    func sendMessage(_ body: String, to conversation: Conversation) throws -> ChatMessage { throw MatrixAPIError.missingBootstrap }
+}
+
+private actor PausedStoreConfigureMessaging: MessagingClientProtocol {
+    let barrier: StoreAvailabilityBarrier
+    init(barrier: StoreAvailabilityBarrier) { self.barrier = barrier }
+    func configure(with bootstrap: MessagingBootstrap) async {
+        if bootstrap.userId == "@b:matrix.test" { _ = await barrier.enterAndWait() }
+    }
     func messages(for conversation: Conversation) -> [ChatMessage] { [] }
     func sendMessage(_ body: String, to conversation: Conversation) throws -> ChatMessage { throw MatrixAPIError.missingBootstrap }
 }

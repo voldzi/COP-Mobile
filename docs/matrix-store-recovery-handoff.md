@@ -2,14 +2,16 @@
 
 ## Integrace
 
-Použijte nový kompletní release této větve `codex/matrix-store-recovery`,
-navazující na neměnný `108f4c2b125bc75b312dcdc57240cd7842f60182`.
+Použijte nový kompletní release této větve `codex/matrix-recovery-diagnostics`,
+navazující na neměnný `2708100c2e650a0bb3726c7d5b0fa94fd2a3aed9`
+(a celý původní union `108f4c2b125bc75b312dcdc57240cd7842f60182`).
 Pinujte celý veřejný commit obsahující tento dokument, předaný v release zprávě.
 Nekombinujte samostatné kopie souborů s jinou revizí SDK. Zachovány jsou mobility, routing, měření,
 identity, notification a hlasové moduly.
 
 `CSMCommunicationHost` zůstává kompatibilní. Sdílené UI při lokální chybě
-zobrazuje **Obnovit místní chat** nad composerem. Vložený host získá stejnou
+zobrazuje **Obnovit místní chat** nad composerem, v jeho blokované akci,
+v nabídce názvu konverzace a ve **Stavu chatu**. Vložený host získá stejnou
 obrazovku bez vlastního resetu. Mimo chybějící/neplatný klíč, AEAD, chybějící
 kryptografickou identitu či výslovnou recoveryRequired se rotace nenabízí.
 Zamčený telefon se odemkne; nedostupná služba/DB se zopakuje.
@@ -50,9 +52,31 @@ na původní AEAD. Nepoužívejte starší verzi k resetování crypto root. Nem
 routing evidence ani new/old keychain položky. Úspěch nové relace nenahrazuje
 ověření doručení a důvěry klíčů s druhým reálným telefonem.
 
-## Ověření
+## Diagnostika a fyzický nález v předchozí verzi
 
-Finální `bash scripts/check.sh` skončil 2026-10-06 úspěšně (exit 0),
+Jízda 1.2 (16) s SDK `2708100` byla aktualizací instalována a spuštěna
+na obou telefonech. Fyzická akceptace však odhalila odemknutí store stále
+nefunkční a obnovu zpočátku neviditelnou. Uživatel později potvrdil, že
+**Obnovit místní chat** již vidí. Úspěch potvrzené obnovy a doručení nových
+E2EE zpráv oběma směry zatím nemáme potvrzený.
+
+Ve zdroji byla doložena ztráta typované chyby při následující síťové chybě
+a String-only diagnostika implicitního reopen. Tento následný release
+opravuje tyto cesty; nepředstírá potvrzení původní příčiny AEAD na telefonu.
+Dočasně zamčený Keychain ani samotné 503 obnovu neopravňují.
+
+## Ověření následného diagnostického release
+
+Zmrazený candidate má cílený gate PASS (exit 0): **35 testů, 1 skipped,
+0 selhání**. Log: `/private/tmp/cop-matrix-recovery-diagnostics-targeted-fenced.log`.
+Nové async fixtures ověřují také suspended configure A→B bez předčasného
+verified-open a zpožděný diagnostic read po novém úspěšném configure.
+Kompletní `scripts/check.sh` tohoto candidate zatím čeká na dokončení;
+instalace/publikace není akceptována pouze na základě této cílené sady.
+
+## Ověření předchozího release
+
+Předchozí SDK `2708100`: finální `bash scripts/check.sh` skončil 2026-10-06 úspěšně (exit 0),
 Xcode 27.1 / 27A9269, SDK 27.1, iPhone Duo iOS 27.1 simulátor:
 
 | Kontrola | Výsledek |
@@ -92,7 +116,8 @@ entitlement); takový test je vykázán jako skipped, nikoli PASS.
 
 1. Over-install schváleného buildu bez smazání app či účtů; nezávisle ověřit
    instalovanou verzi a odemčený start.
-2. Otevřít Chat, ověřit typed chybu, otevřít Obnovit místní chat; zrušení nesmí
+2. Otevřít Chat, ověřit typed chybu a stejný vstup **Obnovit místní chat**
+   v banneru, composeru, nabídce názvu a ve Stavu chatu; zrušení nesmí
    změnit deviceId/store/key. Potvrzení testovacího režimu vytvoří jediný nový ID.
 3. Nová E2EE zpráva oběma směry s druhým telefonem, pozvánky a skutečná důvěra
    klíčů; starou historii bez původního klíče neslibovat.

@@ -319,3 +319,28 @@ public enum CSMChatStoreRecoveryPolicy {
 protocol MessagingSessionAvailability: Sendable {
     func hasUsableMessagingSession(for bootstrap: MessagingBootstrap) async -> Bool
 }
+
+/// Scope excludes rotating tokens. Private values are never displayed or logged.
+struct MatrixLocalStoreScope: Equatable, Sendable {
+    let provider: String
+    let homeserver: URL
+    let userID: String
+    let deviceID: String
+    init?(_ bootstrap: MessagingBootstrap) {
+        guard let homeserver = bootstrap.homeserverBaseUrl,
+              let user = bootstrap.userId, !user.isEmpty,
+              let device = bootstrap.deviceId, !device.isEmpty else { return nil }
+        self.provider = bootstrap.providerId
+        self.homeserver = homeserver
+        self.userID = user
+        self.deviceID = device
+    }
+}
+struct MatrixLocalStoreDiagnostic: Equatable, Sendable {
+    let failure: CSMChatLocalStoreFailure?
+    /// True only after successful open or confirmed usable same-scope session.
+    let isVerifiedOpen: Bool
+}
+protocol MessagingLocalStoreDiagnosing: Sendable {
+    func localStoreDiagnostic(for bootstrap: MessagingBootstrap) async -> MatrixLocalStoreDiagnostic?
+}

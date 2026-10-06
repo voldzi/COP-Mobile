@@ -115,6 +115,102 @@ final class MatrixStoreRecoveryFlowTests: XCTestCase {
         XCTAssertEqual(users.last, "@account-b:matrix.test")
     }
 
+    func testModelKeepsKnownStoreFailureAcrossLater503AndClearsAfterSuccessfulOpen() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let live = StoreRecoveryMessaging()
+        let wrapper = OfflineFirstMessagingClient(liveClient: live, outbox: InMemoryMessageOutbox())
+        let model = makeModel(api: StoreRecoveryAPI(), messaging: wrapper, cache: StoreRecoveryBootstrapCache(), defaults: defaults)
+        await model.start()
+        XCTAssertEqual(model.matrixLocalStoreFailure, .cipherMismatch)
+        await live.setFailure(MatrixAPIError.httpError(503, "synthetic"))
+        await model.appDidBecomeActive()
+        XCTAssertEqual(model.matrixLocalStoreFailure, .cipherMismatch)
+        XCTAssertTrue(try recoveryRecords(defaults).isEmpty)
+        await live.setFailure(nil)
+        await model.appDidBecomeActive()
+        XCTAssertNil(model.matrixLocalStoreFailure)
+        let count = await live.recoveries
+        XCTAssertEqual(count, 0)
+    }
+
+    func testImplicitReopenReachesModelWithoutAnInjectedModelOutbox() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let live = StoreRecoveryMessaging(failure: MatrixAPIError.httpError(503, "synthetic"))
+        let wrapper = OfflineFirstMessagingClient(liveClient: live, outbox: InMemoryMessageOutbox())
+        let model = makeModel(api: StoreRecoveryAPI(), messaging: wrapper, cache: StoreRecoveryBootstrapCache(), defaults: defaults)
+        await model.start()
+        XCTAssertNil(model.matrixLocalStoreFailure)
+        await live.setFailure(MatrixLocalStoreError(failure: .missingKey))
+        let conversations = try await PreviewCopAPIClient().conversations()
+        await model.selectConversation(try XCTUnwrap(conversations.first))
+        XCTAssertEqual(model.matrixLocalStoreFailure, .missingKey)
+        XCTAssertTrue(try recoveryRecords(defaults).isEmpty)
+        let count = await live.recoveries
+        XCTAssertEqual(count, 0)
+    }
+
+    func testAccountChangeClearsPriorFailureWithoutClaimingHealthyChat() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let api = StoreRecoveryAPI()
+        let live = StoreRecoveryMessaging()
+        let wrapper = OfflineFirstMessagingClient(liveClient: live, outbox: InMemoryMessageOutbox())
+        let model = makeModel(api: api, messaging: wrapper, cache: StoreRecoveryBootstrapCache(), defaults: defaults)
+        await model.start()
+        XCTAssertEqual(model.matrixLocalStoreFailure, .cipherMismatch)
+        await model.signOut()
+        await api.changeSubject("account-b")
+        await live.setFailure(MatrixAPIError.httpError(503, "synthetic"))
+        await model.signIn()
+        XCTAssertEqual(model.actor?.subjectId, "account-b")
+        XCTAssertNil(model.matrixLocalStoreFailure)
+        XCTAssertEqual(model.messagingStatusText, "e2ee_queue")
+        XCTAssertTrue(try recoveryRecords(defaults).isEmpty)
+    }
+
+    func testDelayedDiagnosticCannotRestoreFailureAfterNewSuccessfulConfigure() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let live = DelayedDiagnosticMessaging()
+        let model = makeModel(api: StoreRecoveryAPI(), messaging: live, cache: StoreRecoveryBootstrapCache(), defaults: defaults)
+        await model.start()
+        XCTAssertEqual(model.matrixLocalStoreFailure, .cipherMismatch)
+        let pause = RecoveryFlowPause()
+        await live.arm(pause)
+        let conversations = try await PreviewCopAPIClient().conversations()
+        let conversation = try XCTUnwrap(conversations.first)
+        let refresh = Task { await model.selectConversation(conversation) }
+        await pause.waitUntilEntered()
+        await live.allowSuccessfulOpen()
+        await model.appDidBecomeActive()
+        XCTAssertNil(model.matrixLocalStoreFailure)
+        await pause.release()
+        await refresh.value
+        XCTAssertNil(model.matrixLocalStoreFailure, "An older same-scope snapshot must not undo a newer verified open")
+    }
+
+    func testFresh503AndLockedKeychainDoNotAuthorizeLocalReset() async throws {
+        for failure in [MatrixAPIError.httpError(503, "synthetic") as any Error, MatrixLocalStoreError(failure: .deviceLocked)] {
+            let defaults = try isolatedDefaults()
+            defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+            let live = StoreRecoveryMessaging(failure: failure)
+            let wrapper = OfflineFirstMessagingClient(liveClient: live, outbox: InMemoryMessageOutbox())
+            let model = makeModel(api: StoreRecoveryAPI(), messaging: wrapper, cache: StoreRecoveryBootstrapCache(), defaults: defaults)
+            await model.start()
+            if let typed = model.matrixLocalStoreFailure {
+                XCTAssertEqual(typed, .deviceLocked)
+                XCTAssertFalse(MatrixLocalStoreError(failure: typed).permitsRecovery)
+            } else { XCTAssertTrue(failure is MatrixAPIError) }
+            do { try await model.recoverChatStore(authorization: .confirmedTestHistoryReset, confirmed: true); XCTFail("No reset permitted") }
+            catch { XCTAssertNotNil(error as? MatrixLocalStoreError) }
+            let count = await live.recoveries
+            XCTAssertEqual(count, 0)
+            XCTAssertTrue(try recoveryRecords(defaults).isEmpty)
+        }
+    }
+
     private var defaultsSuite = ""
     private func isolatedDefaults() throws -> UserDefaults {
         defaultsSuite = "cop.recovery-flow-tests." + UUID().uuidString
@@ -162,6 +258,7 @@ private actor StoreRecoveryMessaging: MessagingClientProtocol, MatrixLocalStoreR
     init(failure: (any Error)? = MatrixLocalStoreError(failure: .cipherMismatch), failOnlyOnce: Bool = false, pause: RecoveryFlowPause? = nil) {
         self.failure = failure; self.failOnlyOnce = failOnlyOnce; self.pause = pause
     }
+    func setFailure(_ value: (any Error)?) { failure = value }
     func configure(with bootstrap: MessagingBootstrap) throws {
         configuredIDs.append(bootstrap.deviceId ?? "missing"); configuredUsers.append(bootstrap.userId ?? "missing")
         if !recovered, let failure { if failOnlyOnce { self.failure = nil }; throw failure }
@@ -256,4 +353,24 @@ private actor StoreRecoveryAPI: CopAPIClientProtocol {
     func submitCommunityReport(_ draft: CommunityReportDraft) async throws -> CommunityReportSubmission { return try await PreviewCopAPIClient().submitCommunityReport(draft) }
     func communityReports(query: DriverReportQuery?) async throws -> [CommunityReport] { return try await PreviewCopAPIClient().communityReports(query: query) }
     func confirmCommunityReport(reportId: String, value: CommunityReportConfirmationValue) async throws -> CommunityReport { return try await PreviewCopAPIClient().confirmCommunityReport(reportId: reportId, value: value) }
+}
+
+private actor DelayedDiagnosticMessaging: MessagingClientProtocol, MessagingLocalStoreDiagnosing {
+    private var failure: CSMChatLocalStoreFailure? = .cipherMismatch
+    private var pause: RecoveryFlowPause?
+    private var last: MessagingBootstrap?
+    func arm(_ value: RecoveryFlowPause) { pause = value }
+    func allowSuccessfulOpen() { failure = nil }
+    func configure(with bootstrap: MessagingBootstrap) throws {
+        last = bootstrap
+        if let failure { throw MatrixLocalStoreError(failure: failure) }
+    }
+    func localStoreDiagnostic(for bootstrap: MessagingBootstrap) async -> MatrixLocalStoreDiagnostic? {
+        guard last.flatMap(MatrixLocalStoreScope.init) == MatrixLocalStoreScope(bootstrap) else { return nil }
+        let captured = MatrixLocalStoreDiagnostic(failure: failure, isVerifiedOpen: failure == nil)
+        if let pause { self.pause = nil; await pause.enterAndWait() }
+        return captured
+    }
+    func messages(for conversation: Conversation) -> [ChatMessage] { [] }
+    func sendMessage(_ body: String, to conversation: Conversation) throws -> ChatMessage { throw MatrixAPIError.missingBootstrap }
 }

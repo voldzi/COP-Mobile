@@ -255,3 +255,5 @@ Identity pairings are conversation/actor/room scoped, short-lived and excluded f
 ## Matrix local-store repair
 
 Matrix key creation is atomic and never replaces an existing passphrase. Missing/invalid keys beside persisted data, AEAD, device identity mismatch and fresh crypto under an already published device fail closed. Locked Keychain and unavailable SQLite are retry failures, not reset invitations. Recovery uses a verified new device only after confirmation; old roots/keys/outbox/history remain intact. No generation bump, global erase or automatic account E2EE reset. Recovery keys stay ephemeral and outside COP/bridge/logs. See [ADR 0021](adr/0021-device-scoped-matrix-store-recovery.md).
+
+Typed local-store diagnostics are scoped to the Matrix provider/homeserver/user/device and exclude rotating tokens. Later HTTP/network failures cannot erase a confirmed same-scope store failure or invent corruption from error strings. A scope change or verified successful open/recovery clears the diagnostic. Status/menu/composer/banner use the same explicit recovery flow; deviceLocked, keychainUnavailable and storeUnavailable do not authorize reset.

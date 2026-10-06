@@ -92,6 +92,7 @@ struct ChatView: View {
     @State private var showsPendingRecoveryConfirmation = false
     @State private var showsEncryptionRecoverySheet = false
     @State private var showsLocalChatRecoverySheet = false
+    @State private var opensLocalRecoveryAfterStatus = false
     @State private var actionMessage: ChatMessage?
     @State private var forwardBundle: ForwardMessageBundle?
     @State private var deleteConfirmationMessage: ChatMessage?
@@ -243,10 +244,12 @@ struct ChatView: View {
                     mentionCandidates: activeConversation.members,
                     locationShareProvider: locationShareProvider,
                     sendBlockedMessage: appModel.messagingSendBlockedMessage,
-                    sendBlockedActionTitle: encryptionRecoveryPresentation?.primaryActionTitle,
-                    onSendBlockedAction: encryptionRecoveryPresentation == nil ? nil : {
+                    sendBlockedActionTitle: localRecoveryActionAvailable ? "Obnovit místní chat" : encryptionRecoveryPresentation?.primaryActionTitle,
+                    onSendBlockedAction: localRecoveryActionAvailable ? {
+                        showsLocalChatRecoverySheet = true
+                    } : (encryptionRecoveryPresentation == nil ? nil : {
                         showsEncryptionRecoverySheet = true
-                    },
+                    }),
                     replyTo: $replyTo
                 )
             } else {
@@ -444,7 +447,12 @@ struct ChatView: View {
                 }
             )
         }
-        .sheet(isPresented: $showsChatStatusDetail) {
+        .sheet(isPresented: $showsChatStatusDetail, onDismiss: {
+            if opensLocalRecoveryAfterStatus {
+                opensLocalRecoveryAfterStatus = false
+                if localRecoveryActionAvailable { showsLocalChatRecoverySheet = true }
+            }
+        }) {
             ChatStatusDetailSheet(
                 deliveryPresentation: deliveryPresentation,
                 encryptionRecoveryStatus: encryptionRecoveryPresentation,
@@ -458,7 +466,12 @@ struct ChatView: View {
                 } : nil,
                 onOpenEncryptionRecovery: {
                     showsEncryptionRecoverySheet = true
-                }
+                },
+                localStoreFailure: appModel.matrixLocalStoreFailure,
+                onOpenLocalRecovery: localRecoveryActionAvailable ? {
+                    opensLocalRecoveryAfterStatus = true
+                    showsChatStatusDetail = false
+                } : nil
             )
         }
         .confirmationDialog(
@@ -613,7 +626,10 @@ struct ChatView: View {
                         } : nil,
                         onOpenCOP: {
                             onOpenCOP?()
-                        }
+                        },
+                        onOpenLocalRecovery: localRecoveryActionAvailable ? {
+                            showsLocalChatRecoverySheet = true
+                        } : nil
                     )
                 }
 
@@ -878,6 +894,11 @@ struct ChatView: View {
             transportError: appModel.messagingTransportErrorText,
             syncStatus: appModel.messageOutboxSyncStatusText
         )
+    }
+
+    private var localRecoveryActionAvailable: Bool {
+        guard let failure = appModel.matrixLocalStoreFailure else { return false }
+        return MatrixLocalStoreError(failure: failure).permitsRecovery
     }
 
     private var encryptionRecoveryPresentation: MatrixEncryptionRecoveryStatus? {
@@ -1548,6 +1569,8 @@ struct ChatStatusDetailSheet: View {
     var onSync: () -> Void
     var onDiscardPending: (() -> Void)?
     var onOpenEncryptionRecovery: () -> Void
+    var localStoreFailure: CSMChatLocalStoreFailure? = nil
+    var onOpenLocalRecovery: (() -> Void)? = nil
 
     var body: some View {
         NavigationStack {
@@ -1579,6 +1602,17 @@ struct ChatStatusDetailSheet: View {
                     if let onDiscardPending, deliveryPresentation.pendingCount > 0 {
                         Button(role: .destructive, action: onDiscardPending) {
                             Label(CSMLocalization.text("Spravovat čekající zprávy", fallback: "Spravovat čekající zprávy"), systemImage: "ellipsis.circle")
+                        }
+                    }
+                }
+
+                if let localStoreFailure {
+                    Section("Místní šifrované úložiště") {
+                        Text(MatrixLocalStoreError(failure: localStoreFailure).localizedDescription)
+                        if MatrixLocalStoreError(failure: localStoreFailure).permitsRecovery,
+                           let onOpenLocalRecovery {
+                            Button("Obnovit místní chat", systemImage: "key", action: onOpenLocalRecovery)
+                                .accessibilityIdentifier("chat.localStoreRecovery.statusAction")
                         }
                     }
                 }
@@ -1734,6 +1768,7 @@ private struct ChatNavigationTitle: View {
     var onHideConversation: () -> Void
     var onLeaveGroup: (() -> Void)?
     var onOpenCOP: () -> Void
+    var onOpenLocalRecovery: (() -> Void)? = nil
 
     var body: some View {
         Menu {
@@ -1758,6 +1793,11 @@ private struct ChatNavigationTitle: View {
                 Label(CSMLocalization.text("chat.status.detail.title", fallback: "Stav chatu"), systemImage: "lock.shield")
             }
             .accessibilityIdentifier("chat.statusDetailAction")
+
+            if let onOpenLocalRecovery {
+                Button("Obnovit místní chat", systemImage: "key", action: onOpenLocalRecovery)
+                    .accessibilityIdentifier("chat.localStoreRecovery.menuAction")
+            }
 
             if conversation.type == .group {
                 Button(action: onTogglePin) {
