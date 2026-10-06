@@ -37,3 +37,5 @@ Use ADRs for important, costly, risky, or hard-to-reverse technical decisions.
 - `0017-optional-directed-road-attributes.md` — optional directed road attributes and vehicle dimensions; typed outside-coverage fallback reaches Jízda
 
 - [0020 - Shared COP OIDC session](0020-shared-cop-oidc-session.md): API refresh ownership and same-account restoration independent of Matrix chat.
+
+- [0021 - Device-scoped Matrix store recovery](0021-device-scoped-matrix-store-recovery.md): atomic key creation, explicit new-device recovery, immutable old stores and physical acceptance.

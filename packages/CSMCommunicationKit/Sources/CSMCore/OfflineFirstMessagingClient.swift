@@ -1,10 +1,12 @@
 import Foundation
 
-actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagnostics, MessagingLifecycleControlling, MessagingLiveMessageStreaming, MessagingLiveLocationSharing, MessagingHistoryPaging, MessagingCachedSnapshotLoading, MessagingConversationPresentationEnriching, MessagingConversationAvatarUpdating, MatrixEncryptionRecoveryManaging {
+actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagnostics, MessagingLifecycleControlling, MessagingLiveMessageStreaming, MessagingLiveLocationSharing, MessagingHistoryPaging, MessagingCachedSnapshotLoading, MessagingConversationPresentationEnriching, MessagingConversationAvatarUpdating, MatrixEncryptionRecoveryManaging, MatrixLocalStoreRecovering {
     private let liveClient: any MessagingClientProtocol
     private let outbox: any MessageOutboxStoring
     private let outboxActor: OutboxActor
     private let history: (any MessageHistoryStoring)?
+    private var configurationRevision: UInt64 = 0
+    private var localRecoveryInProgress = false
     private var isConfigured = false
     private var liveClientReady = false
     private var lastBootstrap: MessagingBootstrap?
@@ -22,28 +24,38 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
     }
 
     func configure(with bootstrap: MessagingBootstrap) async throws {
+        guard !localRecoveryInProgress else { throw CancellationError() }
         guard bootstrap.enabled else {
             isConfigured = false
             liveClientReady = false
             throw CSMServiceError.disabled("Messaging is disabled by policy.")
         }
 
+        configurationRevision &+= 1
+        let revision = configurationRevision
         let previousBootstrap = lastBootstrap
         let hadReadyLiveClient = liveClientReady
         isConfigured = true
         lastBootstrap = bootstrap
         do {
             try await liveClient.configure(with: bootstrap)
+            guard revision == configurationRevision, !localRecoveryInProgress else { throw CancellationError() }
             liveClientReady = true
             lastTransportError = nil
         } catch {
+            guard revision == configurationRevision, !localRecoveryInProgress else { throw CancellationError() }
             lastTransportError = error.localizedDescription
+            var retainUsableSession = false
             if Self.canKeepExistingLiveReceiveSession(
                 after: error,
                 previousBootstrap: previousBootstrap,
                 bootstrap: bootstrap,
                 hadReadyLiveClient: hadReadyLiveClient
-            ) {
+            ), let availability = liveClient as? any MessagingSessionAvailability {
+                retainUsableSession = await availability.hasUsableMessagingSession(for: bootstrap)
+                guard revision == configurationRevision, !localRecoveryInProgress else { throw CancellationError() }
+            }
+            if retainUsableSession {
                 liveClientReady = true
                 return
             }
@@ -52,6 +64,24 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
                 throw error
             }
         }
+    }
+
+    func recoverLocalStore(from previous: MessagingBootstrap, with bootstrap: MessagingBootstrap, authorization: CSMChatStoreRecoveryAuthorization) async throws {
+        guard !localRecoveryInProgress,
+              let recovery = liveClient as? any MatrixLocalStoreRecovering else {
+            throw MatrixLocalStoreError(failure: .recoveryUnavailable)
+        }
+        localRecoveryInProgress = true
+        configurationRevision &+= 1
+        let revision = configurationRevision
+        liveClientReady = false
+        defer { localRecoveryInProgress = false }
+        try await recovery.recoverLocalStore(from: previous, with: bootstrap, authorization: authorization)
+        guard revision == configurationRevision else { throw CancellationError() }
+        lastBootstrap = bootstrap
+        isConfigured = true
+        liveClientReady = true
+        lastTransportError = nil
     }
 
     func messages(for conversation: Conversation) async throws -> [ChatMessage] {
@@ -310,6 +340,8 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
     }
 
     func suspendMessaging() async throws {
+        configurationRevision &+= 1
+        liveClientReady = false
         guard let lifecycle = liveClient as? any MessagingLifecycleControlling else { return }
         try await lifecycle.suspendMessaging()
     }
@@ -885,6 +917,7 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
     }
 
     private func restoreLiveClientIfPossible() async throws {
+        guard !localRecoveryInProgress else { throw CancellationError() }
         guard let bootstrap = lastBootstrap else { return }
         do {
             try await liveClient.configure(with: bootstrap)
@@ -924,6 +957,7 @@ actor OfflineFirstMessagingClient: MessagingClientProtocol, MessagingClientDiagn
     }
 
     private static func configureFailureInvalidatesExistingSession(_ error: any Error) -> Bool {
+        if error is MatrixLocalStoreError || error is CancellationError { return true }
         let description = error.localizedDescription.lowercased()
         return description.containsAny(of: Self.sessionInvalidationFailureMarkers)
     }

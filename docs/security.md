@@ -251,3 +251,7 @@ Private Dispatch uses SDK-owned ThisDeviceOnly Keychain keys, recipient authenti
 All published production SDK consumers share a device lifecycle for the configured issuer/client. Refresh commits the rotated credential before releasing waiters. Only `invalid_grant` removes the OIDC credential; temporary failures preserve it. Explicit renewal verifies the original issuer/subject and session revision before saving a new credential. It neither signs out Matrix nor permits an implicit account switch. UI must not offer renewal as a recovery from a network or 503 failure. See [ADR 0020](adr/0020-shared-cop-oidc-session.md).
 
 Identity pairings are conversation/actor/room scoped, short-lived and excluded from Codable caches. No guesses from display names or Matrix localparts; no provisioning fallback. API incoming caller names require exact call.peer binding.
+
+## Matrix local-store repair
+
+Matrix key creation is atomic and never replaces an existing passphrase. Missing/invalid keys beside persisted data, AEAD, device identity mismatch and fresh crypto under an already published device fail closed. Locked Keychain and unavailable SQLite are retry failures, not reset invitations. Recovery uses a verified new device only after confirmation; old roots/keys/outbox/history remain intact. No generation bump, global erase or automatic account E2EE reset. Recovery keys stay ephemeral and outside COP/bridge/logs. See [ADR 0021](adr/0021-device-scoped-matrix-store-recovery.md).

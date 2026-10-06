@@ -488,3 +488,7 @@ Shared private mobility purpose-scoped SDK and receipts: [handoff](jizda-shared-
 Consumed additive COP identity lookup and call.peer: [package handoff](../packages/CSMCommunicationKit/VERIFIED_MATRIX_IDENTITIES.md). COP binding OpenAPI remains authoritative.
 
 Whole Jízda integration requires the complete SDK union, not only identity3f: [handoff](../packages/CSMCommunicationKit/JIZDA_COMPLETE_SDK.md).
+
+## Explicit local Matrix recovery
+
+The shared runtime adds typed `localChatStoreFailure`, `isRecoveringChatStore` and explicit `recoverChatStore(authorization:confirmed:)`; the existing authenticated messaging bootstrap accepts the new device ID. No COP REST/Device API contract changed. HTTP 401 retains normal same-device refresh; 429/503 do not trigger recovery. See [the complete Swift interface and acceptance](matrix-store-recovery-handoff.md).

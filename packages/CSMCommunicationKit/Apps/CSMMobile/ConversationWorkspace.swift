@@ -91,6 +91,7 @@ struct ChatView: View {
     @State private var isSearchVisible = false
     @State private var showsPendingRecoveryConfirmation = false
     @State private var showsEncryptionRecoverySheet = false
+    @State private var showsLocalChatRecoverySheet = false
     @State private var actionMessage: ChatMessage?
     @State private var forwardBundle: ForwardMessageBundle?
     @State private var deleteConfirmationMessage: ChatMessage?
@@ -188,6 +189,19 @@ struct ChatView: View {
                         .padding(.bottom, 8)
                         .background(Color(uiColor: .systemBackground))
                         .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                if let failure = appModel.matrixLocalStoreFailure {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(MatrixLocalStoreError(failure: failure).localizedDescription)
+                            .font(.footnote)
+                        if MatrixLocalStoreError(failure: failure).permitsRecovery {
+                            Button("Obnovit místní chat", systemImage: "key") {
+                                showsLocalChatRecoverySheet = true
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
                 }
                 MessageComposer(
                     text: $draft,
@@ -514,6 +528,9 @@ struct ChatView: View {
                 "Smazání u mě skryje zprávu jen v tomto zařízení. Smazání pro všechny odešle Matrix redakci do celé konverzace.",
                 fallback: "Smazání u mě skryje zprávu jen v tomto zařízení. Smazání pro všechny odešle Matrix redakci do celé konverzace."
             ))
+        }
+        .sheet(isPresented: $showsLocalChatRecoverySheet) {
+            MatrixLocalChatRecoverySheet()
         }
         .sheet(isPresented: $showsEncryptionRecoverySheet) {
             MatrixEncryptionRecoverySheet(

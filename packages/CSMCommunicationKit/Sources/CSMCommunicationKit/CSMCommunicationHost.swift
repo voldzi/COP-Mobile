@@ -560,6 +560,15 @@ public final class CSMCommunicationRuntime {
         await model.refreshDeviceRegistrationFromSystem()
     }
 
+    public var localChatStoreFailure: CSMChatLocalStoreFailure? { model.matrixLocalStoreFailure }
+    public var isRecoveringChatStore: Bool { model.matrixLocalRecoveryWorking }
+
+    /// Call only from an explicit confirmed native UI action. No old data is erased.
+    /// The standard path verifies recovery using the user-held backup key.
+    public func recoverChatStore(authorization: CSMChatStoreRecoveryAuthorization, confirmed: Bool) async throws {
+        try await model.recoverChatStore(authorization: authorization, confirmed: confirmed)
+    }
+
     public func startVoiceCall(
         roomID: String,
         title: String?,

@@ -42,6 +42,7 @@ final class CommunicationModel {
         get { chatSessionStore.snapshot.authState }
         set {
             let measurementSessionChanged = authState != newValue
+            if measurementSessionChanged { matrixLocalRecoveryRevision &+= 1 }
             chatSessionStore.update(
                 authState: newValue,
                 actor: actor,
@@ -57,6 +58,13 @@ final class CommunicationModel {
         get { chatSessionStore.snapshot.actor }
         set {
             let measurementSessionChanged = actor?.subjectId != newValue?.subjectId
+            if measurementSessionChanged {
+                matrixLocalRecoveryRevision &+= 1
+                lastMessagingBootstrap = nil
+                matrixLocalStoreFailure = nil
+                matrixLocalRecoveryErrorText = nil
+                messagingTransportReadyForPusher = false
+            }
             chatSessionStore.update(
                 authState: authState,
                 actor: newValue,
@@ -168,6 +176,13 @@ final class CommunicationModel {
     private var messagingBootstrapExpiresAt: Date?
     private var messagingBootstrapIssuedAt: Date?
     private var lastMessagingBootstrap: MessagingBootstrap?
+    private(set) var matrixLocalStoreFailure: CSMChatLocalStoreFailure?
+    private(set) var matrixLocalRecoveryWorking = false
+    private(set) var matrixLocalRecoveryErrorText: String?
+    @ObservationIgnored private var matrixLocalRecoveryRevision: UInt64 = 0
+    @ObservationIgnored private let matrixRecoveryDefaults: UserDefaults
+    let allowsChatRecoveryWithoutBackup: Bool
+
     private(set) var isLoading: Bool {
         get { chatSessionStore.snapshot.isBusy }
         set {
@@ -287,6 +302,8 @@ final class CommunicationModel {
     @ObservationIgnored private var registeredMatrixPusherGatewayURL: URL?
     @ObservationIgnored private var messagingTransportReadyForPusher = false
     @ObservationIgnored private var messagingBootstrapRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var messagingBootstrapRefreshTaskID: UUID?
+    @ObservationIgnored private var messagingBootstrapRefreshTaskRevision: UInt64?
     @ObservationIgnored private var mobilePairingConfirmationTask: Task<Void, Never>?
     @ObservationIgnored private var messagingBootstrapNetworkRetryNotBefore: Date?
     @ObservationIgnored private var pendingAutoSyncAttemptedConversationIds: Set<String> = []
@@ -313,7 +330,9 @@ final class CommunicationModel {
         messagingDeviceRegistration: (any CSMMessagingDeviceRegistering)? = nil,
         conversationMetadata: (any ConversationMetadataProviding)? = nil,
         authSession: any AuthSessionManaging,
-        securityUnlock: any SecurityUnlockManaging
+        securityUnlock: any SecurityUnlockManaging,
+        matrixRecoveryDefaults: UserDefaults = .standard,
+        allowsChatRecoveryWithoutBackup: Bool = CSMChatStoreRecoveryPolicy.allowsWithoutBackup
     ) {
         self.appConfiguration = appConfiguration
         self.api = api
@@ -330,6 +349,12 @@ final class CommunicationModel {
         self.conversationMetadata = conversationMetadata
         self.authSession = authSession
         self.securityUnlock = securityUnlock
+        self.matrixRecoveryDefaults = matrixRecoveryDefaults
+        #if DEBUG
+        self.allowsChatRecoveryWithoutBackup = allowsChatRecoveryWithoutBackup
+        #else
+        self.allowsChatRecoveryWithoutBackup = false
+        #endif
     }
 
     func start() async {
@@ -676,33 +701,57 @@ final class CommunicationModel {
     }
 
     private func configureMessaging(for actor: AuthenticatedActor) async {
-        if let messagingBootstrapRefreshTask {
-            await messagingBootstrapRefreshTask.value
-            return
+        guard !matrixLocalRecoveryWorking, self.actor?.subjectId == actor.subjectId,
+              authState == .signedIn else { return }
+        let revision = matrixLocalRecoveryRevision
+        while let pending = messagingBootstrapRefreshTask {
+            let pendingID = messagingBootstrapRefreshTaskID
+            let pendingRevision = messagingBootstrapRefreshTaskRevision
+            await pending.value
+            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
+                  authState == .signedIn, !matrixLocalRecoveryWorking else { return }
+            if pendingRevision == revision { return }
+            if messagingBootstrapRefreshTaskID == pendingID {
+                messagingBootstrapRefreshTask = nil
+                messagingBootstrapRefreshTaskID = nil
+                messagingBootstrapRefreshTaskRevision = nil
+            }
         }
-
+        let taskID = UUID()
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.performConfigureMessaging(for: actor)
         }
         messagingBootstrapRefreshTask = task
+        messagingBootstrapRefreshTaskID = taskID
+        messagingBootstrapRefreshTaskRevision = revision
         await task.value
-        messagingBootstrapRefreshTask = nil
+        if messagingBootstrapRefreshTaskID == taskID {
+            messagingBootstrapRefreshTask = nil
+            messagingBootstrapRefreshTaskID = nil
+            messagingBootstrapRefreshTaskRevision = nil
+        }
     }
 
     private func performConfigureMessaging(for actor: AuthenticatedActor) async {
-        let deviceId = Self.matrixDeviceId(
-            actor: actor,
-            deviceRegistration: deviceRegistration,
-            posture: devicePosture
-        )
+        let revision = matrixLocalRecoveryRevision
+        guard self.actor?.subjectId == actor.subjectId, authState == .signedIn else { return }
+        let deviceId: String
+        do { deviceId = try selectedMatrixDeviceID(for: actor) }
+        catch {
+            matrixLocalStoreFailure = .deviceIdentityMismatch
+            messagingTransportErrorText = MatrixLocalStoreError(failure: .deviceIdentityMismatch).localizedDescription
+            return
+        }
         let currentStatus = try? await api.messagingStatus()
+        guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
         if let currentStatus, (!currentStatus.enabled || !currentStatus.chatAvailable) {
             messagingStatusText = currentStatus.status
             lastError = currentStatus.warnings.first
             return
         }
         if let cachedBootstrap = await cachedMessagingBootstrap(for: actor, deviceId: deviceId) {
+            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
             let configured = await configureMessagingTransport(
                 with: cachedBootstrap,
                 statusText: currentStatus?.status ?? Self.statusTextForCachedMessagingBootstrap(cachedBootstrap)
@@ -710,12 +759,16 @@ final class CommunicationModel {
             if configured || !Self.messagingTransportFailureNeedsFreshBootstrap(messagingTransportErrorText) {
                 return
             }
+            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
             try? await messagingBootstrapStore?.clear(subjectId: actor.subjectId, deviceId: deviceId)
+            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
             lastMessagingBootstrap = nil
             conversationListRefreshGeneration &+= 1
             messagingBootstrapExpiresAt = nil
             messagingBootstrapIssuedAt = nil
         }
+        guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
+              authState == .signedIn else { return }
 
         do {
             let status: MessagingStatus
@@ -724,15 +777,18 @@ final class CommunicationModel {
             } else {
                 status = try await api.messagingStatus()
             }
+            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
             let matrixBootstrap = try await api.messagingBootstrap(deviceId: deviceId)
-            guard self.actor?.subjectId == actor.subjectId, authState == .signedIn else { return }
+            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId, authState == .signedIn else { return }
             messagingBootstrapIssuedAt = .now
             messagingBootstrapExpiresAt = Self.resolvedMatrixBootstrapExpiry(matrixBootstrap)
             lastMessagingBootstrap = matrixBootstrap
             messagingBootstrapNetworkRetryNotBefore = nil
             try? await messagingBootstrapStore?.save(matrixBootstrap, subjectId: actor.subjectId, deviceId: deviceId)
+            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
             _ = await configureMessagingTransport(with: matrixBootstrap, statusText: status.status)
         } catch {
+            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
             if let retryDelay = Self.messagingBootstrapRetryDelay(after: error) {
                 messagingBootstrapNetworkRetryNotBefore = Date().addingTimeInterval(retryDelay)
             }
@@ -756,6 +812,8 @@ final class CommunicationModel {
         for actor: AuthenticatedActor,
         deviceId: String
     ) async -> MessagingBootstrap? {
+        let revision = matrixLocalRecoveryRevision
+        guard self.actor?.subjectId == actor.subjectId, authState == .signedIn else { return nil }
         if let lastMessagingBootstrap,
            Self.messagingBootstrapStillUsable(lastMessagingBootstrap),
            lastMessagingBootstrap.deviceId == nil || lastMessagingBootstrap.deviceId == deviceId {
@@ -766,6 +824,7 @@ final class CommunicationModel {
               let cached = try? await messagingBootstrapStore.load(subjectId: actor.subjectId, deviceId: deviceId) else {
             return nil
         }
+        guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return nil }
         guard Self.messagingBootstrapStillUsable(cached) else {
             try? await messagingBootstrapStore.clear(subjectId: actor.subjectId, deviceId: deviceId)
             return nil
@@ -779,19 +838,28 @@ final class CommunicationModel {
 
     @discardableResult
     private func configureMessagingTransport(with bootstrap: MessagingBootstrap, statusText: String) async -> Bool {
+        let revision = matrixLocalRecoveryRevision
         do {
             try await messaging.configure(with: bootstrap)
+            guard revision == matrixLocalRecoveryRevision, authState == .signedIn else {
+                try? await (messaging as? any MessagingLifecycleControlling)?.suspendMessaging()
+                return false
+            }
             messagingStatusText = MessagingRuntimeStatusResolver.configuredStatus(
                 bootstrap: bootstrap,
                 serverStatus: statusText
             )
             messagingTransportErrorText = nil
+            matrixLocalStoreFailure = nil
             messagingTransportReadyForPusher = true
             await refreshMatrixEncryptionRecoveryStatus()
+            guard revision == matrixLocalRecoveryRevision, authState == .signedIn else { return false }
             await registerMatrixPusherIfPossible()
-            return true
+            return revision == matrixLocalRecoveryRevision && authState == .signedIn
         } catch {
+            guard revision == matrixLocalRecoveryRevision, authState == .signedIn else { return false }
             messagingTransportReadyForPusher = false
+            matrixLocalStoreFailure = (error as? MatrixLocalStoreError)?.failure
             messagingTransportErrorText = error.localizedDescription
             matrixEncryptionRecoveryStatus = .unavailable(error.localizedDescription)
             if bootstrap.e2eeRequired {
@@ -813,7 +881,7 @@ final class CommunicationModel {
     }
 
     private func ensureMessagingBootstrapFreshIfNeeded(force: Bool = false) async {
-        guard let actor else { return }
+        guard !matrixLocalRecoveryWorking, let actor else { return }
 
         let expiresSoon = messagingBootstrapExpiresAt.map { $0.timeIntervalSinceNow < 90 } ?? false
         let unknownExpiryIsStale = messagingBootstrapExpiresAt == nil &&
@@ -1458,12 +1526,106 @@ final class CommunicationModel {
         }
     }
 
+    private func recoveryRouting(for actor: AuthenticatedActor) -> MatrixDeviceRecoveryRouting {
+        MatrixDeviceRecoveryRouting(defaults: matrixRecoveryDefaults, scope: [
+            appConfiguration.oidcIssuer.absoluteString, appConfiguration.oidcClientId,
+            appConfiguration.copBaseURL.absoluteString, actor.subjectId, Self.matrixInstallationSeed()
+        ].joined(separator: "|"))
+    }
+
+    private func selectedMatrixDeviceID(for actor: AuthenticatedActor) throws -> String {
+        if let selected = try recoveryRouting(for: actor).record()?.selectedDeviceID { return selected }
+        return Self.matrixDeviceId(actor: actor, deviceRegistration: deviceRegistration, posture: devicePosture)
+    }
+
+    func recoverChatStore(authorization: CSMChatStoreRecoveryAuthorization, confirmed: Bool) async throws {
+        guard confirmed, !matrixLocalRecoveryWorking, authState == .signedIn,
+              let actor, let previous = lastMessagingBootstrap,
+              let recovery = messaging as? any MatrixLocalStoreRecovering,
+              let failure = matrixLocalStoreFailure,
+              MatrixLocalStoreError(failure: failure).permitsRecovery else {
+            throw MatrixLocalStoreError(failure: .recoveryRequired)
+        }
+        if case .confirmedTestHistoryReset = authorization, !allowsChatRecoveryWithoutBackup {
+            throw MatrixLocalStoreError(failure: .recoveryUnavailable)
+        }
+        if case let .restoreBackup(key) = authorization, key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw MatrixLocalStoreError(failure: .recoveryUnavailable)
+        }
+        matrixLocalRecoveryWorking = true
+        matrixLocalRecoveryErrorText = nil
+        let revision = matrixLocalRecoveryRevision
+        let routing = recoveryRouting(for: actor)
+        defer {
+            matrixLocalRecoveryWorking = false
+            if revision != matrixLocalRecoveryRevision, let currentActor = self.actor, authState == .signedIn {
+                Task { @MainActor [weak self] in await self?.configureMessaging(for: currentActor) }
+            }
+        }
+        do {
+            // Finish/coalesce ordinary startup before reserving a replacement device.
+            await messagingBootstrapRefreshTask?.value
+            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
+                  authState == .signedIn else { throw CancellationError() }
+            let activeCalls = try await activeVoiceCalls()
+            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
+                  authState == .signedIn else { throw CancellationError() }
+            guard activeCalls.isEmpty else { throw CSMServiceError.invalidState("Nejprve ukončete probíhající hovor; potom obnovte chat.") }
+            let pending = try routing.reserve(original: previous)
+            let bootstrap = try await api.messagingBootstrap(deviceId: pending.pendingDeviceID)
+            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
+                  authState == .signedIn,
+                  bootstrap.deviceId == pending.pendingDeviceID,
+                  bootstrap.deviceId != previous.deviceId,
+                  bootstrap.userId == previous.userId,
+                  bootstrap.homeserverBaseUrl == previous.homeserverBaseUrl,
+                  bootstrap.e2eeRequired, bootstrap.enabled, bootstrap.chatAvailable,
+                  bootstrap.tokenAvailable else { throw MatrixLocalStoreError(failure: .deviceIdentityMismatch) }
+            try await recovery.recoverLocalStore(from: previous, with: bootstrap, authorization: authorization)
+            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
+                  authState == .signedIn else {
+                try? await (messaging as? any MessagingLifecycleControlling)?.suspendMessaging()
+                throw CancellationError()
+            }
+            try routing.commit(pending)
+            lastMessagingBootstrap = bootstrap
+            messagingBootstrapIssuedAt = .now
+            messagingBootstrapExpiresAt = Self.resolvedMatrixBootstrapExpiry(bootstrap)
+            messagingBootstrapNetworkRetryNotBefore = nil
+            // Retain the old bootstrap, old crypto root/key, history and outbox.
+            // Routing selection is already durable. Cache failure must not rotate
+            // another device; next startup obtains a fresh token for the selected ID.
+            try? await messagingBootstrapStore?.save(bootstrap, subjectId: actor.subjectId, deviceId: pending.pendingDeviceID)
+            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
+                  authState == .signedIn else {
+                try? await (messaging as? any MessagingLifecycleControlling)?.suspendMessaging()
+                throw CancellationError()
+            }
+            messagingTransportErrorText = nil
+            matrixLocalStoreFailure = nil
+            messagingStatusText = "online"
+            messagingTransportReadyForPusher = true
+            conversationListRefreshGeneration &+= 1
+            await refreshMatrixEncryptionRecoveryStatus()
+            await registerMatrixPusherIfPossible()
+            await reloadSelectedConversationAfterEncryptionRecovery()
+        } catch {
+            if revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId {
+                matrixLocalRecoveryErrorText = error.localizedDescription
+            }
+            throw error
+        }
+    }
+
     func refreshMatrixEncryptionRecoveryStatus() async {
         guard let recovery = messaging as? any MatrixEncryptionRecoveryManaging else {
             matrixEncryptionRecoveryStatus = .unsupported("The active messaging client does not expose Matrix encryption recovery.")
             return
         }
-        matrixEncryptionRecoveryStatus = await recovery.encryptionRecoveryStatus()
+        let revision = matrixLocalRecoveryRevision
+        let status = await recovery.encryptionRecoveryStatus()
+        guard revision == matrixLocalRecoveryRevision else { return }
+        matrixEncryptionRecoveryStatus = status
     }
 
     func createMatrixEncryptionRecovery(reset: Bool = false) async {
@@ -1482,6 +1644,7 @@ final class CommunicationModel {
             matrixEncryptionRecoveryStatus = await recovery.encryptionRecoveryStatus()
             await reloadSelectedConversationAfterEncryptionRecovery()
         } catch {
+            if let local = error as? MatrixLocalStoreError { matrixLocalStoreFailure = local.failure }
             let presentation = Self.matrixEncryptionRecoveryErrorPresentation(from: error)
             matrixEncryptionRecoveryErrorText = presentation.message
             matrixEncryptionRecoveryErrorTechnicalDetail = presentation.technicalDetail
@@ -1506,6 +1669,7 @@ final class CommunicationModel {
             matrixEncryptionRecoveryStatus = await recovery.encryptionRecoveryStatus()
             await reloadSelectedConversationAfterEncryptionRecovery()
         } catch {
+            if let local = error as? MatrixLocalStoreError { matrixLocalStoreFailure = local.failure }
             let presentation = Self.matrixEncryptionRecoveryErrorPresentation(from: error)
             matrixEncryptionRecoveryErrorText = presentation.message
             matrixEncryptionRecoveryErrorTechnicalDetail = presentation.technicalDetail
@@ -1530,6 +1694,7 @@ final class CommunicationModel {
             matrixEncryptionRecoveryStatus = await recovery.encryptionRecoveryStatus()
             await reloadSelectedConversationAfterEncryptionRecovery()
         } catch {
+            if let local = error as? MatrixLocalStoreError { matrixLocalStoreFailure = local.failure }
             let presentation = Self.matrixEncryptionRecoveryErrorPresentation(from: error)
             matrixEncryptionRecoveryErrorText = presentation.message
             matrixEncryptionRecoveryErrorTechnicalDetail = presentation.technicalDetail
@@ -1888,7 +2053,7 @@ final class CommunicationModel {
             guard try await validateMobilePairingSessionBeforeClaim(code: code, actor: actor) else {
                 return
             }
-            let request = makeMobilePairingClaimRequest(actor: actor)
+            let request = try makeMobilePairingClaimRequest(actor: actor)
             let response = try await api.claimMobilePairingSession(code: code, request: request)
             guard validateMobilePairingSecurity(response) else {
                 await failMobilePairing(
@@ -1987,7 +2152,7 @@ final class CommunicationModel {
         }
     }
 
-    private func makeMobilePairingClaimRequest(actor: AuthenticatedActor) -> MobilePairingClaimRequest {
+    private func makeMobilePairingClaimRequest(actor: AuthenticatedActor) throws -> MobilePairingClaimRequest {
         let registration = deviceRegistration?.registration(
             push: nil,
             posture: devicePosture
@@ -2000,11 +2165,7 @@ final class CommunicationModel {
             buildNumber: appConfiguration.buildNumber,
             deviceModel: registration?.deviceModel ?? "iPhone",
             osVersion: registration?.osVersion ?? ProcessInfo.processInfo.operatingSystemVersionString,
-            matrixDeviceId: Self.matrixDeviceId(
-                actor: actor,
-                deviceRegistration: deviceRegistration,
-                posture: devicePosture
-            ),
+            matrixDeviceId: try selectedMatrixDeviceID(for: actor),
             capabilities: MobilePairingClaimRequest.Capabilities(
                 matrixRustSdk: true,
                 e2ee: true,
@@ -3338,46 +3499,9 @@ final class CommunicationModel {
     }
 
     private func reconcileMatrixDeviceGeneration(for subjectId: String) async {
-        let key = Self.matrixDeviceGenerationStorageKey(subjectId: subjectId)
-        let storedGeneration = UserDefaults.standard.string(forKey: key)
-        guard storedGeneration != Self.matrixDeviceGeneration else { return }
-
-        do {
-            if let messageOutbox {
-                try await messageOutbox.clear()
-            }
-            if let messageHistory {
-                try await messageHistory.clear()
-            }
-            pendingMessageCount = 0
-            messages = []
-            loadingConversationId = nil
-            messagingTransportErrorText = nil
-            messageOutboxSyncStatusText = "idle"
-            pendingAutoSyncAttemptedConversationIds = []
-            pendingAutoSyncInFlightConversationIds = []
-            UserDefaults.standard.set(Self.matrixDeviceGeneration, forKey: key)
-            await appendEvent(
-                kind: .messageOutboxDiscarded,
-                summary: "Lokalni Matrix E2EE store byl prepnut na novou generaci a stara odesilaci fronta byla vycistena.",
-                subjectIdOverride: subjectId,
-                metadata: [
-                    "previousGeneration": storedGeneration ?? "unset",
-                    "currentGeneration": Self.matrixDeviceGeneration
-                ]
-            )
-        } catch {
-            lastError = error.localizedDescription
-            await appendEvent(
-                kind: .messageOutboxSyncFailed,
-                summary: "Vycisteni stare Matrix E2EE fronty pri migraci selhalo.",
-                subjectIdOverride: subjectId,
-                metadata: [
-                    "error": error.localizedDescription,
-                    "currentGeneration": Self.matrixDeviceGeneration
-                ]
-            )
-        }
+        // A generation marker is not consent to erase app-global history/outbox.
+        // Keep the established v7 identity and preserve all queued content.
+        UserDefaults.standard.set(Self.matrixDeviceGeneration, forKey: Self.matrixDeviceGenerationStorageKey(subjectId: subjectId))
     }
 
     private static func matrixDeviceGenerationStorageKey(subjectId: String) -> String {
@@ -4085,11 +4209,7 @@ final class CommunicationModel {
     }
 
     private func clearCachedMessagingBootstrap(for actor: AuthenticatedActor) async {
-        let deviceId = Self.matrixDeviceId(
-            actor: actor,
-            deviceRegistration: deviceRegistration,
-            posture: devicePosture
-        )
+        guard let deviceId = try? selectedMatrixDeviceID(for: actor) else { return }
         try? await messagingBootstrapStore?.clear(subjectId: actor.subjectId, deviceId: deviceId)
     }
 

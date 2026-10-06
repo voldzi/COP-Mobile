@@ -328,3 +328,72 @@ struct MatrixEncryptionRecoverySheet: View {
             )
     }
 }
+
+/// Explicit device-scoped repair, separate from account-wide E2EE reset.
+struct MatrixLocalChatRecoverySheet: View {
+    @Environment(CommunicationModel.self) private var appModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var recoveryKey = ""
+    @State private var requestedAuthorization: CSMChatStoreRecoveryAuthorization?
+    @State private var showsConfirmation = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Obnova použije novou identitu tohoto chatového zařízení. Původní šifrované úložiště, historie, neodeslané zprávy i ostatní účty zůstanou zachované.")
+                    Text("Obnovovací klíč odemkne existující E2EE zálohu. Aplikace jej neukládá ani neodesílá do COP.")
+                }
+                Section("Obnovovací klíč E2EE zálohy") {
+                    SecureField("Vložte obnovovací klíč", text: $recoveryKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("chat.localStoreRecovery.backupKey")
+                    Button("Obnovit ze zálohy") {
+                        requestedAuthorization = .restoreBackup(recoveryKey: recoveryKey)
+                        showsConfirmation = true
+                    }
+                    .disabled(appModel.matrixLocalRecoveryWorking || recoveryKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("chat.localStoreRecovery.restoreBackup")
+                }
+                if appModel.allowsChatRecoveryWithoutBackup {
+                    Section("Testovací provoz") {
+                        Text("Bez klíče nelze slíbit obnovení staré historie. Původní úložiště zůstane zachované; pro nový chat vznikne nové šifrované zařízení.")
+                        Button("Pokračovat bez obnovení historie", role: .destructive) {
+                            requestedAuthorization = .confirmedTestHistoryReset
+                            showsConfirmation = true
+                        }
+                        .disabled(appModel.matrixLocalRecoveryWorking)
+                        .accessibilityIdentifier("chat.localStoreRecovery.testWithoutBackup")
+                    }
+                }
+                if appModel.matrixLocalRecoveryWorking { ProgressView("Ověřuji nové zařízení a obnovu chatu…") }
+                if let error = appModel.matrixLocalRecoveryErrorText { Text(error).foregroundStyle(.red) }
+            }
+            .navigationTitle("Obnovit chat")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Zavřít") { recoveryKey = ""; dismiss() }
+                        .disabled(appModel.matrixLocalRecoveryWorking)
+                }
+            }
+            .interactiveDismissDisabled(appModel.matrixLocalRecoveryWorking)
+            .alert("Potvrdit obnovu tohoto chatu?", isPresented: $showsConfirmation) {
+                Button("Zrušit", role: .cancel) { requestedAuthorization = nil }
+                Button("Potvrdit obnovu") {
+                    guard let authorization = requestedAuthorization else { return }
+                    requestedAuthorization = nil
+                    Task {
+                        do {
+                            try await appModel.recoverChatStore(authorization: authorization, confirmed: true)
+                            recoveryKey = ""; dismiss()
+                        } catch { recoveryKey = "" }
+                    }
+                }
+            } message: {
+                Text("Chat použije nové ověřené zařízení. Původní data ani neodeslané zprávy se nesmažou. Ostatní funkce a účty se nemění.")
+            }
+            .onDisappear { recoveryKey = ""; requestedAuthorization = nil }
+        }
+    }
+}

@@ -16,7 +16,7 @@ import UIKit
 /// the SDK handle Megolm encryption, room key sharing, media encryption and
 /// local crypto state. It deliberately checks encrypted-room state before
 /// sending whenever COP/CSM policy marks the conversation as E2EE-required.
-actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycleControlling, MessagingLiveMessageStreaming, MessagingLiveLocationSharing, MessagingHistoryPaging, MessagingConversationPresentationEnriching, MessagingConversationAvatarUpdating, MatrixEncryptionRecoveryManaging {
+actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycleControlling, MessagingLiveMessageStreaming, MessagingLiveLocationSharing, MessagingHistoryPaging, MessagingConversationPresentationEnriching, MessagingConversationAvatarUpdating, MatrixEncryptionRecoveryManaging, MatrixLocalStoreRecovering, MessagingSessionAvailability {
     private static let userAgent = "COP Mobile iOS/0.1.2 MatrixRustSDK/26.06.23"
     private static let preflightUserAgent = "COP Mobile iOS/0.1.2 Matrix preflight"
     private static let historyPageSize: UInt16 = 100
@@ -35,6 +35,9 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
         subsystem: Bundle.main.bundleIdentifier ?? "cz.voldzi.copmobile",
         category: "matrix-rust"
     )
+    private let initializationID = UUID().uuidString
+    private var configurationRevision: UInt64 = 0
+    private let identityVerifier: any MatrixDeviceIdentityChecking
     private let keychain: KeychainCredentialStore
     private let fileManager: FileManager
     private let fixedStorePassphrase: String?
@@ -52,11 +55,13 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
     init(
         keychain: KeychainCredentialStore,
         fileManager: FileManager = .default,
-        fixedStorePassphrase: String? = nil
+        fixedStorePassphrase: String? = nil,
+        identityVerifier: any MatrixDeviceIdentityChecking = MatrixDeviceIdentityVerifier()
     ) {
         self.keychain = keychain
         self.fileManager = fileManager
         self.fixedStorePassphrase = fixedStorePassphrase
+        self.identityVerifier = identityVerifier
     }
 
     deinit {
@@ -67,14 +72,40 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
     // MARK: - MessagingClientProtocol
 
     func configure(with bootstrap: MessagingBootstrap) async throws {
-        try await configure(with: bootstrap, resetLocalStore: false)
+        try await serializedConfigure(with: bootstrap, authorization: nil)
     }
 
-    private func configure(with bootstrap: MessagingBootstrap, resetLocalStore: Bool) async throws {
-        lastBootstrap = bootstrap
+    func recoverLocalStore(from previous: MessagingBootstrap, with bootstrap: MessagingBootstrap, authorization: CSMChatStoreRecoveryAuthorization) async throws {
+        guard previous.userId == bootstrap.userId,
+              previous.homeserverBaseUrl == bootstrap.homeserverBaseUrl,
+              previous.deviceId != bootstrap.deviceId,
+              previous.e2eeRequired, bootstrap.e2eeRequired,
+              lastBootstrap?.userId == previous.userId,
+              lastBootstrap?.homeserverBaseUrl == previous.homeserverBaseUrl else {
+            throw MatrixLocalStoreError(failure: .deviceIdentityMismatch)
+        }
+        try await serializedConfigure(with: bootstrap, authorization: authorization)
+    }
+
+    private func serializedConfigure(with bootstrap: MessagingBootstrap, authorization: CSMChatStoreRecoveryAuthorization?) async throws {
+        configurationRevision &+= 1
+        let revision = configurationRevision
         let context = try Self.makeSessionContext(from: bootstrap)
-        if !resetLocalStore, sessionContext?.isEquivalent(to: context) == true, let client {
+        try await MatrixInitializationGate.shared.withExclusive(key: "client:" + initializationID) {
+            try await MatrixInitializationGate.shared.withExclusive(key: "store:" + Self.sha256Hex(context.storeSubject)) {
+                try await self.installClient(with: bootstrap, context: context, revision: revision, authorization: authorization)
+            }
+        }
+    }
+
+    private func installClient(with bootstrap: MessagingBootstrap, context: MatrixRustSessionContext, revision: UInt64, authorization: CSMChatStoreRecoveryAuthorization?) async throws {
+        guard revision == configurationRevision else { throw CancellationError() }
+        try Task.checkCancellation()
+        lastBootstrap = bootstrap
+        if authorization == nil, sessionContext?.isEquivalent(to: context) == true, let client {
             try await refreshExistingSession(client, reason: "equivalent-bootstrap")
+            guard revision == configurationRevision else { throw CancellationError() }
+            try Task.checkCancellation()
             return
         }
 
@@ -84,17 +115,28 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
         unavailableAvatarURLs.removeAll(keepingCapacity: true)
         liveLocationCompatibilitySessions.removeAll(keepingCapacity: true)
 
-        let passphrase = try await matrixStorePassphrase(for: context.storeSubject)
-        if resetLocalStore {
-            try Self.removeMatrixLocalStore(subject: context.storeSubject, fileManager: fileManager)
+        guard let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            throw MatrixLocalStoreError(failure: .recoveryUnavailable)
         }
-        let storePaths = try Self.matrixStorePaths(
-            subject: context.storeSubject,
-            fileManager: fileManager
-        )
+        let files = MatrixLocalStoreFiles(rootDirectory: appSupport.appendingPathComponent("CSMMatrixRust", isDirectory: true))
+        let inspection = try files.inspect(subject: context.storeSubject)
+        let identity = MatrixDeviceIdentityContext(homeserver: context.homeserverURL, userID: context.userId, deviceID: context.deviceId, accessToken: context.accessToken)
+        // Refuse a fresh crypto DB under a device whose public keys already exist.
+        // This check precedes key creation; an old key is never manufactured anew.
+        if !inspection.hasCryptoDatabase { try await identityVerifier.verify(identity, requireUnpublishedKeys: true) }
+        let storePaths = try await files.prepare(inspection: inspection, subject: context.storeSubject, keys: keychain, fixedPassphrase: fixedStorePassphrase)
+        if inspection.hasCryptoDatabase { try await identityVerifier.verify(identity, requireUnpublishedKeys: false) }
+        guard revision == configurationRevision else { throw CancellationError() }
         try await Self.verifyHomeserverReachable(context.homeserverURL)
 
-        let matrixClient = try await ClientBuilder()
+        let recoveryMarker = inspection.root.appendingPathComponent(".cop-explicit-device-recovery-v1")
+        let isExplicitRecoveryDevice = authorization != nil || fileManager.fileExists(atPath: recoveryMarker.path)
+        if authorization != nil {
+            try Data("explicit-device-recovery-v1".utf8).write(to: recoveryMarker, options: .atomic)
+        }
+        let matrixClient: Client
+        do {
+            matrixClient = try await ClientBuilder()
             .homeserverUrl(url: context.homeserverURL.absoluteString)
             .requestConfig(
                 config: RequestConfig(
@@ -106,50 +148,83 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
             )
             .sqliteStore(
                 config: SqliteStoreBuilder(dataPath: storePaths.dataPath, cachePath: storePaths.cachePath)
-                    .passphrase(passphrase: passphrase)
+                    .passphrase(passphrase: storePaths.passphrase)
             )
             // Cross-signing and backup activation are SDK-owned session duties.
             // The recovery key remains user-held, but an already recovered
             // account must sign this device before other clients share keys.
-            .autoEnableBackups(autoEnableBackups: true)
-            .autoEnableCrossSigning(autoEnableCrossSigning: true)
+            .autoEnableBackups(autoEnableBackups: !isExplicitRecoveryDevice)
+            .autoEnableCrossSigning(autoEnableCrossSigning: !isExplicitRecoveryDevice)
             .backupDownloadStrategy(backupDownloadStrategy: .oneShot)
             .slidingSyncVersionBuilder(versionBuilder: .none)
             .userAgent(userAgent: Self.userAgent)
             .build()
+        } catch { throw MatrixLocalStoreError.classifyBuilderFailure(error) }
 
-        let sdkSession = MatrixRustSDK.Session(
-            accessToken: context.accessToken,
-            refreshToken: context.refreshToken,
-            userId: context.userId,
-            deviceId: context.deviceId,
-            homeserverUrl: context.homeserverURL.absoluteString,
-            oauthData: nil,
-            slidingSyncVersion: .none
-        )
-        try await matrixClient.restoreSessionWith(session: sdkSession, roomLoadSettings: .all)
-        try await matrixClient.resume()
-        await matrixClient.enableAllSendQueues(enable: true)
-        // Do not await `waitForE2eeInitializationTasks()` here. In the current
-        // pilot Synapse deployment, Matrix Rust probes secret storage
-        // (`m.secret_storage.default_key`) while enabling recovery.
-        // Awaiting that recovery-oriented task can wedge the first sync before
-        // any fresh encrypted event is sent. Fresh Megolm sends remain guarded by
-        // the encrypted-room check below and by the SDK send queue.
-        await syncOnceBestEffort(using: matrixClient, timeoutMs: 10_000, fullState: true, reason: "initial")
-        await joinKnownInvitedRooms(using: matrixClient)
+        do {
+            guard revision == configurationRevision else { throw CancellationError() }
+            let sdkSession = MatrixRustSDK.Session(
+                accessToken: context.accessToken,
+                refreshToken: context.refreshToken,
+                userId: context.userId,
+                deviceId: context.deviceId,
+                homeserverUrl: context.homeserverURL.absoluteString,
+                oauthData: nil,
+                slidingSyncVersion: .none
+            )
+            try await matrixClient.restoreSessionWith(session: sdkSession, roomLoadSettings: .all)
+            try await matrixClient.resume()
+            await matrixClient.enableAllSendQueues(enable: authorization == nil)
+            if case let .restoreBackup(recoveryKey)? = authorization {
+                let trimmed = recoveryKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { throw MatrixLocalStoreError(failure: .recoveryUnavailable) }
+                do {
+                    let encryption = matrixClient.encryption()
+                    try await encryption.recover(recoveryKey: trimmed)
+                    try await encryption.enableBackups()
+                    guard encryption.backupState().isEnabledForRecovery else {
+                        throw MatrixLocalStoreError(failure: .recoveryUnavailable)
+                    }
+                } catch {
+                    try? await matrixClient.pause()
+                    throw MatrixLocalStoreError(failure: .recoveryUnavailable)
+                }
+            }
+            guard revision == configurationRevision else {
+                try? await matrixClient.pause()
+                throw CancellationError()
+            }
+            try Task.checkCancellation()
+            await matrixClient.enableAllSendQueues(enable: true)
+            // Do not await `waitForE2eeInitializationTasks()` here. In the current
+            // pilot Synapse deployment, Matrix Rust probes secret storage
+            // (`m.secret_storage.default_key`) while enabling recovery.
+            // Awaiting that recovery-oriented task can wedge the first sync before
+            // any fresh encrypted event is sent. Fresh Megolm sends remain guarded by
+            // the encrypted-room check below and by the SDK send queue.
+            await syncOnceBestEffort(using: matrixClient, timeoutMs: 10_000, fullState: true, reason: "initial")
+            await joinKnownInvitedRooms(using: matrixClient)
 
-        let listener = MatrixRustSyncListener()
-        let handle = matrixClient.syncV2(
-            settings: SyncSettingsV2(timeoutMs: 30_000, fullState: false),
-            listener: listener
-        )
+            guard revision == configurationRevision else {
+                try? await matrixClient.pause()
+                throw CancellationError()
+            }
+            let listener = MatrixRustSyncListener()
+            let handle = matrixClient.syncV2(
+                settings: SyncSettingsV2(timeoutMs: 30_000, fullState: false),
+                listener: listener
+            )
 
-        client = matrixClient
-        sessionContext = context
-        syncListener = listener
-        syncHandle = handle
-        logger.info("Matrix Rust session configured for user \(context.safeUserId, privacy: .public) device \(context.deviceId, privacy: .public).")
+            client = matrixClient
+            sessionContext = context
+            syncListener = listener
+            syncHandle = handle
+            logger.info("Matrix Rust session configured with verified device identity.")
+        } catch {
+            await matrixClient.enableAllSendQueues(enable: false)
+            try? await matrixClient.pause()
+            throw error
+        }
     }
 
     func messages(for conversation: Conversation) async throws -> [ChatMessage] {
@@ -587,12 +662,35 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
         )
     }
 
+    func hasUsableMessagingSession(for bootstrap: MessagingBootstrap) async -> Bool {
+        guard client != nil, let context = sessionContext else { return false }
+        return context.userId == bootstrap.userId && context.deviceId == bootstrap.deviceId && context.homeserverURL == bootstrap.homeserverBaseUrl
+    }
+
     func resumeMessaging() async throws {
-        guard let client else { return }
+        let revision = configurationRevision
+        try await MatrixInitializationGate.shared.withExclusive(key: "client:" + initializationID) {
+            try await self.resumeConfiguredClient(revision: revision)
+        }
+    }
+
+    private func resumeConfiguredClient(revision: UInt64) async throws {
+        guard revision == configurationRevision, let client else { return }
         try await client.resume()
+        guard revision == configurationRevision else {
+            try? await client.pause()
+            throw CancellationError()
+        }
     }
 
     func suspendMessaging() async throws {
+        configurationRevision &+= 1
+        try await MatrixInitializationGate.shared.withExclusive(key: "client:" + initializationID) {
+            try await self.pauseConfiguredClient()
+        }
+    }
+
+    private func pauseConfiguredClient() async throws {
         guard let client else { return }
         try await client.pause()
     }
@@ -827,15 +925,9 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
             )
         } catch {
             if Self.isWebSecretStorageRetryCandidate(error) {
-                do {
-                    try await retryEncryptionRecoveryAfterLocalStoreReset(
-                        recoveryKeyCandidates: recoveryKeyCandidates,
-                        originalError: error
-                    )
-                    return
-                } catch {
-                    throw Self.userFacingRecoveryError(from: error)
-                }
+                // Reopening an empty crypto DB under the old device ID can publish
+                // conflicting identity keys. Only explicit scoped device recovery may replace it.
+                throw MatrixLocalStoreError(failure: .recoveryRequired)
             }
             if let userFacingError = error as? MatrixEncryptionRecoveryUserFacingError {
                 throw userFacingError
@@ -910,34 +1002,6 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
         }
 
         throw Self.preferredRecoveryError(firstError: firstError, lastError: lastError)
-    }
-
-    private func retryEncryptionRecoveryAfterLocalStoreReset(
-        recoveryKeyCandidates: [String],
-        originalError: any Error
-    ) async throws {
-        guard let bootstrap = lastBootstrap else {
-            throw originalError
-        }
-
-        logger.warning(
-            "Matrix recovery hit web secret-storage compatibility failure. Resetting local Matrix store and retrying once without changing server recovery: \(originalError.localizedDescription, privacy: .public)"
-        )
-        do {
-            try await configure(with: bootstrap, resetLocalStore: true)
-            let retryClient = try requireClient()
-            try await restoreEncryptionRecovery(
-                using: retryClient,
-                encryption: retryClient.encryption(),
-                recoveryKeyCandidates: recoveryKeyCandidates,
-                syncReason: "encryption-recovery-local-store-retry"
-            )
-        } catch {
-            logger.error(
-                "Matrix recovery local-store retry failed: \(error.localizedDescription, privacy: .public)"
-            )
-            throw Self.preferredRecoveryError(firstError: originalError, lastError: error)
-        }
     }
 
     private func enableBackupsAfterPartialRecoveryIfPossible(_ encryption: Encryption) async -> Bool {
@@ -1630,6 +1694,7 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
     }
 
     private func stopSyncService() async {
+        if let client { try? await client.pause() }
         syncHandle?.cancel()
         syncHandle = nil
         syncListener = nil
@@ -1648,29 +1713,6 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
     private func cancelTimelineSubscriptions() {
         timelineSubscriptions.values.forEach { $0.handle.cancel() }
         timelineSubscriptions.removeAll()
-    }
-
-    private func matrixStorePassphrase(for subject: String) async throws -> String {
-        if let fixedStorePassphrase {
-            return fixedStorePassphrase
-        }
-
-        let account = "matrix-rust-store.\(Self.sha256Hex(subject))"
-        if let existing = try await keychain.loadSymmetricKey(account: account),
-           let passphrase = String(data: existing, encoding: .utf8),
-           !passphrase.isEmpty {
-            return passphrase
-        }
-
-        var bytes = [UInt8](repeating: 0, count: 32)
-        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        guard status == errSecSuccess else {
-            throw CSMServiceError.unavailable("Nelze vytvorit Matrix store passphrase: \(status).")
-        }
-
-        let passphrase = Data(bytes).base64EncodedString()
-        try await keychain.saveSymmetricKey(Data(passphrase.utf8), account: account)
-        return passphrase
     }
 
     private static func makeSessionContext(from bootstrap: MessagingBootstrap) throws -> MatrixRustSessionContext {
@@ -1728,41 +1770,6 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             throw CSMServiceError.unavailable("Matrix homeserver neni dostupny pro iOS klienta (HTTP \(status)).")
         }
-    }
-
-    private static func matrixStorePaths(
-        subject: String,
-        fileManager: FileManager
-    ) throws -> MatrixRustStorePaths {
-        let root = try matrixStoreRoot(subject: subject, fileManager: fileManager)
-        let data = root.appendingPathComponent("data", isDirectory: true)
-        let cache = root.appendingPathComponent("cache", isDirectory: true)
-        try fileManager.createDirectory(at: data, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: cache, withIntermediateDirectories: true)
-
-        return MatrixRustStorePaths(dataPath: data.path, cachePath: cache.path)
-    }
-
-    private static func matrixStoreRoot(
-        subject: String,
-        fileManager: FileManager
-    ) throws -> URL {
-        guard let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            throw CSMServiceError.unavailable("Application Support adresar neni dostupny.")
-        }
-
-        return appSupport
-            .appendingPathComponent("CSMMatrixRust", isDirectory: true)
-            .appendingPathComponent(sha256Hex(subject), isDirectory: true)
-    }
-
-    private static func removeMatrixLocalStore(
-        subject: String,
-        fileManager: FileManager
-    ) throws {
-        let root = try matrixStoreRoot(subject: subject, fileManager: fileManager)
-        guard fileManager.fileExists(atPath: root.path) else { return }
-        try fileManager.removeItem(at: root)
     }
 
     private static func safeAttachmentFilename(for attachment: MessageAttachment) -> String {
@@ -2639,7 +2646,7 @@ actor MatrixRustE2EEMessagingClient: MessagingClientProtocol, MessagingLifecycle
 
 }
 
-private struct MatrixRustSessionContext {
+private struct MatrixRustSessionContext: Sendable {
     var homeserverURL: URL
     var accessToken: String
     var refreshToken: String?

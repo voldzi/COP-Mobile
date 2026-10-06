@@ -64,3 +64,5 @@ Jízda community police reporting: [public SDK handoff](jizda-community-reports-
 - [COP independent mobility availability](cop-dispatch-availability-handoff.md): optional wire-v1 service states, compatible Swift API and fail-closed sharing integration.
 
 - [Mobility invitation notifications](mobility-invitation-notifications-handoff.md): versioned push link, verified runtime listener and explicit host navigation.
+
+Matrix crypto store recovery: [ADR 0021](adr/0021-device-scoped-matrix-store-recovery.md) and [Jízda integration/acceptance](matrix-store-recovery-handoff.md).

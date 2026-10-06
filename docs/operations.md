@@ -168,3 +168,7 @@ co build, entitlement, permission nebo security policy nepovoluje.
 
 Výpadek závislosti se mapuje na pojmenovaný degraded stav; aplikace neoznačí
 Wi-Fi jako důkaz dostupného COP backendu.
+
+## Local encrypted chat recovery
+
+Do not repair AEAD by deleting a Matrix root, replacing its key, increasing device generation or using a server crypto/account reset. The shared UI/API requires confirmation and validates a new device session. Pending/selected device routing survives restart, while original roots and credentials are retained. DEBUG-only Boolean `CSMAllowChatRecoveryWithoutBackup` is the authorized test-build policy; Release always rejects it. Rollback and real-device acceptance are in [the handoff](matrix-store-recovery-handoff.md).

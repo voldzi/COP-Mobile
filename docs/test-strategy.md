@@ -562,3 +562,7 @@ Run `OIDCTokenLifecycleTests` and `COPSessionRestorationTests` in the shared pac
 Read-only identity and caller presentation changes require isolated two-user/DM/self/peer/push tests plus the exact Xcode27.1 gate. Real-phone calls and server/account acceptance must be recorded separately.
 
 Complete Jízda SDK union gate:136packageXCTest/1private replay skip, plus30appunit/5UI/2SwiftTesting/2accessibility PASS2026-10-05. Actual Jízda host Debug/Release/fixtures and phones are separate.
+
+## Matrix store recovery boundary
+
+`MatrixLocalStoreTests` covers the actual pinned Rust SQLite/cipher mismatch and original-key reopen, stored account detection, HTTP identity fixtures, atomic Keychain API fixture, root symlinks, backup exclusion and cancellation gates. `MatrixStoreRecoveryFlowTests` covers same-device 401 refresh, explicit confirmation, two-account routing/cache isolation, preserved encrypted outbox, restart after cache-save failure and account switch during recovery. Missing Keychain entitlement in a package runner is reported as skipped and remains a physical-device gate. [Required phone scenarios](matrix-store-recovery-handoff.md).
