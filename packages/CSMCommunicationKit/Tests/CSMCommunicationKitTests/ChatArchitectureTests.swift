@@ -62,7 +62,7 @@ final class ChatArchitectureTests: XCTestCase {
         do {
             try await client.registerPusher(
                 pushKey: "apns-token",
-                pushGatewayURL: URL(string: "https://messaging.example/api/v1/matrix/push/notify")!
+                pushGatewayURL: URL(string: "https://messaging.example/_matrix/push/v1/notify")!
             )
             XCTFail("Pusher registration failure must not be reported as success.")
         } catch {

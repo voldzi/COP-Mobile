@@ -117,6 +117,15 @@ formát. Bridge má vlastní lokální error contract popsaný níže.
   dokumentace služby;
 - Matrix Client-Server API přes připnutý Matrix Rust SDK pro session restore,
   sync, E2EE timeline, send queue, media a recovery.
+- Matrix HTTP pusher dostává plnou HTTPS adresu CSM Messaging s přesnou cestou
+  `/_matrix/push/v1/notify` na kořeni nakonfigurovaného originu, nikoli REST
+  cestu `/api/v1/matrix/push/notify`. Resolver zachovává host a explicitní port;
+  případnou REST base path a trailing slash nahrazuje kanonickou cestou.
+  Odmítá relativní adresu, HTTP, userinfo, query, fragment i neplatný port,
+  místo aby je přenesl do pusheru. Jde o lokální bezpečnostní politiku nad
+  [Matrix Push Gateway API](https://spec.matrix.org/latest/push-gateway-api/),
+  které vyžaduje při registraci pusheru úplné URI tohoto endpointu. Nemění
+  COP přihlášení, tokeny, E2EE úložiště ani serverové preference oznámení.
 - COP `POST /api/v1/ai/chat-agent/query` pouze pro explicitní přímou konverzaci
   `COP AI Assistant`. Native posílá aktuální otázku a bezpečný identifikátor
   konverzace, nikoli historii roomu nebo Matrix/E2EE tajemství; odpověď se

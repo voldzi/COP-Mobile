@@ -196,6 +196,12 @@ Automatizované integrační testy a ruční penetrační scénáře musí ově�
 - tracking session state machine, durable cursor, stop a recovery metadat;
 - asset allowlist, skutečná velikost, SHA-256, quota, TTL a cleanup;
 - APNs/deep-link parsing bez vystavení tokenu nebo nepovolené route;
+- `MatrixPushGatewayURLPolicyTests`: kanonická root cesta
+  `/_matrix/push/v1/notify` pro HTTPS origin, trailing slash i REST base path,
+  zachování explicitního portu a IPv6 originu; odmítnutí HTTP, relativních URL,
+  userinfo, query/fragment včetně prázdných a neplatného portu. Ověření resolveru
+  není důkazem doručení APNs; opravený pusher se navíc ověřuje na dvou fyzických
+  telefonech se samostatným foreground/background a Focus/mute scénářem;
 - nativní OIDC state/issuer/redirect/PKCE validace, cancel, refresh, logout a
   explicitní změna účtu (`prompt=login` + izolovaná webová relace bez převzetí
   SSO cookie předchozího uživatele) a změna subjectu;

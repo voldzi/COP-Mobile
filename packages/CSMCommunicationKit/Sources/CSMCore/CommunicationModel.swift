@@ -1237,8 +1237,7 @@ final class CommunicationModel {
     }
 
     private var matrixPushGatewayURL: URL? {
-        let base = appConfiguration.messagingBaseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        return URL(string: base + "/api/v1/matrix/push/notify")
+        MatrixPushGatewayURLPolicy.resolve(messagingBaseURL: appConfiguration.messagingBaseURL)
     }
 
     private func makeMessagingDeviceRegistrationRequest(
