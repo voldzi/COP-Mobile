@@ -222,7 +222,7 @@ public extension CSMCommunicationRuntime {
         return result
     }
 
-    func mobilityRequest<Response: Decodable>(path: String, method: String, body: Data?, query: [URLQueryItem], expectedScope: String, ifMatch: String? = nil) async throws -> Response {
+    func mobilityRequest<Response: Decodable>(path: String, method: String, body: Data?, query: [URLQueryItem], expectedScope: String, ifMatch: String? = nil, idempotencyKey: String? = nil) async throws -> Response {
         let generation = MobilitySessionGeneration.shared.value
         guard mobilitySessionScope() == expectedScope else { throw CSMCOPSessionError(.accountChanged) }
         let configuration = AppConfiguration.fromBundle()
@@ -250,6 +250,10 @@ public extension CSMCommunicationRuntime {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         if let ifMatch { request.setValue(ifMatch, forHTTPHeaderField: "If-Match") }
+        if let idempotencyKey {
+            guard UUID(uuidString: idempotencyKey) != nil else { throw CSMCOPSessionError(.invalidResponse) }
+            request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        }
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         let config = URLSessionConfiguration.ephemeral; config.urlCache = nil; config.httpCookieStorage = nil
         let session = URLSession(configuration: config, delegate: MobilityNoRedirect(), delegateQueue: nil)
