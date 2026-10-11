@@ -85,6 +85,9 @@ struct ChatView: View {
     var onOpenCOP: (() -> Void)?
     var onStartVoiceCall: ((String, String, [String]?, String?) -> Void)?
     @State private var draft = ""
+    @State private var safetyScope: String?
+    @State private var safetyActor: String?
+    @State private var showsCommunicationSafety = false
     @State private var localSummary: LocalAIConversationSummary?
     @State private var replyTo: MessageReplyReference?
     @State private var searchText = ""
@@ -141,7 +144,9 @@ struct ChatView: View {
         let timeline = timelinePresentationStore.presentation
 
         AnyView(VStack(spacing: 0) {
-            if let activeConversation {
+            if let activeConversation, appModel.communicationBlockedDirectConversationIDs.contains(activeConversation.conversationId) {
+                ContentUnavailableView("Uživatel je zablokován", systemImage: "hand.raised.fill", description: Text("Soukromý chat je skrytý. Odblokovat jej můžete v nabídce bezpečnosti komunikace."))
+            } else if let activeConversation {
                 if isSearchVisible || !searchText.isEmpty {
                     ChatSearchBar(
                         text: $searchText,
@@ -309,6 +314,12 @@ struct ChatView: View {
             }
         }
         .toolbar(.hidden, for: .tabBar)
+        .sheet(isPresented: $showsCommunicationSafety) {
+            if let activeConversation, let safetyScope, let safetyActor {
+                CSMCommunicationSafetySheet(runtime: CSMCommunicationRuntime(model: appModel), conversation: activeConversation,
+                    expectedScope: safetyScope, actorSubjectID: safetyActor, onBlocked: { draft = ""; replyTo = nil })
+            }
+        }
         .confirmationDialog(
             CSMLocalization.text("Odstranit čekající zprávy?", fallback: "Odstranit čekající zprávy?"),
             isPresented: $showsPendingRecoveryConfirmation,
@@ -593,6 +604,16 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let activeConversation {
+                if !activeConversation.isAIAssistantConversation {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            let runtime = CSMCommunicationRuntime(model: appModel)
+                            safetyScope = runtime.mobilitySessionScope(); safetyActor = appModel.actor?.subjectId
+                            showsCommunicationSafety = true
+                        } label: { Image(systemName: "shield.lefthalf.filled") }
+                        .accessibilityLabel("Bezpečnost komunikace")
+                    }
+                }
                 ToolbarItem(placement: .principal) {
                     ChatNavigationTitle(
                         conversation: activeConversation,

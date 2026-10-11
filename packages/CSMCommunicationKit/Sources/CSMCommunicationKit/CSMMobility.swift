@@ -222,7 +222,7 @@ public extension CSMCommunicationRuntime {
         return result
     }
 
-    func mobilityRequest<Response: Decodable>(path: String, method: String, body: Data?, query: [URLQueryItem], expectedScope: String, ifMatch: String? = nil, idempotencyKey: String? = nil) async throws -> Response {
+    func mobilityRequest<Response: Decodable>(path: String, method: String, body: Data?, query: [URLQueryItem], expectedScope: String, ifMatch: String? = nil, idempotencyKey: String? = nil, responseValidator: (@Sendable (Int, Response) throws -> Void)? = nil) async throws -> Response {
         let generation = MobilitySessionGeneration.shared.value
         guard mobilitySessionScope() == expectedScope else { throw CSMCOPSessionError(.accountChanged) }
         let configuration = AppConfiguration.fromBundle()
@@ -271,7 +271,9 @@ public extension CSMCommunicationRuntime {
                 message: error?.error.message ?? "Sdílení COP není dostupné.", correlationId: error?.error.correlationId,
                 retryAfter: http.value(forHTTPHeaderField: "Retry-After"))
         }
-        return try JSONDecoder().decode(Response.self, from: data)
+        let result = try JSONDecoder().decode(Response.self, from: data)
+        try responseValidator?(http.statusCode, result)
+        return result
     }
 }
 private final class MobilityNoRedirect: NSObject, URLSessionTaskDelegate, Sendable {

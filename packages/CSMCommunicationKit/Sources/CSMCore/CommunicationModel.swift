@@ -35,6 +35,8 @@ final class CommunicationModel {
     /// generation gives affected phones a clean Matrix device and store without
     /// changing the server contract or storing secrets in the app.
     private static let matrixDeviceGeneration = "matrix-rust-e2ee-v7"
+    private(set) var communicationBlockedDirectConversationIDs: Set<String> = []
+    private(set) var jizdaLinkLocallySuspended = false
     private static let matrixInstallationSeedStorageKey = "cz.zeleznalady.csm.matrixInstallationSeed"
     private static let aiAssistantUserId = "cop.ai.agent"
     private static let aiAssistantDisplayName = "COP AI Assistant"
@@ -60,6 +62,8 @@ final class CommunicationModel {
         set {
             let measurementSessionChanged = actor?.subjectId != newValue?.subjectId
             if measurementSessionChanged {
+                communicationBlockedDirectConversationIDs = []
+                jizdaLinkLocallySuspended = false
                 matrixLocalRecoveryRevision &+= 1
                 lastMessagingBootstrap = nil
                 matrixLocalStoreFailure = nil
@@ -3673,6 +3677,7 @@ final class CommunicationModel {
     @discardableResult
     func sendMessage(_ draft: OutgoingMessageDraft) async -> Bool {
         guard !draft.isEmpty, let selectedConversation else { return false }
+        guard !jizdaLinkLocallySuspended, !communicationBlockedDirectConversationIDs.contains(selectedConversation.conversationId) else { return false }
         await ensureMessagingBootstrapFreshIfNeeded(force: shouldForceMessagingRefreshBeforeSend)
         if let blockedMessage = messagingSendBlockedMessage {
             lastError = blockedMessage
@@ -3718,6 +3723,7 @@ final class CommunicationModel {
             ]
         )
         do {
+            guard !jizdaLinkLocallySuspended, !communicationBlockedDirectConversationIDs.contains(sendConversation.conversationId) else { return false }
             let message = try await messaging.sendMessage(draft, to: sendConversation)
             ChatPerformance.measure(
                 "chat.local-echo",
@@ -3784,6 +3790,31 @@ final class CommunicationModel {
     func discardPendingMessagesForActiveConversation() async {
         guard let selectedConversation else { return }
         await discardPendingMessages(for: selectedConversation)
+    }
+
+    func confirmDirectCommunicationBlock(peerSubjectID: String, blocked: Bool, expectedSubjectID: String) async {
+        guard actor?.subjectId == expectedSubjectID else { return }
+        let direct = conversations.filter { $0.type == .direct && $0.members.contains { $0.userId == peerSubjectID } }
+        for conversation in direct {
+            guard actor?.subjectId == expectedSubjectID else { return }
+            if blocked {
+                communicationBlockedDirectConversationIDs.insert(conversation.conversationId)
+                await discardPendingMessages(for: conversation)
+            } else { communicationBlockedDirectConversationIDs.remove(conversation.conversationId) }
+        }
+    }
+
+    func suspendLocalCommunicationForJizdaUnlink() async {
+        jizdaLinkLocallySuspended = true
+        messagingConfigurationRevision &+= 1
+        timelineSynchronization.stop()
+        liveLocationShareTask?.cancel()
+        liveLocationShareTask = nil
+        activeLiveLocationConversation = nil
+        activeLiveLocationShare = nil
+        // Pause this application's client. Do not call global Matrix/OIDC logout,
+        // unregister an unscoped legacy ID or erase any local history/SwiftData.
+        try? await (messaging as? any MessagingLifecycleControlling)?.suspendMessaging()
     }
 
     private func discardPendingMessages(for conversation: Conversation) async {
@@ -3887,9 +3918,11 @@ final class CommunicationModel {
         for conversation: Conversation,
         trigger: PendingMessageSyncTrigger
     ) async {
+        guard !jizdaLinkLocallySuspended, !communicationBlockedDirectConversationIDs.contains(conversation.conversationId) else { return }
         await ensureMessagingBootstrapFreshIfNeeded(force: trigger.forceBootstrapRefresh)
         await refreshMatrixEncryptionRecoveryStatus()
         let syncConversation = await refreshedConversationForSend(conversation)
+        guard !jizdaLinkLocallySuspended, !communicationBlockedDirectConversationIDs.contains(syncConversation.conversationId) else { return }
 
         if (syncConversation.e2eeRequired || syncConversation.encrypted),
            matrixEncryptionRecoveryStatus.blocksSending {

@@ -1,51 +1,102 @@
-# Account safety candidate on pinned SDK 09493a0
+# Account safety SDK candidate on pinned 09493a0
 
-Prepared for Jízda's coordinated COP acceptance, not production activation.
+Source-only transfer for coordinated Jízda/COP acceptance. Publication does not
+activate production capabilities or prove a native build. Use the exact release
+manifest, complete patch and base revision; the older three-file transfer is
+superseded.
 
-The source-only SDK delta is `CSMAccountSafety.swift`, the appended optional
-`idempotencyKey` parameter/header in `CSMMobility.swift`, and four XCTest cases
-in `AccountSafetyContractsTests.swift`. Existing calls retain their nil default
-and the original session/actor-generation guards. Do not overwrite Jízda's
-host callback, notification, voice or send-ack patches.
+## Complete transfer scope
 
-COP contract: `cop-account-safety-v1`, binding
-`delta_acr_cop/openapi/openapi.json` on `codex/account-deletion-moderation`.
-Detailed endpoints, server enforcement, retention, privacy candidate, exact
-unexecuted deployment plan and outstanding erasure are in COP
-`docs/integration/40_ACCOUNT_SAFETY_APP_REVIEW.md`.
+Against Jízda's pinned `09493a0`, include all nine paths:
 
-Public methods: capabilities; report with stable operation UUID; own report
-status; read block state; block/unblock. Targets are user/message/call references
-verified server-side. Evidence is optional, explicitly selected and confirmed,
-at most 4096 UTF-8 bytes. No automatic timeline, transcript or decrypted history.
-Render selected evidence as plain text and obtain confirmation before sending.
-Do not follow links or render HTML from it. New APIs neither select an actor nor
-choose an external AI key/model. No fallback to another actor/local-only block.
+- `docs/README.md`
+- this integration document
+- `packages/CSMCommunicationKit/Apps/CSMMobile/ConversationWorkspace.swift`
+- `packages/CSMCommunicationKit/Sources/CSMCommunicationKit/CSMAccountSafety.swift`
+- `packages/CSMCommunicationKit/Sources/CSMCommunicationKit/CSMMobility.swift`
+- `packages/CSMCommunicationKit/Sources/CSMCommunicationKit/CSMCommunicationSafetySheet.swift`
+- `packages/CSMCommunicationKit/Sources/CSMCommunicationKit/CSMJizdaAppLink.swift`
+- `packages/CSMCommunicationKit/Sources/CSMCore/CommunicationModel.swift`
+- `packages/CSMCommunicationKit/Tests/CSMCommunicationKitTests/AccountSafetyContractsTests.swift`
 
-After a successful canonical block, hide the peer's older cached history and
-explicitly discard their pending drafts; keep other group members and state
-consistent. Report/block failures and unavailable capability are not successful
-operations. The host must not expose an account-deletion action based on this
-candidate: `accountDeletion=false`, and the actual erasure workflow/SDK are not
-yet implemented. App Store release still requires those actual features and the
-accepted moderation/filter/contact/retention process.
+The two new safety-sheet/link source files must be included explicitly. An
+unstaged `git diff` would omit them. Preserve Jízda's host callback,
+notification, voice, measurement, routing and send-ack changes; apply the delta
+to a new frozen snapshot and resolve only genuine overlapping edits.
 
-## Verification
+## Contract and methods
 
-Foundation model harness: PASS for metadata-only encoding, positive explicit
-excerpt, refusal of missing confirmation/empty text and 4096-byte UTF-8 bound.
-Four full SDK XCTest cases were added but not run as a native suite here.
-Device-contract validation: PASS 19 fixtures. iOS-project validation: PASS.
+COP authority is binding JSON OpenAPI in `delta_acr_cop` and its integration
+plans 40–42. Reporting/blocking: `cop-account-safety-v1`. Jízda-only unlink:
+`cop-jizda-link-v1`. Account and local SwiftData deletion are not part of unlink.
 
-Actual toolchain readback: `xcodebuild -version` gives Xcode 27.1,
-Build version 27A9275; `xcrun --sdk iphoneos --show-sdk-version` gives 27.1.
-This pinned baseline's `scripts/verify-apple-toolchain.sh:5` defaults to 27A9269,
-aligned with AGENTS/CLAUDE and ADR0007. The verifier therefore fails on the
-build identity, not on version 27.0 or on a missing toolchain. The pin has not
-been changed or bypassed and no Xcode download was attempted. Jízda's existing
-approval of its installed 27.1 and host tests must be handled by its owner:
-apply this small delta to its accepted frozen snapshot and run the suite there.
-Earlier host 230/571/scenario results do not cover this new delta.
+Public methods:
 
-Physical iPhone, real Matrix/APNs/LiveKit and account erasure were not tested.
-No production restart, secret creation, account reset or app install occurred.
+- `copAccountSafetyCapabilities(expectedScope:)`
+- `copCommunicationReport(_:operationId:expectedScope:)`
+- `copCommunicationReportStatus(reportId:expectedScope:)`
+- `copCommunicationBlockState(peerSubjectId:expectedScope:)`
+- `copCommunicationSetBlocked(_:peerSubjectId:expectedScope:)`
+- `copJizdaLinkCapabilities(expectedScope:)`
+- `copJizdaLinkStatus(expectedScope:)`
+- `copDisconnectJizda(operationId:expectedScope:)`
+
+Existing `mobilityRequest` callers retain nil defaults. New optional
+`idempotencyKey` is validated as UUID. Optional responseValidator observes HTTP
+status and decoded receipt, without changing actor/scope/session-generation,
+HTTPS, no-redirect or ephemeral no-cookie guards.
+
+Targets are user/message/call references verified server-side. Both encoder and
+decoder validate the exact target shape and explicit evidence. Standalone
+capabilities/receipt coding validates the current version, truthful state,
+no account/local-data erasure, and absent/null account-deletion URL. Every submission
+is validated again before HTTP and self-report targets are rejected. Default
+reports contain no evidence. Optional evidence is selected text, explicitly
+confirmed, at most 4096 UTF-8 bytes. Render it as plain text, never HTML/links;
+never automatically attach decrypted history, transcript or location. Reporting
+and blocking UI gates are independent.
+
+Keep operation UUID across retries; discard it when account/scope changes.
+POST unlink 202 is pending with nonempty remaining; POST 200 is complete only
+with disconnected/empty remaining. Mismatched HTTP/body results fail. GET 200
+may recover pending work. isComplete alone is not proof of a successful POST.
+
+Before unlink, pause the host's Dispatch/location/measurement producers. On
+accepted fence the SDK pauses local communication and emits the content-free
+`.csmJizdaLinkFenceAccepted` event. The host must stop its own producers. Check
+status on cold start before push/voice producers. On 503 recover status before
+resuming. Preserve SwiftData; do not invoke global COP/Matrix logout/deletion.
+
+A separate attested Jízda OIDC client and exact PKCE redirect must be provisioned
+before unlink can activate. Shared csm-mobile is not app identity. Do not copy a
+refresh token into the new namespace. Real Matrix-device/live-permission
+revocation and legacy migration are incomplete, so current production cleanup
+cannot complete. Full COP account removal is absent, capability false/URL null.
+
+Canonical block hides direct cached history/discards unsent drafts. Group-cache
+filtering, cold-start block synchronization and already-handed-off Matrix/media
+revocation remain acceptance gates. Existing LiveKit JWTs and ongoing call
+audio are not claimed revoked by this candidate.
+
+## Toolchain and evidence matrix
+
+| Check | Accepted scope |
+| --- | --- |
+| Xcode 27.1(27A9269), iPhoneOS SDK 27.1, iOS minimum 26 | Current exact pinned baseline; not available on this Mac |
+| Installed Xcode 27.1(27A9275), iPhoneOS SDK 27.1 | New exact-pin approval requested by Jízda owner; pending. Not declared accepted native toolchain |
+| Isolated Foundation models, Swift 6 language mode | Focused model/encoder/decoder/receipt/preflight evidence only |
+| Skeleton, device 19 fixtures, iOS project validator | Static configuration evidence only |
+| Native SDK XCTest/check.sh and host Jízda builds | Pending exact approval and serialized owner execution |
+| Physical iPhone/Matrix/APNs/LiveKit/unlink/deletion | Not performed by this source transfer |
+
+The pin has not been changed or bypassed and no Xcode download was attempted.
+Earlier Jízda host-test results predate this delta. An isolated XCTest attempt
+returned `no such module XCTest`; do not count checked-in cases as executed.
+Fresh verification: 128 isolated Foundation checks passed; all seven Swift
+files parse; 15 native XCTest cases are checked in but not executed. Static
+skeleton/device 19 fixtures/project validation passed. Hashes and complete scope
+are recorded in the transfer manifest.
+
+No production restart, secret creation, account reset, real message/push or app
+installation occurred. App Review needs actual deletion and the accepted
+moderation/filter/contact/retention process before those features are claimed.
