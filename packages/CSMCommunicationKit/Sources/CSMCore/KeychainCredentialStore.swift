@@ -28,7 +28,7 @@ extension TokenCredentialStoring {
     }
 }
 
-actor KeychainCredentialStore: TokenCredentialStoring, MatrixStoreKeyAccessing {
+actor KeychainCredentialStore: TokenCredentialStoring, MatrixStoreKeyAccessing, CSMJizdaLifecyclePersisting {
     private let service: String
     private let accessGroup: String?
     private let matrixItems: any MatrixKeychainItemAccessing
@@ -55,6 +55,42 @@ actor KeychainCredentialStore: TokenCredentialStoring, MatrixStoreKeyAccessing {
 
     func loadSymmetricKey(account: String) throws -> Data? {
         try load(account: "symmetric-key.\(account)")
+    }
+    func loadOrCreateInstallationID(scope: String, legacyCandidate: UUID?) throws -> UUID {
+        let data = try createPersistentItem(account: "jizda-installation.\(scope)", candidate: Data((legacyCandidate ?? UUID()).uuidString.lowercased().utf8))
+        guard let text = String(data: data, encoding: .utf8), let id = UUID(uuidString: text) else {
+            throw CSMServiceError.invalidState("Uložená instalace Jízdy není platná.")
+        }
+        return id
+    }
+    func hasJizdaAcceptedFence(scope: String) throws -> Bool {
+        guard let data = try readPersistentItem(account: "jizda-link-fence.\(scope)") else { return false }
+        guard data == Data("accepted-v1".utf8) else { throw CSMServiceError.invalidState("Stav odpojení Jízdy není platný.") }
+        return true
+    }
+    func saveJizdaAcceptedFence(scope: String) throws {
+        let expected = Data("accepted-v1".utf8)
+        guard try createPersistentItem(account: "jizda-link-fence.\(scope)", candidate: expected) == expected else {
+            throw CSMServiceError.invalidState("Stav odpojení Jízdy není platný.")
+        }
+    }
+    private func readPersistentItem(account: String) throws -> Data? {
+        var query = baseQuery(account: account)
+        query[kSecReturnData as String] = true; query[kSecMatchLimit as String] = kSecMatchLimitOne
+        let (status, data) = matrixItems.read(query: query)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data else { throw CSMServiceError.unavailable("Zabezpečené úložiště není dostupné.") }
+        return data
+    }
+    private func createPersistentItem(account: String, candidate: Data) throws -> Data {
+        if let existing = try readPersistentItem(account: account) { return existing }
+        var query = baseQuery(account: account)
+        query[kSecValueData as String] = candidate
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        let status = matrixItems.add(query: query)
+        if status == errSecSuccess { return candidate }
+        if status == errSecDuplicateItem, let winner = try readPersistentItem(account: account) { return winner }
+        throw CSMServiceError.unavailable("Zabezpečené úložiště není dostupné.")
     }
 
     // SecItemAdd is the cross-instance create-if-absent primitive. Never update a
@@ -155,8 +191,8 @@ actor KeychainCredentialStore: TokenCredentialStoring, MatrixStoreKeyAccessing {
     }
 }
 
-// Injection is restricted to Matrix store key creation. OIDC and other key
-// operations continue to use their existing Keychain implementations.
+// Injection covers Matrix keys and app-scoped Jízda installation/fence items.
+// OIDC operations continue to use their existing Keychain implementation.
 protocol MatrixKeychainItemAccessing: Sendable {
     func read(query: [String: Any]) -> (Int32, Data?)
     func add(query: [String: Any]) -> Int32

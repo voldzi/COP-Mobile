@@ -5,6 +5,10 @@ activate production capabilities or prove a native build. Use the exact release
 manifest, complete patch and base revision; the older three-file transfer is
 superseded.
 
+The first-phase nine-file scope below remains the exact historical transfer.
+The new lifecycle completion uses a separate immutable v2manifest; do not modify
+the original archive or replace Jízda's newer host code wholesale.
+
 ## Complete transfer scope
 
 Against Jízda's pinned `09493a0`, include all nine paths:
@@ -69,9 +73,12 @@ resuming. Preserve SwiftData; do not invoke global COP/Matrix logout/deletion.
 
 A separate attested Jízda OIDC client and exact PKCE redirect must be provisioned
 before unlink can activate. Shared csm-mobile is not app identity. Do not copy a
-refresh token into the new namespace. Real Matrix-device/live-permission
-revocation and legacy migration are incomplete, so current production cleanup
-cannot complete. Full COP account removal is absent, capability false/URL null.
+refresh token into the new namespace. Messaging source now selectively revokes and reads back attested Matrix devices.
+Live permission revocation and unknown legacy migration remain incomplete, so
+current production cleanup cannot complete. Whole COP account erasure has a
+separate source-only orchestration contract and a real local sessions/profile
+adapter, but lacks all required provider proofs. SDK safety capability remains
+false/URL null; do not expose a delete action based on source alone.
 
 Canonical block hides direct cached history/discards unsent drafts. Group-cache
 filtering, cold-start block synchronization and already-handed-off Matrix/media
@@ -82,14 +89,15 @@ audio are not claimed revoked by this candidate.
 
 | Check | Accepted scope |
 | --- | --- |
-| Xcode 27.1(27A9269), iPhoneOS SDK 27.1, iOS minimum 26 | Current exact pinned baseline; not available on this Mac |
-| Installed Xcode 27.1(27A9275), iPhoneOS SDK 27.1 | New exact-pin approval requested by Jízda owner; pending. Not declared accepted native toolchain |
+| Xcode 27.1(27A9275), iPhoneOS SDK 27.1, iOS minimum26 | Exact installed pin explicitly approved by human; verifier passed |
+| First-phase frozen SDK native tests on exact27A9275 | Jízda owner reports248tests, twoexplicit skips, zero failures; predates lifecycle delta |
 | Isolated Foundation models, Swift 6 language mode | Focused model/encoder/decoder/receipt/preflight evidence only |
 | Skeleton, device 19 fixtures, iOS project validator | Static configuration evidence only |
-| Native SDK XCTest/check.sh and host Jízda builds | Pending exact approval and serialized owner execution |
+| New lifecycle SDK/host native tests | Serialized owner execution pending; do not reuse first-phase results |
 | Physical iPhone/Matrix/APNs/LiveKit/unlink/deletion | Not performed by this source transfer |
 
-The pin has not been changed or bypassed and no Xcode download was attempted.
+The exact pin was changed only after explicit human approval (published6e4b028),
+never bypassed; no Xcode download was attempted.
 Earlier Jízda host-test results predate this delta. An isolated XCTest attempt
 returned `no such module XCTest`; do not count checked-in cases as executed.
 Fresh verification: 128 isolated Foundation checks passed; all seven Swift

@@ -149,7 +149,13 @@ struct ProductionCopAPIClient: CopAPIClientProtocol {
     }
 
     func messagingBootstrap(deviceId: String) async throws -> MessagingBootstrap {
-        try await http.post("/api/v1/messaging/bootstrap", body: MessagingBootstrapRequest(deviceId: deviceId))
+        try await messagingBootstrap(deviceId: deviceId, installationId: nil)
+    }
+    func messagingBootstrap(deviceId: String, installationId: UUID?) async throws -> MessagingBootstrap {
+        try await http.post("/api/v1/messaging/bootstrap", body: MessagingBootstrapRequest(deviceId: deviceId, installationId: installationId))
+    }
+    func jizdaLinkStatus() async throws -> CSMJizdaLinkReceipt {
+        try await http.getVerifiedUncached("/api/v1/me/app-links/jizda")
     }
 
     func startVoiceCall(_ request: CSMVoiceCallStartRequest) async throws -> CSMVoiceCallSession {
@@ -494,8 +500,9 @@ private struct AlertAcknowledgementRequest: Encodable, Sendable {
     var note: String?
 }
 
-private struct MessagingBootstrapRequest: Encodable, Sendable {
+struct MessagingBootstrapRequest: Encodable, Sendable {
     var deviceId: String
+    var installationId: UUID? = nil
 }
 
 private struct CopAlertListResponse: Decodable, Sendable {

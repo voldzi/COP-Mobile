@@ -42,6 +42,35 @@ struct HTTPClient: Sendable {
         return try await send(request, transientRetryCount: transientRetryCount)
     }
 
+    /// Security-gating reads cannot reuse a cached permission or follow a
+    /// redirect to a different authority. Only the dedicated Jízda link check
+    /// opts in; existing REST reads retain their current behavior.
+    func getVerifiedUncached<Response: Decodable & Sendable>(_ path: String) async throws -> Response {
+        guard requiresAuthorization, baseURL.scheme == "https", baseURL.host != nil,
+              baseURL.user == nil, baseURL.password == nil, baseURL.query == nil,
+              baseURL.fragment == nil, ["", "/"].contains(baseURL.path) else {
+            throw CSMServiceError.disabled("Ověření propojení vyžaduje ověřenou konfiguraci COP.")
+        }
+        var request = try await request(path, method: "GET")
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = 15
+        request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil; configuration.httpCookieStorage = nil
+        // Preserve an injected test transport without inheriting cookies/cache.
+        configuration.protocolClasses = session.configuration.protocolClasses
+        let verificationSession = URLSession(configuration: configuration,
+            delegate: HTTPVerificationNoRedirect(), delegateQueue: nil)
+        defer { verificationSession.finishTasksAndInvalidate() }
+        let (data, response) = try await verificationSession.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.url == request.url,
+              data.count <= 65_536 else { throw CSMServiceError.invalidState("Neplatná odpověď ověření propojení.") }
+        guard http.statusCode == 200 else {
+            throw HTTPResponseFailure(statusCode: http.statusCode, code: Self.errorCode(in: data))
+        }
+        return try CSMJSONCoding.decoder.decode(Response.self, from: data)
+    }
+
     func getData(
         _ path: String,
         queryItems: [URLQueryItem] = [],
@@ -271,5 +300,13 @@ struct EmptyHTTPResponse: Decodable, Sendable {
 
     init(statusCode: Int) {
         self.statusCode = statusCode
+    }
+}
+
+private final class HTTPVerificationNoRedirect: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                    completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 }

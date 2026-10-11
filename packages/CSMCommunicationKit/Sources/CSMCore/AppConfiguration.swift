@@ -18,6 +18,7 @@ struct AppConfiguration: Sendable, Equatable {
     var oidcRedirectScheme: String
     var oidcScope: String
     var resetStateForUITesting: Bool
+    var appScope: String? = nil
 
     static let preview = AppConfiguration(
         copBaseURL: URL(string: "https://cop.zeleznalady.cz")!,
@@ -80,7 +81,8 @@ struct AppConfiguration: Sendable, Equatable {
             oidcClientId: clientId ?? preview.oidcClientId,
             oidcRedirectScheme: redirectScheme ?? preview.oidcRedirectScheme,
             oidcScope: scope ?? preview.oidcScope,
-            resetStateForUITesting: resetStateForUITesting
+            resetStateForUITesting: resetStateForUITesting,
+            appScope: info["CSMAppScope"] as? String
         )
     }
 

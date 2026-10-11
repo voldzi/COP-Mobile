@@ -37,6 +37,11 @@ final class CommunicationModel {
     private static let matrixDeviceGeneration = "matrix-rust-e2ee-v7"
     private(set) var communicationBlockedDirectConversationIDs: Set<String> = []
     private(set) var jizdaLinkLocallySuspended = false
+    private(set) var jizdaLifecyclePolicy: CSMJizdaLifecyclePolicy
+    var jizdaLifecycleSnapshot: CSMJizdaLifecycleSnapshot { jizdaLifecyclePolicy.snapshot }
+    var communicationProducersPermitted: Bool {
+        authState == .signedIn && !jizdaLinkLocallySuspended && jizdaLifecycleSnapshot.permitsProducers
+    }
     private static let matrixInstallationSeedStorageKey = "cz.zeleznalady.csm.matrixInstallationSeed"
     private static let aiAssistantUserId = "cop.ai.agent"
     private static let aiAssistantDisplayName = "COP AI Assistant"
@@ -45,7 +50,12 @@ final class CommunicationModel {
         get { chatSessionStore.snapshot.authState }
         set {
             let measurementSessionChanged = authState != newValue
-            if measurementSessionChanged { matrixLocalRecoveryRevision &+= 1 }
+            if measurementSessionChanged {
+                matrixLocalRecoveryRevision &+= 1
+                jizdaLifecyclePolicy.resetAccount()
+                jizdaInstallationID = nil
+                jizdaLinkLocallySuspended = false
+            }
             chatSessionStore.update(
                 authState: newValue,
                 actor: actor,
@@ -53,7 +63,7 @@ final class CommunicationModel {
                 deviceID: messagingDeviceId
             )
             if measurementSessionChanged { NotificationCenter.default.post(name: .csmDriverMeasurementSessionChanged, object: nil) }
-            if measurementSessionChanged { NotificationCenter.default.post(name: .csmMobilitySessionChanged, object: nil) }
+            if measurementSessionChanged { NotificationCenter.default.post(name: .csmMobilitySessionChanged, object: nil); publishJizdaLifecycleReadiness() }
         }
     }
     private(set) var connectionMode: ConnectionMode = .offline
@@ -64,6 +74,8 @@ final class CommunicationModel {
             if measurementSessionChanged {
                 communicationBlockedDirectConversationIDs = []
                 jizdaLinkLocallySuspended = false
+                jizdaLifecyclePolicy.resetAccount()
+                jizdaInstallationID = nil
                 matrixLocalRecoveryRevision &+= 1
                 lastMessagingBootstrap = nil
                 matrixLocalStoreFailure = nil
@@ -78,7 +90,7 @@ final class CommunicationModel {
                 deviceID: messagingDeviceId
             )
             if measurementSessionChanged { NotificationCenter.default.post(name: .csmDriverMeasurementSessionChanged, object: nil) }
-            if measurementSessionChanged { NotificationCenter.default.post(name: .csmMobilitySessionChanged, object: nil) }
+            if measurementSessionChanged { NotificationCenter.default.post(name: .csmMobilitySessionChanged, object: nil); publishJizdaLifecycleReadiness() }
         }
     }
     private(set) var policy: MobileNativePolicy?
@@ -282,6 +294,10 @@ final class CommunicationModel {
         )
     }
 
+    @ObservationIgnored private let jizdaLifecyclePersistence: any CSMJizdaLifecyclePersisting
+    @ObservationIgnored private var jizdaInstallationID: UUID?
+    @ObservationIgnored private var jizdaProducerSuspensionTask: Task<Void, Never>?
+    @ObservationIgnored private var jizdaProducerSuspensionTaskID: UUID?
     @ObservationIgnored private let appConfiguration: AppConfiguration
     @ObservationIgnored private let api: any CopAPIClientProtocol
     @ObservationIgnored private let messaging: any MessagingClientProtocol
@@ -340,9 +356,13 @@ final class CommunicationModel {
         authSession: any AuthSessionManaging,
         securityUnlock: any SecurityUnlockManaging,
         matrixRecoveryDefaults: UserDefaults = .standard,
-        allowsChatRecoveryWithoutBackup: Bool = CSMChatStoreRecoveryPolicy.allowsWithoutBackup
+        allowsChatRecoveryWithoutBackup: Bool = CSMChatStoreRecoveryPolicy.allowsWithoutBackup,
+        jizdaLifecyclePersistence: any CSMJizdaLifecyclePersisting = KeychainCredentialStore()
     ) {
         self.appConfiguration = appConfiguration
+        self.jizdaLifecyclePersistence = jizdaLifecyclePersistence
+        self.jizdaLifecyclePolicy = CSMJizdaLifecyclePolicy(appScope: appConfiguration.appScope,
+            clientID: appConfiguration.oidcClientId, redirectScheme: appConfiguration.oidcRedirectScheme)
         self.api = api
         self.messaging = messaging
         self.messageOutbox = messageOutbox
@@ -363,6 +383,163 @@ final class CommunicationModel {
         #else
         self.allowsChatRecoveryWithoutBackup = false
         #endif
+    }
+
+    private func publishJizdaLifecycleReadiness() {
+        NotificationCenter.default.post(name: .csmJizdaLifecycleReadinessChanged, object: nil)
+    }
+
+    func permitsCommunicationProducers(epoch: UUID) -> Bool {
+        epoch == jizdaLifecycleSnapshot.generation && communicationProducersPermitted
+    }
+
+    private func permitsMessagingPreparation(epoch: UUID) -> Bool {
+        guard !Task.isCancelled, epoch == jizdaLifecycleSnapshot.generation,
+              authState == .signedIn, !jizdaLinkLocallySuspended else { return false }
+        return !jizdaLifecyclePolicy.required || jizdaLifecyclePolicy.permitsTransportPreparation
+    }
+
+    private func jizdaStorageScope(actor: AuthenticatedActor, installationID: UUID? = nil) -> String {
+        let values = [appConfiguration.oidcIssuer.absoluteString, appConfiguration.oidcClientId,
+                      appConfiguration.copBaseURL.absoluteString, actor.subjectId,
+                      installationID?.uuidString.lowercased() ?? "installation"]
+        return Self.tokenFingerprint(values.joined(separator: "\0"))
+    }
+
+    private func secureJizdaInstallationID(actor: AuthenticatedActor, epoch: UUID) async throws -> UUID {
+        if let jizdaInstallationID { return jizdaInstallationID }
+        // Migrate only the exact valid UUID previously used by this app, never a
+        // Matrix device prefix. Its new Keychain namespace also binds the actor.
+        let legacy = UserDefaults.standard.string(forKey: "cz.zeleznalady.csm.app-instance-id")
+            .flatMap(UUID.init(uuidString:))
+        let id = try await jizdaLifecyclePersistence.loadOrCreateInstallationID(
+            scope: jizdaStorageScope(actor: actor), legacyCandidate: legacy)
+        guard epoch == jizdaLifecycleSnapshot.generation, self.actor?.subjectId == actor.subjectId,
+              authState == .signedIn else { throw CSMCOPSessionError(.accountChanged) }
+        jizdaInstallationID = id
+        return id
+    }
+
+    /// Always consult the authenticated server on cold start/foreground. A
+    /// persisted accepted fence is conservative; a cached ready state is never
+    /// authority to resume producers. Default csm-mobile does not use this path.
+    @discardableResult
+    func ensureJizdaLifecycleReady(force: Bool = false) async -> Bool {
+        guard authState == .signedIn, let actor else { return false }
+        if !jizdaLifecyclePolicy.required { return communicationProducersPermitted }
+        guard jizdaLifecyclePolicy.configured else {
+            await suspendCommunicationProducers(epoch: jizdaLifecycleSnapshot.generation)
+            return false
+        }
+        let epoch = jizdaLifecycleSnapshot.generation
+        if let pending = jizdaProducerSuspensionTask { await pending.value }
+        guard epoch == jizdaLifecycleSnapshot.generation, self.actor?.subjectId == actor.subjectId else { return false }
+        if !force, communicationProducersPermitted { return true }
+        _ = jizdaLifecyclePolicy.beginVerification()
+        publishJizdaLifecycleReadiness()
+        await suspendCommunicationProducers(epoch: epoch)
+        guard epoch == jizdaLifecycleSnapshot.generation, self.actor?.subjectId == actor.subjectId else { return false }
+        do {
+            let id = try await secureJizdaInstallationID(actor: actor, epoch: epoch)
+            let fenceScope = jizdaStorageScope(actor: actor, installationID: id)
+            let persisted = try await jizdaLifecyclePersistence.hasJizdaAcceptedFence(scope: fenceScope)
+            guard epoch == jizdaLifecycleSnapshot.generation, self.actor?.subjectId == actor.subjectId,
+                  authState == .signedIn else { return false }
+            let receipt = try await api.jizdaLinkStatus()
+            try receipt.validate()
+            guard epoch == jizdaLifecycleSnapshot.generation, self.actor?.subjectId == actor.subjectId,
+                  authState == .signedIn else { return false }
+            if persisted || receipt.status != "linked" {
+                _ = jizdaLifecyclePolicy.acceptFence(epoch: epoch)
+                jizdaLinkLocallySuspended = true
+                publishJizdaLifecycleReadiness()
+                try await jizdaLifecyclePersistence.saveJizdaAcceptedFence(scope: fenceScope)
+            }
+            guard jizdaLifecyclePolicy.verified(status: receipt.status, persistedFence: persisted, epoch: epoch),
+                  self.actor?.subjectId == actor.subjectId, authState == .signedIn else { return false }
+            jizdaLinkLocallySuspended = !jizdaLifecycleSnapshot.permitsProducers
+            if jizdaLinkLocallySuspended {
+                await suspendCommunicationProducers(epoch: epoch)
+            } else {
+                guard jizdaLifecyclePolicy.beginTransportPreparation(epoch: epoch) else { return false }
+                publishJizdaLifecycleReadiness()
+                // suspend/invalidate cleared the actual client even when its
+                // cached token has not expired. Reconfigure it before ready.
+                await configureMessaging(for: actor)
+                guard permitsMessagingPreparation(epoch: epoch), self.actor?.subjectId == actor.subjectId else { return false }
+                _ = jizdaLifecyclePolicy.finishTransportPreparation(
+                    epoch: epoch, succeeded: messagingTransportReadyForPusher)
+            }
+            guard epoch == jizdaLifecycleSnapshot.generation else { return false }
+            publishJizdaLifecycleReadiness()
+            if permitsCommunicationProducers(epoch: epoch) {
+                // Forced verification stopped the old timeline. A valid cached
+                // bootstrap still needs its live stream and pusher restored.
+                if let selectedConversation { startLiveMessageStream(for: selectedConversation) }
+                await registerMatrixPusherIfPossible()
+                guard permitsCommunicationProducers(epoch: epoch) else { return false }
+            }
+            return communicationProducersPermitted
+        } catch {
+            guard jizdaLifecyclePolicy.failed(epoch: epoch), self.actor?.subjectId == actor.subjectId,
+                  authState == .signedIn else { return false }
+            lastError = "Propojení Jízdy nelze ověřit. Komunikace zůstává pozastavená."
+            await suspendCommunicationProducers(epoch: epoch)
+            guard epoch == jizdaLifecycleSnapshot.generation else { return false }
+            publishJizdaLifecycleReadiness()
+            return false
+        }
+    }
+
+    func rejectJizdaLinkVerification(epoch: UUID) async {
+        guard jizdaLifecyclePolicy.required, jizdaLifecyclePolicy.configured,
+              authState == .signedIn, jizdaLifecyclePolicy.failed(epoch: epoch) else { return }
+        await suspendCommunicationProducers(epoch: epoch)
+        guard epoch == jizdaLifecycleSnapshot.generation else { return }
+        publishJizdaLifecycleReadiness()
+    }
+
+    /// Returns false if the receipt belongs to a superseded authenticated session.
+    /// The host event must be emitted only after this returns true.
+    func acceptJizdaLinkFence(epoch: UUID) async throws -> Bool {
+        guard jizdaLifecyclePolicy.required, jizdaLifecyclePolicy.configured,
+              let actor, authState == .signedIn, jizdaLifecyclePolicy.acceptFence(epoch: epoch) else { return false }
+        jizdaLinkLocallySuspended = true
+        publishJizdaLifecycleReadiness()
+        // Stop network producers immediately, even if secure persistence fails.
+        await suspendCommunicationProducers(epoch: epoch)
+        guard epoch == jizdaLifecycleSnapshot.generation, self.actor?.subjectId == actor.subjectId else { return false }
+        let id = try await secureJizdaInstallationID(actor: actor, epoch: epoch)
+        try await jizdaLifecyclePersistence.saveJizdaAcceptedFence(
+            scope: jizdaStorageScope(actor: actor, installationID: id))
+        return epoch == jizdaLifecycleSnapshot.generation && self.actor?.subjectId == actor.subjectId && authState == .signedIn
+    }
+
+    private func suspendCommunicationProducers(epoch: UUID) async {
+        guard epoch == jizdaLifecycleSnapshot.generation else { return }
+        jizdaLinkLocallySuspended = true
+        messagingConfigurationRevision &+= 1
+        messagingBootstrapRefreshTask?.cancel()
+        messagingBootstrapRefreshTask = nil; messagingBootstrapRefreshTaskID = nil
+        messagingBootstrapRefreshTaskRevision = nil
+        timelineSynchronization.stop()
+        messagingTransportReadyForPusher = false
+        liveLocationShareTask?.cancel(); liveLocationShareTask = nil
+        activeLiveLocationConversation = nil; activeLiveLocationShare = nil
+        if let task = jizdaProducerSuspensionTask { await task.value; return }
+        let taskID = UUID()
+        let task = Task<Void, Never> { @MainActor [messaging] in
+            if let invalidating = messaging as? any MessagingSessionInvalidating {
+                try? await invalidating.invalidateMessagingSession()
+            } else {
+                try? await (messaging as? any MessagingLifecycleControlling)?.suspendMessaging()
+            }
+        }
+        jizdaProducerSuspensionTask = task; jizdaProducerSuspensionTaskID = taskID
+        await task.value
+        if jizdaProducerSuspensionTaskID == taskID {
+            jizdaProducerSuspensionTask = nil; jizdaProducerSuspensionTaskID = nil
+        }
     }
 
     func start() async {
@@ -396,30 +573,39 @@ final class CommunicationModel {
         title: String?,
         participantSubjectIDs: [String]?
     ) async throws -> CSMVoiceCallSession {
-        guard authState == .signedIn else {
+        let epoch = jizdaLifecycleSnapshot.generation
+        guard permitsCommunicationProducers(epoch: epoch) else {
             throw CSMVoiceCallControlError.authenticationRequired
         }
-        return try await api.startVoiceCall(
+        let result = try await api.startVoiceCall(
             CSMVoiceCallStartRequest(
                 participantSubjectIds: participantSubjectIDs,
                 roomId: roomID,
                 title: title
             )
         )
+        guard permitsCommunicationProducers(epoch: epoch) else { throw CancellationError() }
+        return result
     }
 
     func voiceCall(callID: String) async throws -> CSMVoiceCallSession {
-        guard authState == .signedIn else {
+        let epoch = jizdaLifecycleSnapshot.generation
+        guard permitsCommunicationProducers(epoch: epoch) else {
             throw CSMVoiceCallControlError.authenticationRequired
         }
-        return try await api.voiceCall(callId: callID)
+        let result = try await api.voiceCall(callId: callID)
+        guard permitsCommunicationProducers(epoch: epoch) else { throw CancellationError() }
+        return result
     }
 
     func activeVoiceCalls() async throws -> [CSMVoiceCall] {
-        guard authState == .signedIn else {
+        let epoch = jizdaLifecycleSnapshot.generation
+        guard permitsCommunicationProducers(epoch: epoch) else {
             throw CSMVoiceCallControlError.authenticationRequired
         }
-        return try await api.voiceCalls(roomId: nil, activeOnly: true, limit: 20)
+        let result = try await api.voiceCalls(roomId: nil, activeOnly: true, limit: 20)
+        guard permitsCommunicationProducers(epoch: epoch) else { throw CancellationError() }
+        return result
     }
 
     func refreshVoiceCallTimeline(for conversation: Conversation) async {
@@ -462,10 +648,11 @@ final class CommunicationModel {
         expectedRevision: Int?,
         reason: String?
     ) async throws -> CSMVoiceCallSession {
-        guard authState == .signedIn else {
+        let epoch = jizdaLifecycleSnapshot.generation
+        guard permitsCommunicationProducers(epoch: epoch) else {
             throw CSMVoiceCallControlError.authenticationRequired
         }
-        return try await api.transitionVoiceCall(
+        let result = try await api.transitionVoiceCall(
             callId: callID,
             request: CSMVoiceCallActionRequest(
                 action: action,
@@ -474,6 +661,8 @@ final class CommunicationModel {
                 reason: reason
             )
         )
+        guard permitsCommunicationProducers(epoch: epoch) else { throw CancellationError() }
+        return result
     }
 
     func signIn(forceAuthentication: Bool = false, loginHint: String? = nil) async {
@@ -610,15 +799,19 @@ final class CommunicationModel {
     }
 
     func appDidBecomeActive() async {
-        guard authState == .signedIn else { return }
+        guard authState == .signedIn, !jizdaLifecyclePolicy.acceptedFence else { return }
+        let epoch = jizdaLifecycleSnapshot.generation
         guard await authSession.canUseExistingSession() else {
             authState = .signedOut
             connectionMode = .offline
             return
         }
+        guard epoch == jizdaLifecycleSnapshot.generation,
+              await ensureJizdaLifecycleReady(force: true), permitsCommunicationProducers(epoch: epoch) else { return }
         if let lifecycle = messaging as? any MessagingLifecycleControlling {
             do {
                 try await lifecycle.resumeMessaging()
+                guard permitsCommunicationProducers(epoch: epoch) else { return }
             } catch {
                 lastError = error.localizedDescription
             }
@@ -627,6 +820,7 @@ final class CommunicationModel {
             messagingStatusText == "degraded" ||
             messagingStatusText == "offline_queue"
         await ensureMessagingBootstrapFreshIfNeeded(force: shouldRecoverMessagingTransport)
+        guard permitsCommunicationProducers(epoch: epoch) else { return }
         await refreshMatrixEncryptionRecoveryStatus()
         await refreshPendingMessageCount()
         await flushCommunityReportOutbox()
@@ -647,14 +841,17 @@ final class CommunicationModel {
     }
 
     private func bootstrapCommunication() async {
+        let initialEpoch = jizdaLifecycleSnapshot.generation
         isLoading = true
         defer { isLoading = false }
         do {
             let bootstrap = try await api.bootstrap(seconds: 180)
+            guard initialEpoch == jizdaLifecycleSnapshot.generation, authState == .signedIn else { return }
             try await enforceSecurityUnlockIfRequired(
                 by: bootstrap.policy,
                 subjectId: bootstrap.actor.subjectId
             )
+            guard initialEpoch == jizdaLifecycleSnapshot.generation, authState == .signedIn else { return }
             actor = bootstrap.actor
             policy = bootstrap.policy
             userProfile = bootstrap.profile
@@ -678,7 +875,10 @@ final class CommunicationModel {
             // availability states; they must not keep the host behind an auth
             // spinner. Runtime preparation still awaits the complete start task.
             isLoading = false
+            guard await ensureJizdaLifecycleReady(force: true) else { return }
+            let epoch = jizdaLifecycleSnapshot.generation
             await reconcileMatrixDeviceGeneration(for: bootstrap.actor.subjectId)
+            guard permitsCommunicationProducers(epoch: epoch) else { return }
             await preparePushIfAllowed(by: bootstrap)
             await registerDeviceIfPossible()
             await registerMessagingDeviceIfPossible()
@@ -698,10 +898,12 @@ final class CommunicationModel {
     }
 
     func submitCommunityReport(_ draft: CommunityReportDraft) async throws -> CommunityReportSubmission? {
-        guard authState == .signedIn else {
+        let epoch = jizdaLifecycleSnapshot.generation
+        guard communicationProducersPermitted else {
             throw CSMServiceError.authenticationRequired("Pro odeslání hlášení se přihlaste ke COP.")
         }
         try await communityOutbox?.enqueue(draft)
+        guard permitsCommunicationProducers(epoch: epoch) else { return nil }
         do {
             let submission = try await api.submitCommunityReport(draft)
             try await communityOutbox?.removeDraft(id: draft.id)
@@ -712,10 +914,11 @@ final class CommunicationModel {
     }
 
     private func flushCommunityReportOutbox() async {
-        guard authState == .signedIn, let communityOutbox else { return }
+        let epoch = jizdaLifecycleSnapshot.generation
+        guard communicationProducersPermitted, let communityOutbox else { return }
         guard let pending = try? await communityOutbox.pendingDrafts() else { return }
         for draft in pending {
-            guard !Task.isCancelled else { return }
+            guard permitsCommunicationProducers(epoch: epoch), !Task.isCancelled else { return }
             do {
                 _ = try await api.submitCommunityReport(draft)
                 try await communityOutbox.removeDraft(id: draft.id)
@@ -726,6 +929,8 @@ final class CommunicationModel {
     }
 
     private func configureMessaging(for actor: AuthenticatedActor) async {
+        guard permitsMessagingPreparation(epoch: jizdaLifecycleSnapshot.generation) else { return }
+        let epoch = jizdaLifecycleSnapshot.generation
         guard !matrixLocalRecoveryWorking, self.actor?.subjectId == actor.subjectId,
               authState == .signedIn else { return }
         let revision = matrixLocalRecoveryRevision
@@ -733,7 +938,7 @@ final class CommunicationModel {
             let pendingID = messagingBootstrapRefreshTaskID
             let pendingRevision = messagingBootstrapRefreshTaskRevision
             await pending.value
-            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
                   authState == .signedIn, !matrixLocalRecoveryWorking else { return }
             if pendingRevision == revision { return }
             if messagingBootstrapRefreshTaskID == pendingID {
@@ -759,8 +964,10 @@ final class CommunicationModel {
     }
 
     private func performConfigureMessaging(for actor: AuthenticatedActor) async {
+        guard permitsMessagingPreparation(epoch: jizdaLifecycleSnapshot.generation) else { return }
+        let epoch = jizdaLifecycleSnapshot.generation
         let revision = matrixLocalRecoveryRevision
-        guard self.actor?.subjectId == actor.subjectId, authState == .signedIn else { return }
+        guard permitsMessagingPreparation(epoch: epoch), self.actor?.subjectId == actor.subjectId, authState == .signedIn else { return }
         let deviceId: String
         do { deviceId = try selectedMatrixDeviceID(for: actor) }
         catch {
@@ -769,14 +976,14 @@ final class CommunicationModel {
             return
         }
         let currentStatus = try? await api.messagingStatus()
-        guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
+        guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
         if let currentStatus, (!currentStatus.enabled || !currentStatus.chatAvailable) {
             messagingStatusText = currentStatus.status
             lastError = currentStatus.warnings.first
             return
         }
         if let cachedBootstrap = await cachedMessagingBootstrap(for: actor, deviceId: deviceId) {
-            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
             let configured = await configureMessagingTransport(
                 with: cachedBootstrap,
                 statusText: currentStatus?.status ?? Self.statusTextForCachedMessagingBootstrap(cachedBootstrap)
@@ -784,15 +991,15 @@ final class CommunicationModel {
             if configured || !Self.messagingTransportFailureNeedsFreshBootstrap(messagingTransportErrorText) {
                 return
             }
-            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
             try? await messagingBootstrapStore?.clear(subjectId: actor.subjectId, deviceId: deviceId)
-            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
             lastMessagingBootstrap = nil
             conversationListRefreshGeneration &+= 1
             messagingBootstrapExpiresAt = nil
             messagingBootstrapIssuedAt = nil
         }
-        guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
+        guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
               authState == .signedIn else { return }
 
         do {
@@ -802,18 +1009,21 @@ final class CommunicationModel {
             } else {
                 status = try await api.messagingStatus()
             }
-            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
-            let matrixBootstrap = try await api.messagingBootstrap(deviceId: deviceId)
-            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId, authState == .signedIn else { return }
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
+            let installationID: UUID? = jizdaLifecyclePolicy.required
+                ? try await secureJizdaInstallationID(actor: actor, epoch: epoch) : nil
+            guard permitsMessagingPreparation(epoch: epoch) else { return }
+            let matrixBootstrap = try await api.messagingBootstrap(deviceId: deviceId, installationId: installationID)
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId, authState == .signedIn else { return }
             messagingBootstrapIssuedAt = .now
             messagingBootstrapExpiresAt = Self.resolvedMatrixBootstrapExpiry(matrixBootstrap)
             lastMessagingBootstrap = matrixBootstrap
             messagingBootstrapNetworkRetryNotBefore = nil
             try? await messagingBootstrapStore?.save(matrixBootstrap, subjectId: actor.subjectId, deviceId: deviceId)
-            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
             _ = await configureMessagingTransport(with: matrixBootstrap, statusText: status.status)
         } catch {
-            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return }
             if let retryDelay = Self.messagingBootstrapRetryDelay(after: error) {
                 messagingBootstrapNetworkRetryNotBefore = Date().addingTimeInterval(retryDelay)
             }
@@ -837,8 +1047,10 @@ final class CommunicationModel {
         for actor: AuthenticatedActor,
         deviceId: String
     ) async -> MessagingBootstrap? {
+        guard permitsMessagingPreparation(epoch: jizdaLifecycleSnapshot.generation) else { return nil }
+        let epoch = jizdaLifecycleSnapshot.generation
         let revision = matrixLocalRecoveryRevision
-        guard self.actor?.subjectId == actor.subjectId, authState == .signedIn else { return nil }
+        guard permitsMessagingPreparation(epoch: epoch), self.actor?.subjectId == actor.subjectId, authState == .signedIn else { return nil }
         if let lastMessagingBootstrap,
            Self.messagingBootstrapStillUsable(lastMessagingBootstrap),
            lastMessagingBootstrap.deviceId == nil || lastMessagingBootstrap.deviceId == deviceId {
@@ -849,7 +1061,7 @@ final class CommunicationModel {
               let cached = try? await messagingBootstrapStore.load(subjectId: actor.subjectId, deviceId: deviceId) else {
             return nil
         }
-        guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return nil }
+        guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId else { return nil }
         guard Self.messagingBootstrapStillUsable(cached) else {
             try? await messagingBootstrapStore.clear(subjectId: actor.subjectId, deviceId: deviceId)
             return nil
@@ -863,6 +1075,8 @@ final class CommunicationModel {
 
     @discardableResult
     func configureMessagingTransport(with bootstrap: MessagingBootstrap, statusText: String) async -> Bool {
+        guard permitsMessagingPreparation(epoch: jizdaLifecycleSnapshot.generation) else { return false }
+        let epoch = jizdaLifecycleSnapshot.generation
         localStoreDiagnosticRevision &+= 1
         messagingConfigurationRevision &+= 1
         let transportRevision = messagingConfigurationRevision
@@ -870,7 +1084,7 @@ final class CommunicationModel {
         let revision = matrixLocalRecoveryRevision
         do {
             try await messaging.configure(with: bootstrap)
-            guard revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision, authState == .signedIn else {
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision, authState == .signedIn else {
                 // A superseded operation does not own the current transport.
                 // Sign-out owns lifecycle teardown; never suspend a newer install.
                 return false
@@ -884,13 +1098,13 @@ final class CommunicationModel {
             matrixLocalStoreFailure = nil
             matrixLocalStoreFailureScope = nil
             messagingTransportReadyForPusher = true
-            if let selectedConversation { startLiveMessageStream(for: selectedConversation) }
+            if communicationProducersPermitted, let selectedConversation { startLiveMessageStream(for: selectedConversation) }
             await refreshMatrixEncryptionRecoveryStatus()
-            guard revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision, authState == .signedIn else { return false }
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision, authState == .signedIn else { return false }
             await registerMatrixPusherIfPossible()
-            return revision == matrixLocalRecoveryRevision && transportRevision == messagingConfigurationRevision && authState == .signedIn
+            return permitsMessagingPreparation(epoch: epoch) && revision == matrixLocalRecoveryRevision && transportRevision == messagingConfigurationRevision && authState == .signedIn
         } catch {
-            guard revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision, authState == .signedIn else { return false }
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision, authState == .signedIn else { return false }
             messagingTransportReadyForPusher = false
             if let typed = error as? MatrixLocalStoreError {
                 matrixLocalStoreFailure = typed.failure
@@ -900,7 +1114,7 @@ final class CommunicationModel {
                 matrixLocalStoreFailureScope = nil
             }
             await refreshLocalStoreDiagnostic(for: bootstrap)
-            guard revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision, authState == .signedIn else { return false }
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision, authState == .signedIn else { return false }
             messagingTransportErrorText = error.localizedDescription
             matrixEncryptionRecoveryStatus = .unavailable(error.localizedDescription)
             if bootstrap.e2eeRequired {
@@ -922,7 +1136,7 @@ final class CommunicationModel {
     }
 
     private func ensureMessagingBootstrapFreshIfNeeded(force: Bool = false) async {
-        guard !matrixLocalRecoveryWorking, let actor else { return }
+        guard communicationProducersPermitted, !matrixLocalRecoveryWorking, let actor else { return }
 
         let expiresSoon = messagingBootstrapExpiresAt.map { $0.timeIntervalSinceNow < 90 } ?? false
         let unknownExpiryIsStale = messagingBootstrapExpiresAt == nil &&
@@ -1050,6 +1264,8 @@ final class CommunicationModel {
     }
 
     private func registerDeviceIfPossible() async {
+        guard communicationProducersPermitted else { return }
+        let epoch = jizdaLifecycleSnapshot.generation
         guard let deviceRegistration else { return }
         guard !deviceRegistrationInFlight else {
             deviceRegistrationRefreshPending = true
@@ -1060,6 +1276,7 @@ final class CommunicationModel {
 
         repeat {
             deviceRegistrationRefreshPending = false
+            guard permitsCommunicationProducers(epoch: epoch) else { return }
             let registration = deviceRegistration.registration(
                 push: nil,
                 posture: devicePosture
@@ -1067,6 +1284,7 @@ final class CommunicationModel {
             guard registration != lastSuccessfulDeviceRegistration else { continue }
             do {
                 let response = try await api.registerDevice(registration)
+                guard permitsCommunicationProducers(epoch: epoch) else { return }
                 deviceSessionId = response.deviceSessionId
                 policy = response.policy
                 lastSuccessfulDeviceRegistration = registration
@@ -1080,12 +1298,15 @@ final class CommunicationModel {
                     ]
                 )
             } catch {
+                guard permitsCommunicationProducers(epoch: epoch) else { return }
                 lastError = error.localizedDescription
             }
         } while deviceRegistrationRefreshPending
     }
 
     private func registerMessagingDeviceIfPossible() async {
+        guard communicationProducersPermitted else { return }
+        let epoch = jizdaLifecycleSnapshot.generation
         guard let messagingDeviceRegistration else { return }
         guard !messagingDeviceRegistrationInFlight else {
             messagingDeviceRegistrationRefreshPending = true
@@ -1096,6 +1317,7 @@ final class CommunicationModel {
 
         repeat {
             messagingDeviceRegistrationRefreshPending = false
+            guard permitsCommunicationProducers(epoch: epoch) else { return }
             guard let token = pushSnapshot.deviceToken, pushSnapshot.environment != "unavailable" else {
                 messagingDeviceRegistrationStatusText = "waiting_for_apns"
                 Self.recordDeviceRegistrationDiagnostic("waiting_for_apns")
@@ -1104,6 +1326,7 @@ final class CommunicationModel {
             }
             let systemCalls = Bundle.main.object(forInfoDictionaryKey: "CSMVoiceDistribution") as? String == "global"
             let voipToken = systemCalls ? await voipDeviceTokenProvider?() : nil
+            guard permitsCommunicationProducers(epoch: epoch) else { return }
             guard !systemCalls || (voipToken?.isEmpty == false) else {
                 messagingDeviceRegistrationStatusText = "waiting_for_voip"
                 Self.recordDeviceRegistrationDiagnostic("waiting_for_voip")
@@ -1118,14 +1341,22 @@ final class CommunicationModel {
                    let registeredMessagingDeviceTokenFingerprint,
                    registeredMessagingDeviceTokenFingerprint != tokenFingerprint {
                     try? await messagingDeviceRegistration.deleteDevice(deviceId: messagingDeviceId)
+                    guard permitsCommunicationProducers(epoch: epoch) else { return }
                     self.messagingDeviceId = nil
                     lastSuccessfulMessagingDeviceRegistrationRequest = nil
                     messagingDeviceRegistrationStatusText = "refreshing_apns_token"
                 }
 
+                let installationID: UUID?
+                if jizdaLifecyclePolicy.required {
+                    guard let actor else { return }
+                    installationID = try await secureJizdaInstallationID(actor: actor, epoch: epoch)
+                } else { installationID = nil }
+                guard permitsCommunicationProducers(epoch: epoch) else { return }
                 let request = makeMessagingDeviceRegistrationRequest(
                     deviceToken: token,
-                    voipDeviceToken: voipToken
+                    voipDeviceToken: voipToken,
+                    installationID: installationID
                 )
                 if request == lastSuccessfulMessagingDeviceRegistrationRequest,
                    messagingDeviceId != nil,
@@ -1137,6 +1368,7 @@ final class CommunicationModel {
                     appInstanceId: request.appInstanceId,
                     bundleId: request.appBundleId
                 )
+                guard permitsCommunicationProducers(epoch: epoch) else { return }
                 guard ticket.messagingBaseUrl.host == appConfiguration.messagingBaseURL.host else {
                     throw CSMServiceError.invalidState("Registrační ticket směřuje na neočekávanou službu.")
                 }
@@ -1145,6 +1377,7 @@ final class CommunicationModel {
                     request,
                     authorizationTicket: ticket.ticket
                 )
+                guard permitsCommunicationProducers(epoch: epoch) else { return }
                 messagingDeviceId = response.device.deviceId
                 registeredMessagingDeviceTokenFingerprint = tokenFingerprint
                 lastSuccessfulMessagingDeviceRegistrationRequest = request
@@ -1166,6 +1399,7 @@ final class CommunicationModel {
                     ]
                 )
             } catch {
+                guard permitsCommunicationProducers(epoch: epoch) else { return }
                 messagingDeviceRegistrationStatusText = "failed"
                 lastError = error.localizedDescription
                 let category = (error as? HTTPResponseFailure)?.registrationDiagnostic ?? "transport_or_client_error"
@@ -1183,6 +1417,8 @@ final class CommunicationModel {
     }
 
     private func registerMatrixPusherIfPossible(force: Bool = false) async {
+        guard communicationProducersPermitted else { return }
+        let epoch = jizdaLifecycleSnapshot.generation
         guard !matrixPusherRegistrationInFlight else {
             matrixPusherRegistrationRefreshPending = true
             return
@@ -1193,7 +1429,7 @@ final class CommunicationModel {
         var forceCurrentAttempt = force
         repeat {
             matrixPusherRegistrationRefreshPending = false
-            guard authState == .signedIn, messagingTransportReadyForPusher else { return }
+            guard permitsCommunicationProducers(epoch: epoch), messagingTransportReadyForPusher else { return }
             let revision = matrixLocalRecoveryRevision
             let transportRevision = messagingConfigurationRevision
             guard let token = pushSnapshot.deviceToken, pushSnapshot.environment != "unavailable" else { return }
@@ -1210,7 +1446,7 @@ final class CommunicationModel {
 
             do {
                 try await messaging.registerPusher(pushKey: token, pushGatewayURL: gatewayURL)
-                guard revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision,
+                guard permitsCommunicationProducers(epoch: epoch), revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision,
                       authState == .signedIn else { return }
                 registeredMatrixPusherTokenFingerprint = tokenFingerprint
                 registeredMatrixPusherGatewayURL = gatewayURL
@@ -1224,7 +1460,7 @@ final class CommunicationModel {
                     ]
                 )
             } catch {
-                guard revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision,
+                guard permitsCommunicationProducers(epoch: epoch), revision == matrixLocalRecoveryRevision, transportRevision == messagingConfigurationRevision,
                       authState == .signedIn else { return }
                 lastError = error.localizedDescription
                 await appendEvent(
@@ -1246,12 +1482,13 @@ final class CommunicationModel {
 
     private func makeMessagingDeviceRegistrationRequest(
         deviceToken: String,
-        voipDeviceToken: String?
+        voipDeviceToken: String?,
+        installationID: UUID? = nil
     ) -> CSMMessagingDeviceRegistrationRequest {
         return CSMMessagingDeviceRegistrationRequest(
             apnsEnvironment: Self.apnsEnvironment,
             appBundleId: Bundle.main.bundleIdentifier ?? "cz.voldzi.copmobile",
-            appInstanceId: Self.appInstanceId,
+            appInstanceId: installationID?.uuidString.lowercased() ?? Self.appInstanceId,
             capabilities: .init(
                 criticalAlerts: false,
                 e2ee: true,
@@ -1319,8 +1556,12 @@ final class CommunicationModel {
     }
 
     private func preparePushIfAllowed(by bootstrap: MobileBootstrap) async {
+        guard communicationProducersPermitted else { return }
+        let epoch = jizdaLifecycleSnapshot.generation
         if bootstrap.capabilities.pushNotifications || bootstrap.policy.pushNotifications != "not_configured" {
-            pushSnapshot = await pushNotifications.prepareForRemoteNotifications()
+            let prepared = await pushNotifications.prepareForRemoteNotifications()
+            guard permitsCommunicationProducers(epoch: epoch) else { return }
+            pushSnapshot = prepared
         } else {
             pushSnapshot = pushNotifications.currentSnapshot
         }
@@ -1354,8 +1595,11 @@ final class CommunicationModel {
     }
 
     func refreshDeviceRegistrationFromSystem() async {
+        guard communicationProducersPermitted else { return }
+        let epoch = jizdaLifecycleSnapshot.generation
         pushSnapshot = pushNotifications.currentSnapshot
         await evaluateDevicePosture(policy: policy)
+        guard permitsCommunicationProducers(epoch: epoch) else { return }
         await registerDeviceIfPossible()
         await registerMessagingDeviceIfPossible()
         await registerMatrixPusherIfPossible()
@@ -1366,7 +1610,7 @@ final class CommunicationModel {
         if let actor {
             Self.writeNotificationPreferences(notificationPreferences, subjectId: actor.subjectId)
         }
-        guard let messagingDeviceId, let messagingDeviceRegistration else { return }
+        guard communicationProducersPermitted, let messagingDeviceId, let messagingDeviceRegistration else { return }
 
         do {
             let response = try await messagingDeviceRegistration.updatePreferences(
@@ -1422,7 +1666,7 @@ final class CommunicationModel {
         if let actor {
             Self.writeNotificationSubscriptions(notificationSubscriptions, subjectId: actor.subjectId)
         }
-        guard let messagingDeviceId, let messagingDeviceRegistration else { return }
+        guard communicationProducersPermitted, let messagingDeviceId, let messagingDeviceRegistration else { return }
 
         do {
             let response = try await messagingDeviceRegistration.updatePreferences(
@@ -1587,7 +1831,8 @@ final class CommunicationModel {
     }
 
     func recoverChatStore(authorization: CSMChatStoreRecoveryAuthorization, confirmed: Bool) async throws {
-        guard confirmed, !matrixLocalRecoveryWorking, authState == .signedIn,
+        let epoch = jizdaLifecycleSnapshot.generation
+        guard permitsMessagingPreparation(epoch: epoch), confirmed, !matrixLocalRecoveryWorking, authState == .signedIn,
               let actor, let previous = lastMessagingBootstrap,
               let recovery = messaging as? any MatrixLocalStoreRecovering,
               let failure = matrixLocalStoreFailure,
@@ -1613,15 +1858,21 @@ final class CommunicationModel {
         do {
             // Finish/coalesce ordinary startup before reserving a replacement device.
             await messagingBootstrapRefreshTask?.value
-            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
                   authState == .signedIn else { throw CancellationError() }
-            let activeCalls = try await activeVoiceCalls()
-            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
+            let activeCalls = jizdaLifecyclePolicy.required
+                ? try await api.voiceCalls(roomId: nil, activeOnly: true, limit: 20)
+                : try await activeVoiceCalls()
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
                   authState == .signedIn else { throw CancellationError() }
             guard activeCalls.isEmpty else { throw CSMServiceError.invalidState("Nejprve ukončete probíhající hovor; potom obnovte chat.") }
             let pending = try routing.reserve(original: previous)
-            let bootstrap = try await api.messagingBootstrap(deviceId: pending.pendingDeviceID)
-            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
+            let installationID: UUID? = jizdaLifecyclePolicy.required
+                ? try await secureJizdaInstallationID(actor: actor, epoch: epoch) : nil
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision,
+                  self.actor?.subjectId == actor.subjectId else { throw CancellationError() }
+            let bootstrap = try await api.messagingBootstrap(deviceId: pending.pendingDeviceID, installationId: installationID)
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
                   authState == .signedIn,
                   bootstrap.deviceId == pending.pendingDeviceID,
                   bootstrap.deviceId != previous.deviceId,
@@ -1630,9 +1881,8 @@ final class CommunicationModel {
                   bootstrap.e2eeRequired, bootstrap.enabled, bootstrap.chatAvailable,
                   bootstrap.tokenAvailable else { throw MatrixLocalStoreError(failure: .deviceIdentityMismatch) }
             try await recovery.recoverLocalStore(from: previous, with: bootstrap, authorization: authorization)
-            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
                   authState == .signedIn else {
-                try? await (messaging as? any MessagingLifecycleControlling)?.suspendMessaging()
                 throw CancellationError()
             }
             try routing.commit(pending)
@@ -1644,9 +1894,8 @@ final class CommunicationModel {
             // Routing selection is already durable. Cache failure must not rotate
             // another device; next startup obtains a fresh token for the selected ID.
             try? await messagingBootstrapStore?.save(bootstrap, subjectId: actor.subjectId, deviceId: pending.pendingDeviceID)
-            guard revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
+            guard permitsMessagingPreparation(epoch: epoch), revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId,
                   authState == .signedIn else {
-                try? await (messaging as? any MessagingLifecycleControlling)?.suspendMessaging()
                 throw CancellationError()
             }
             localStoreDiagnosticRevision &+= 1
@@ -1655,12 +1904,19 @@ final class CommunicationModel {
             matrixLocalStoreFailureScope = nil
             messagingStatusText = "online"
             messagingTransportReadyForPusher = true
+            if jizdaLifecyclePolicy.required {
+                _ = jizdaLifecyclePolicy.finishTransportPreparation(epoch: epoch, succeeded: true)
+                publishJizdaLifecycleReadiness()
+            }
             conversationListRefreshGeneration &+= 1
             await refreshMatrixEncryptionRecoveryStatus()
+            guard permitsCommunicationProducers(epoch: epoch), revision == matrixLocalRecoveryRevision else { throw CancellationError() }
             await registerMatrixPusherIfPossible()
+            guard permitsCommunicationProducers(epoch: epoch), revision == matrixLocalRecoveryRevision else { throw CancellationError() }
             await reloadSelectedConversationAfterEncryptionRecovery()
         } catch {
-            if revision == matrixLocalRecoveryRevision, self.actor?.subjectId == actor.subjectId {
+            if epoch == jizdaLifecycleSnapshot.generation, revision == matrixLocalRecoveryRevision,
+               self.actor?.subjectId == actor.subjectId {
                 matrixLocalRecoveryErrorText = error.localizedDescription
             }
             throw error
@@ -1799,6 +2055,8 @@ final class CommunicationModel {
     }
 
     func handlePushPayload(_ payload: CSMRemoteNotificationPayload) async -> CSMNavigationDestination? {
+        guard communicationProducersPermitted else { return nil }
+        let epoch = jizdaLifecycleSnapshot.generation
         guard let deepLink = payload.targetDeepLink else { return nil }
         var metadata = payload.auditMetadata
         metadata["deliveryContext"] = payload.deliveryContext.rawValue
@@ -1807,6 +2065,7 @@ final class CommunicationModel {
             summary: "Prijat minimalni push odkaz pro CSM Messenger.",
             metadata: metadata
         )
+        guard permitsCommunicationProducers(epoch: epoch) else { return nil }
         guard payload.deliveryContext.shouldNavigate else {
             await refreshForPassivePush(payload, deepLink: deepLink)
             return nil
@@ -3098,6 +3357,8 @@ final class CommunicationModel {
         modelPreference: ChatAIModelPreference,
         conversation: Conversation
     ) async {
+        guard communicationProducersPermitted else { return }
+        let epoch = jizdaLifecycleSnapshot.generation
         aiAgentStatusConversationId = conversation.conversationId
         aiAgentStatusText = "COP AI vybírá relevantní data a připravuje odpověď…"
         defer {
@@ -3108,6 +3369,7 @@ final class CommunicationModel {
         }
         do {
             let currentLocation = await aiCurrentLocationProvider?()
+            guard permitsCommunicationProducers(epoch: epoch) else { return }
             let response = try await api.queryAIChatAgent(
                 CopAIChatAgentRequest(
                     question: question,
@@ -3121,12 +3383,14 @@ final class CommunicationModel {
                     currentLocation: currentLocation
                 )
             )
+            guard permitsCommunicationProducers(epoch: epoch) else { return }
             guard response.status == "COMPLETED",
                   let summary = response.summary else {
                 throw CSMServiceError.unavailable("COP AI agent nevratil dokoncenou odpoved.")
             }
             let body = "COP AI agent\nDotaz: \(question)\n\n\(summary)"
             let answer = try await messaging.sendMessage(body, to: conversation)
+            guard permitsCommunicationProducers(epoch: epoch) else { return }
             if !messages.contains(where: { $0.id == answer.id }) {
                 timelineStore.send(.upsert(answer))
             }
@@ -3137,6 +3401,7 @@ final class CommunicationModel {
                 metadata: ["conversationId": conversation.conversationId]
             )
         } catch {
+            guard permitsCommunicationProducers(epoch: epoch) else { return }
             lastError = error.localizedDescription
             await appendEvent(
                 kind: .messageSendFailed,
@@ -3580,6 +3845,8 @@ final class CommunicationModel {
         locationProvider:
             @escaping @MainActor @Sendable () async throws -> CSMCommunicationLocation
     ) async throws {
+        let epoch = jizdaLifecycleSnapshot.generation
+        guard permitsCommunicationProducers(epoch: epoch) else { throw CSMServiceError.unavailable("Propojení Jízdy není ověřené.") }
         guard let liveLocationClient = messaging as? any MessagingLiveLocationSharing else {
             throw CSMServiceError.unavailable("Živá poloha teď není dostupná.")
         }
@@ -3589,20 +3856,25 @@ final class CommunicationModel {
         }
 
         let boundedDuration = min(max(durationSeconds, 15 * 60), 8 * 60 * 60)
+        guard permitsCommunicationProducers(epoch: epoch) else { throw CancellationError() }
         let firstSample = try await locationProvider()
+        guard permitsCommunicationProducers(epoch: epoch) else { throw CancellationError() }
         let point = Self.geoPoint(from: firstSample)
 
         try await liveLocationClient.startLiveLocationShare(
             durationSeconds: boundedDuration,
             in: conversation
         )
+        guard permitsCommunicationProducers(epoch: epoch) else { throw CancellationError() }
         do {
             try await liveLocationClient.updateLiveLocation(point, in: conversation)
         } catch {
+            guard permitsCommunicationProducers(epoch: epoch) else { throw CancellationError() }
             try? await liveLocationClient.stopLiveLocationShare(in: conversation)
             throw error
         }
 
+        guard permitsCommunicationProducers(epoch: epoch) else { throw CancellationError() }
         let startedAt = Date()
         let share = ActiveLiveLocationShare(
             conversationId: conversation.conversationId,
@@ -3619,14 +3891,17 @@ final class CommunicationModel {
                 } catch {
                     return
                 }
-                guard let self, self.activeLiveLocationShare == share else { return }
+                guard let self, self.permitsCommunicationProducers(epoch: epoch),
+                      self.activeLiveLocationShare == share else { return }
                 guard Date() < share.expiresAt else {
                     await self.expireLiveLocationShare(share)
                     return
                 }
 
                 do {
+                    guard self.permitsCommunicationProducers(epoch: epoch) else { return }
                     let sample = try await locationProvider()
+                    guard self.permitsCommunicationProducers(epoch: epoch), !Task.isCancelled else { return }
                     let update = Self.geoPoint(from: sample)
                     try await liveLocationClient.updateLiveLocation(update, in: conversation)
                 } catch {
@@ -3676,9 +3951,11 @@ final class CommunicationModel {
 
     @discardableResult
     func sendMessage(_ draft: OutgoingMessageDraft) async -> Bool {
+        let epoch = jizdaLifecycleSnapshot.generation
         guard !draft.isEmpty, let selectedConversation else { return false }
-        guard !jizdaLinkLocallySuspended, !communicationBlockedDirectConversationIDs.contains(selectedConversation.conversationId) else { return false }
+        guard permitsCommunicationProducers(epoch: epoch), !communicationBlockedDirectConversationIDs.contains(selectedConversation.conversationId) else { return false }
         await ensureMessagingBootstrapFreshIfNeeded(force: shouldForceMessagingRefreshBeforeSend)
+        guard permitsCommunicationProducers(epoch: epoch) else { return false }
         if let blockedMessage = messagingSendBlockedMessage {
             lastError = blockedMessage
             messagingTransportErrorText = blockedMessage
@@ -3695,6 +3972,7 @@ final class CommunicationModel {
             return false
         }
         let sendConversation = await refreshedConversationForSend(selectedConversation)
+        guard permitsCommunicationProducers(epoch: epoch) else { return false }
         if let validationError = MessageAttachmentPolicy.validationError(for: draft) {
             lastError = validationError
             messagingTransportErrorText = validationError
@@ -3723,8 +4001,9 @@ final class CommunicationModel {
             ]
         )
         do {
-            guard !jizdaLinkLocallySuspended, !communicationBlockedDirectConversationIDs.contains(sendConversation.conversationId) else { return false }
+            guard permitsCommunicationProducers(epoch: epoch), !communicationBlockedDirectConversationIDs.contains(sendConversation.conversationId) else { return false }
             let message = try await messaging.sendMessage(draft, to: sendConversation)
+            guard permitsCommunicationProducers(epoch: epoch) else { return false }
             ChatPerformance.measure(
                 "chat.local-echo",
                 budgetMilliseconds: ChatPerformanceBudget.localEchoMilliseconds
@@ -3757,7 +4036,7 @@ final class CommunicationModel {
                     ]
                 )
             }
-            if let aiInvocation,
+            if permitsCommunicationProducers(epoch: epoch), let aiInvocation,
                message.deliveryState != .pending,
                draft.attachments.isEmpty,
                !aiInvocation.question.isEmpty {
@@ -3769,6 +4048,7 @@ final class CommunicationModel {
             }
             return true
         } catch {
+            guard permitsCommunicationProducers(epoch: epoch) else { return false }
             lastError = error.localizedDescription
             messagingTransportErrorText = error.localizedDescription
             await refreshPendingMessageCount()
@@ -3793,28 +4073,92 @@ final class CommunicationModel {
     }
 
     func confirmDirectCommunicationBlock(peerSubjectID: String, blocked: Bool, expectedSubjectID: String) async {
+        let epoch = jizdaLifecycleSnapshot.generation
         guard actor?.subjectId == expectedSubjectID else { return }
         let direct = conversations.filter { $0.type == .direct && $0.members.contains { $0.userId == peerSubjectID } }
         for conversation in direct {
-            guard actor?.subjectId == expectedSubjectID else { return }
+            guard epoch == jizdaLifecycleSnapshot.generation, actor?.subjectId == expectedSubjectID else { return }
             if blocked {
                 communicationBlockedDirectConversationIDs.insert(conversation.conversationId)
-                await discardPendingMessages(for: conversation)
+                await discardPendingMessagesForConfirmedBlock(for: conversation, expectedSubjectID: expectedSubjectID, epoch: epoch)
             } else { communicationBlockedDirectConversationIDs.remove(conversation.conversationId) }
         }
     }
 
     func suspendLocalCommunicationForJizdaUnlink() async {
-        jizdaLinkLocallySuspended = true
-        messagingConfigurationRevision &+= 1
-        timelineSynchronization.stop()
-        liveLocationShareTask?.cancel()
-        liveLocationShareTask = nil
-        activeLiveLocationConversation = nil
-        activeLiveLocationShare = nil
-        // Pause this application's client. Do not call global Matrix/OIDC logout,
-        // unregister an unscoped legacy ID or erase any local history/SwiftData.
-        try? await (messaging as? any MessagingLifecycleControlling)?.suspendMessaging()
+        _ = try? await acceptJizdaLinkFence(epoch: jizdaLifecycleSnapshot.generation)
+    }
+
+    private func discardPendingMessagesForConfirmedBlock(for conversation: Conversation, expectedSubjectID: String, epoch: UUID) async {
+        func isCurrent() -> Bool { epoch == jizdaLifecycleSnapshot.generation && actor?.subjectId == expectedSubjectID && authState == .signedIn }
+        guard isCurrent() else { return }
+        // Resolve the account-owned outbox before suspending. A delayed count
+        // must never select a replacement account's outbox for deletion.
+        let capturedOutbox = messageOutbox
+        let capturedMatrixScope = lastMessagingBootstrap.map(MatrixLocalStoreScope.init)
+        do {
+            let before: Int
+            var capturedIDs: [String] = []
+            if let capturedOutbox {
+                let records = try await capturedOutbox.pendingRecords(for: conversation.conversationId)
+                guard isCurrent() else { return }
+                capturedIDs = records.filter { record in
+                    if let submission = record.matrixSubmission { return submission.scope == capturedMatrixScope }
+                    return record.message.senderId == expectedSubjectID
+                }.map(\.id)
+                before = capturedIDs.count
+            }
+            else { before = messages.filter { $0.roomId == conversation.conversationId && $0.isOwnMessage && $0.deliveryState == .pending }.count }
+            guard isCurrent() else { return }
+            guard before > 0 else { messageOutboxSyncStatusText = "idle"; return }
+            let removed: Int
+            if let capturedOutbox {
+                // Delete only the confirmed account's captured rows. Never
+                // delete the entire room after another account adds a message.
+                for id in capturedIDs {
+                    guard isCurrent() else { return }
+                    try await capturedOutbox.removeMessage(id: id, conversationId: conversation.conversationId)
+                    guard isCurrent() else { return }
+                }
+                removed = capturedIDs.count
+            }
+            else {
+                let originalCount = messages.count
+                timelineStore.send(.removeWhere { $0.roomId == conversation.conversationId && $0.isOwnMessage && $0.deliveryState == .pending })
+                removed = originalCount - timelineStore.state.messages.count
+            }
+            guard isCurrent() else { return }
+            let after: Int
+            if let capturedOutbox {
+                let total = try await capturedOutbox.pendingMessageCount()
+                guard isCurrent() else { return }
+                after = try await capturedOutbox.pendingRecords(for: conversation.conversationId).count
+                guard isCurrent() else { return }
+                pendingMessageCount = total
+            } else {
+                after = messages.filter { $0.roomId == conversation.conversationId && $0.isOwnMessage && $0.deliveryState == .pending }.count
+                pendingMessageCount = messages.filter { $0.isOwnMessage && $0.deliveryState == .pending }.count
+            }
+            if selectedConversation?.conversationId == conversation.conversationId {
+                timelineStore.send(.removeWhere { $0.roomId == conversation.conversationId && $0.isOwnMessage && $0.deliveryState == .pending })
+                // Removal is immediate. The bound live stream refreshes remote
+                // content; an async room-only reload could replace account B's
+                // timeline if this shared direct room survives an account switch.
+            }
+            messageOutboxSyncStatusText = removed > 0 ? "discarded" : (pendingMessageCount > 0 ? "waiting" : "idle")
+            if after == 0 {
+                messagingTransportErrorText = nil
+                pendingAutoSyncAttemptedConversationIds.remove(conversation.conversationId)
+                pendingAutoSyncInFlightConversationIds.remove(conversation.conversationId)
+            }
+            await appendEvent(kind: .messageOutboxDiscarded, relatedId: conversation.conversationId,
+                summary: "Uzivatel odstranil lokalne cekajici zpravy z aktivni konverzace.",
+                metadata: ["before": "\(before)", "after": "\(after)", "removed": "\(removed)", "conversationId": conversation.conversationId])
+        } catch {
+            guard isCurrent() else { return }
+            messageOutboxSyncStatusText = "failed"
+            lastError = error.localizedDescription
+        }
     }
 
     private func discardPendingMessages(for conversation: Conversation) async {
@@ -3918,11 +4262,12 @@ final class CommunicationModel {
         for conversation: Conversation,
         trigger: PendingMessageSyncTrigger
     ) async {
-        guard !jizdaLinkLocallySuspended, !communicationBlockedDirectConversationIDs.contains(conversation.conversationId) else { return }
+        let epoch = jizdaLifecycleSnapshot.generation
+        guard permitsCommunicationProducers(epoch: epoch), !communicationBlockedDirectConversationIDs.contains(conversation.conversationId) else { return }
         await ensureMessagingBootstrapFreshIfNeeded(force: trigger.forceBootstrapRefresh)
         await refreshMatrixEncryptionRecoveryStatus()
         let syncConversation = await refreshedConversationForSend(conversation)
-        guard !jizdaLinkLocallySuspended, !communicationBlockedDirectConversationIDs.contains(syncConversation.conversationId) else { return }
+        guard permitsCommunicationProducers(epoch: epoch), !communicationBlockedDirectConversationIDs.contains(syncConversation.conversationId) else { return }
 
         if (syncConversation.e2eeRequired || syncConversation.encrypted),
            matrixEncryptionRecoveryStatus.blocksSending {
@@ -3975,7 +4320,9 @@ final class CommunicationModel {
             } else {
                 aiQuestionsBeforeSync = []
             }
+            guard permitsCommunicationProducers(epoch: epoch) else { return }
             let result = try await messaging.synchronizePendingMessages(for: syncConversation)
+            guard permitsCommunicationProducers(epoch: epoch) else { return }
             await refreshPendingMessageCount()
             let after = await pendingMessageCount(for: conversation)
 
@@ -4350,12 +4697,14 @@ final class CommunicationModel {
     }
 
     private func startLiveMessageStream(for conversation: Conversation) {
+        guard communicationProducersPermitted else { return }
+        let epoch = jizdaLifecycleSnapshot.generation
         let conversationId = conversation.conversationId
         timelineSynchronization.start(
             conversation: conversation,
             messaging: messaging,
             prepareFallbackRefresh: { [weak self] in
-                guard let self,
+                guard let self, self.permitsCommunicationProducers(epoch: epoch),
                       self.selectedConversation?.conversationId == conversationId else {
                     return
                 }
@@ -4364,7 +4713,7 @@ final class CommunicationModel {
                 )
             },
             consume: { [weak self] snapshot in
-                guard let self,
+                guard let self, self.permitsCommunicationProducers(epoch: epoch),
                       self.selectedConversation?.conversationId == conversationId else {
                     return
                 }
@@ -4378,7 +4727,7 @@ final class CommunicationModel {
                 await self.refreshPendingMessageCount()
             },
             reportError: { [weak self] error in
-                guard let self,
+                guard let self, self.permitsCommunicationProducers(epoch: epoch),
                       self.selectedConversation?.conversationId == conversationId else {
                     return
                 }

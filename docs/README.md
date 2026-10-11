@@ -1,5 +1,7 @@
 # COP Mobile Documentation
 
+- [Jízda lifecycle completion and v2 transfer](integration/JIZDA_LIFECYCLE_COMPLETION.md).
+
 Toto je aktivní dokumentační sada pro tenký nativní host COP. Historické a
 překonané analýzy patří do `archive/`.
 

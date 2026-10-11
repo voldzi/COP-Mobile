@@ -114,32 +114,95 @@ private extension ISO8601DateFormatter {
 }
 public extension CSMCommunicationRuntime {
     func copJizdaLinkCapabilities(expectedScope: String) async throws -> CSMJizdaLinkCapabilities {
+        try requireDedicatedJizdaLinkConfiguration()
         let result: CSMJizdaLinkCapabilities = try await mobilityRequest(path: "/api/v1/me/app-links/jizda/capabilities", method: "GET", body: nil, query: [], expectedScope: expectedScope)
         guard result.contractVersion == "cop-jizda-link-v1", result.app == "jizda", result.scope == "jizda_app_link", !result.accountDeletion, !result.localDataDeleted else { throw CSMCOPSessionError(.invalidResponse) }
         return result
     }
     func copJizdaLinkStatus(expectedScope: String) async throws -> CSMJizdaLinkReceipt {
-        let result: CSMJizdaLinkReceipt = try await mobilityRequest(path: "/api/v1/me/app-links/jizda", method: "GET", body: nil, query: [], expectedScope: expectedScope)
-        try result.validate()
-        if result.status != "linked" {
-            await model.suspendLocalCommunicationForJizdaUnlink()
-            NotificationCenter.default.post(name: .csmJizdaLinkFenceAccepted, object: nil)
+        try requireDedicatedJizdaLinkConfiguration()
+        let sessionGeneration = copSessionGeneration()
+        let epoch = model.jizdaLifecycleSnapshot.generation
+        do {
+            let result: CSMJizdaLinkReceipt = try await mobilityRequest(path: "/api/v1/me/app-links/jizda", method: "GET", body: nil, query: [], expectedScope: expectedScope)
+            try result.validate()
+            if result.status != "linked" {
+                guard try await model.acceptJizdaLinkFence(epoch: epoch),
+                      sessionGeneration == copSessionGeneration(), mobilitySessionScope() == expectedScope else {
+                    throw CSMCOPSessionError(.accountChanged)
+                }
+                NotificationCenter.default.post(name: .csmJizdaLinkFenceAccepted, object: nil)
+            }
+            return result
+        } catch {
+            await model.rejectJizdaLinkVerification(epoch: epoch)
+            throw error
         }
-        return result
     }
     /// Label the explicit confirmation "Odpojit Jízdu". 202/pending is not completion.
     /// Stop this host's producers when the fence is accepted; preserve SwiftData.
     /// Never call global COP/Matrix user deletion or unlink another app here.
     func copDisconnectJizda(operationId: UUID, expectedScope: String) async throws -> CSMJizdaLinkReceipt {
-        let config = AppConfiguration.fromBundle()
-        guard !["csm-mobile", "cop-web"].contains(config.oidcClientId) else { throw CSMCOPSessionError(.configuration) }
-        let result: CSMJizdaLinkReceipt = try await mobilityRequest(path: "/api/v1/me/app-links/jizda/disconnect", method: "POST", body: nil, query: [], expectedScope: expectedScope, idempotencyKey: operationId.uuidString, responseValidator: { status, receipt in
-            try receipt.validate(disconnectHTTPStatus: status)
-        })
-        try result.validate()
-        guard result.operationId?.lowercased() == operationId.uuidString.lowercased(), result.status != "linked" else { throw CSMCOPSessionError(.invalidResponse) }
-        await model.suspendLocalCommunicationForJizdaUnlink()
-        NotificationCenter.default.post(name: .csmJizdaLinkFenceAccepted, object: nil)
-        return result
+        try requireDedicatedJizdaLinkConfiguration()
+        let sessionGeneration = copSessionGeneration()
+        let epoch = model.jizdaLifecycleSnapshot.generation
+        do {
+            let result: CSMJizdaLinkReceipt = try await mobilityRequest(path: "/api/v1/me/app-links/jizda/disconnect", method: "POST", body: nil, query: [], expectedScope: expectedScope, idempotencyKey: operationId.uuidString, responseValidator: { status, receipt in
+                try receipt.validate(disconnectHTTPStatus: status)
+            })
+            try result.validate()
+            guard result.operationId?.lowercased() == operationId.uuidString.lowercased(), result.status != "linked" else { throw CSMCOPSessionError(.invalidResponse) }
+            guard try await model.acceptJizdaLinkFence(epoch: epoch),
+                  sessionGeneration == copSessionGeneration(), mobilitySessionScope() == expectedScope else {
+                throw CSMCOPSessionError(.accountChanged)
+            }
+            NotificationCenter.default.post(name: .csmJizdaLinkFenceAccepted, object: nil)
+            return result
+        } catch {
+            await model.rejectJizdaLinkVerification(epoch: epoch)
+            throw error
+        }
     }
+    func copJizdaLifecycleSnapshot() -> CSMJizdaLifecycleSnapshot {
+        let snapshot = model.jizdaLifecycleSnapshot
+        return .init(readiness: snapshot.readiness, generation: snapshot.generation, scope: mobilitySessionScope())
+    }
+    /// Recheck a captured snapshot immediately before mutating host producers
+    /// after any await. An old account's observer must never stop the new one.
+    func copJizdaLifecycleSnapshotIsCurrent(_ snapshot: CSMJizdaLifecycleSnapshot) -> Bool {
+        guard snapshot.scope != nil else { return false }
+        return snapshot == copJizdaLifecycleSnapshot()
+    }
+
+    /// Earliest-launch prerequisite when no restored session scope exists yet.
+    /// Restores authentication and checks the server link before SDK producers;
+    /// the host must not construct its own producers unless the returned current
+    /// snapshot permits them. Does not return subject IDs or tokens.
+    func copStartJizdaLifecycle() async throws -> CSMJizdaLifecycleSnapshot {
+        try requireDedicatedJizdaLinkConfiguration()
+        await startIfNeeded()
+        return copJizdaLifecycleSnapshot()
+    }
+
+    /// Call before constructing voice, Dispatch or measurement producers in the
+    /// dedicated Jízda host, and on csmJizdaLifecycleReadinessChanged. Unknown or
+    /// unavailable verification requires those producers to remain suspended.
+    func copPrepareJizdaLifecycle(expectedScope: String) async throws -> CSMJizdaLifecycleSnapshot {
+        try requireDedicatedJizdaLinkConfiguration()
+        await startIfNeeded()
+        let sessionGeneration = copSessionGeneration()
+        let epoch = model.jizdaLifecycleSnapshot.generation
+        guard mobilitySessionScope() == expectedScope else { throw CSMCOPSessionError(.accountChanged) }
+        _ = await model.ensureJizdaLifecycleReady(force: true)
+        guard sessionGeneration == copSessionGeneration(), mobilitySessionScope() == expectedScope,
+              epoch == model.jizdaLifecycleSnapshot.generation else { throw CSMCOPSessionError(.accountChanged) }
+        return copJizdaLifecycleSnapshot()
+    }
+
+    private func requireDedicatedJizdaLinkConfiguration() throws {
+        guard model.jizdaLifecyclePolicy.required, model.jizdaLifecyclePolicy.configured else {
+            throw CSMCOPSessionError(.configuration)
+        }
+    }
+
 }

@@ -23,6 +23,8 @@ protocol CopAPIClientProtocol: Sendable {
     func acknowledgeAlert(alertId: String, note: String?) async throws -> CopAlert
     func messagingStatus() async throws -> MessagingStatus
     func messagingBootstrap(deviceId: String) async throws -> MessagingBootstrap
+    func messagingBootstrap(deviceId: String, installationId: UUID?) async throws -> MessagingBootstrap
+    func jizdaLinkStatus() async throws -> CSMJizdaLinkReceipt
     func messagingIdentityLookup(conversationId: String) async throws -> MessagingIdentityLookup
     func startVoiceCall(_ request: CSMVoiceCallStartRequest) async throws -> CSMVoiceCallSession
     func voiceCalls(roomId: String?, activeOnly: Bool, limit: Int) async throws -> [CSMVoiceCall]
@@ -46,6 +48,13 @@ protocol CopAPIClientProtocol: Sendable {
 }
 
 extension CopAPIClientProtocol {
+    func messagingBootstrap(deviceId: String, installationId: UUID?) async throws -> MessagingBootstrap {
+        guard installationId == nil else { throw CSMServiceError.unavailable("Instalaci Jízdy nelze ověřit.") }
+        return try await messagingBootstrap(deviceId: deviceId)
+    }
+    func jizdaLinkStatus() async throws -> CSMJizdaLinkReceipt {
+        throw CSMServiceError.unavailable("Stav propojení Jízdy není dostupný.")
+    }
     func messagingIdentityLookup(conversationId: String) async throws -> MessagingIdentityLookup {
         throw CSMServiceError.unavailable("Ověřené identity konverzace nejsou dostupné.")
     }

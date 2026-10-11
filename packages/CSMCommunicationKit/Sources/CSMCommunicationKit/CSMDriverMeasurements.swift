@@ -13,6 +13,22 @@ public struct CSMDriverMeasurementHTTPResult: Sendable {
     public let retryAfter: String?
 }
 
+enum CSMDriverMeasurementAccessPolicy {
+    static func allowsConfiguration(_ configuration: AppConfiguration) -> Bool {
+        let dedicated = CSMJizdaLifecyclePolicy(appScope: configuration.appScope,
+            clientID: configuration.oidcClientId, redirectScheme: configuration.oidcRedirectScheme)
+        let ordinary = configuration.oidcClientId == "csm-mobile" && !dedicated.required
+        return !configuration.usePreviewServices && (ordinary || dedicated.configured) &&
+            configuration.copBaseURL.scheme == "https" && configuration.copBaseURL.host?.isEmpty == false &&
+            configuration.copBaseURL.user == nil &&
+            configuration.copBaseURL.password == nil && configuration.copBaseURL.query == nil &&
+            configuration.copBaseURL.fragment == nil && ["", "/"].contains(configuration.copBaseURL.path)
+    }
+    static func requiresReadyProducers(_ operation: CSMDriverMeasurementOperation) -> Bool {
+        operation == .grantConsent || operation == .submitBatch
+    }
+}
+
 /// Purpose-specific transport only. Neither token nor arbitrary URL is exposed.
 public extension CSMCommunicationRuntime {
     func driverMeasurementSessionScope() -> String? {
@@ -24,13 +40,14 @@ public extension CSMCommunicationRuntime {
         guard CSMDriverMeasurementBatchPolicy.matchesSession(current: driverMeasurementSessionScope(), expected: expectedScope) else {
             throw CSMServiceError.authenticationRequired("Relace měření se změnila.")
         }
+        let epoch = model.jizdaLifecycleSnapshot.generation
         let configuration = AppConfiguration.fromBundle()
-        guard !configuration.usePreviewServices, configuration.oidcClientId == "csm-mobile",
-              configuration.copBaseURL.scheme == "https", configuration.copBaseURL.user == nil,
-              configuration.copBaseURL.password == nil, configuration.copBaseURL.query == nil,
-              configuration.copBaseURL.fragment == nil,
-              ["", "/"].contains(configuration.copBaseURL.path) else {
+        guard CSMDriverMeasurementAccessPolicy.allowsConfiguration(configuration) else {
             throw CSMServiceError.disabled("Měření vyžaduje ověřenou konfiguraci COP.")
+        }
+        let createsMeasurement = CSMDriverMeasurementAccessPolicy.requiresReadyProducers(operation)
+        if createsMeasurement, !model.permitsCommunicationProducers(epoch: epoch) {
+            throw CSMServiceError.unavailable("Propojení Jízdy není ověřené; měření zůstává vypnuté.")
         }
         let suffix: String, method: String, body: Data?
         switch operation {
@@ -50,8 +67,12 @@ public extension CSMCommunicationRuntime {
         let lifecycle = DeviceOIDCSession.shared.lifecycle(issuer: configuration.oidcIssuer,
             clientId: configuration.oidcClientId)
         guard let token = try await lifecycle.accessToken(), !token.isEmpty,
+              epoch == model.jizdaLifecycleSnapshot.generation,
               driverMeasurementSessionScope() == expectedScope else {
             throw CSMServiceError.authenticationRequired("Přihlášení měření vypršelo.")
+        }
+        if createsMeasurement, !model.permitsCommunicationProducers(epoch: epoch) {
+            throw CSMServiceError.unavailable("Propojení Jízdy není ověřené; měření zůstává vypnuté.")
         }
         let url = configuration.copBaseURL.appendingPathComponent("api/v1/driver-measurements/v1/" + suffix)
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
@@ -65,9 +86,12 @@ public extension CSMCommunicationRuntime {
         let session = URLSession(configuration: config, delegate: DriverMeasurementNoRedirect(), delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
         let (data, response) = try await session.data(for: request)
-        guard driverMeasurementSessionScope() == expectedScope,
+        guard epoch == model.jizdaLifecycleSnapshot.generation, driverMeasurementSessionScope() == expectedScope,
               let http = response as? HTTPURLResponse, http.url == url, data.count <= 1_048_576 else {
             throw CSMServiceError.authenticationRequired("Relace měření se změnila.")
+        }
+        if createsMeasurement, !model.permitsCommunicationProducers(epoch: epoch) {
+            throw CSMServiceError.unavailable("Propojení Jízdy není ověřené; měření zůstává vypnuté.")
         }
         return .init(data: data, statusCode: http.statusCode, retryAfter: http.value(forHTTPHeaderField: "Retry-After"))
     }

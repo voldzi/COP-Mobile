@@ -41,17 +41,20 @@ struct CSMCommunicationSafetySheet: View {
                     Toggle("Přiložit mnou vybraný výňatek", isOn: $includeExcerpt).disabled(busy || pendingReport != nil || reportAccepted)
                     if includeExcerpt { TextEditor(text: $excerpt).frame(minHeight: 90).disabled(busy || pendingReport != nil || reportAccepted) }
                     Button(pendingReport == nil ? "Předat hlášení správci COP" : "Zopakovat stejné hlášení") { confirmation = "report" }
-                        .disabled(busy || peer.isEmpty || capabilities?.reporting != true || reportAccepted)
+                        .disabled(busy || peer.isEmpty || !CSMCommunicationSafetyActionPolicy.permitsReport(reporting: capabilities?.reporting, pending: pendingReport != nil) || reportAccepted)
                 }
                 if conversation.type == .direct {
                     Section("Blokování") {
                         Button(blocked == true ? "Odblokovat uživatele" : "Zablokovat uživatele", role: blocked == true ? nil : .destructive) { confirmation = "block" }
-                            .disabled(busy || blocked == nil || capabilities?.blocking != true)
+                            .disabled(busy || !CSMCommunicationSafetyActionPolicy.permitsBlock(blocking: capabilities?.blocking, currentlyBlocked: blocked))
                     }
                 }
                 if !status.isEmpty { Text(status).accessibilityIdentifier("chat.safety.status") }
                 if capabilities == nil || (capabilities?.reporting != true && capabilities?.blocking != true) {
                     Text("Tato funkce zatím není dostupná.")
+                }
+                if let contact = CSMCommunicationSafetyActionPolicy.contactURL(email: capabilities?.reportContactEmail) {
+                    Link("Kontaktovat správce COP", destination: contact)
                 }
             }
             .navigationTitle("Bezpečnost komunikace")
@@ -65,11 +68,13 @@ struct CSMCommunicationSafetySheet: View {
             .task(id: peer) {
                 guard !peer.isEmpty, conversation.type == .direct else { return }
                 let selectedPeer = peer
+                let generation = runtime.copSessionGeneration()
                 do {
                     let state = try await runtime.copCommunicationBlockState(peerSubjectId: selectedPeer, expectedScope: expectedScope)
-                    guard peer == selectedPeer, runtime.model.actor?.subjectId == actorSubjectID else { return }
+                    guard peer == selectedPeer, sessionIsCurrent(generation) else { return }
                     blocked = state.blocked
                     await runtime.model.confirmDirectCommunicationBlock(peerSubjectID: selectedPeer, blocked: state.blocked, expectedSubjectID: actorSubjectID)
+                    guard peer == selectedPeer, sessionIsCurrent(generation) else { return }
                     if state.blocked { onBlocked() }
                 }
                 catch { blocked = nil }
@@ -86,24 +91,44 @@ struct CSMCommunicationSafetySheet: View {
         }
     }
     @MainActor private func perform(_ action: String?) async {
-        guard !busy, runtime.model.actor?.subjectId == actorSubjectID else { status = "Účet se změnil. Otevřete akci znovu."; return }
+        let generation = runtime.copSessionGeneration()
+        guard !busy, sessionIsCurrent(generation) else { status = "Účet se změnil. Otevřete akci znovu."; return }
         busy = true; defer { busy = false }
         do {
             if action == "report" {
+                guard CSMCommunicationSafetyActionPolicy.permitsReport(reporting: capabilities?.reporting, pending: pendingReport != nil) else { return }
                 if pendingReport == nil {
                     let evidence = includeExcerpt ? try CSMCommunicationReportEvidence(selectedText: excerpt, explicitlyConfirmed: true) : nil
                     pendingReport = CSMCommunicationReportDraft(target: .user(peerSubjectId: peer, conversationId: conversation.conversationId), reason: reason, evidence: evidence)
                 }
                 guard let draft = pendingReport else { return }
                 _ = try await runtime.copCommunicationReport(draft, operationId: operationID, expectedScope: expectedScope)
+                guard sessionIsCurrent(generation) else { return }
                 reportAccepted = true; status = "Hlášení bylo předáno správci COP k posouzení."
             } else if action == "block" {
+                guard CSMCommunicationSafetyActionPolicy.permitsBlock(blocking: capabilities?.blocking, currentlyBlocked: blocked) else { return }
                 let state = try await runtime.copCommunicationSetBlocked(blocked != true, peerSubjectId: peer, expectedScope: expectedScope)
+                guard sessionIsCurrent(generation) else { return }
                 blocked = state.blocked
                 await runtime.model.confirmDirectCommunicationBlock(peerSubjectID: peer, blocked: state.blocked, expectedSubjectID: actorSubjectID)
+                guard sessionIsCurrent(generation) else { return }
                 if state.blocked { onBlocked() }
                 status = state.blocked ? "Uživatel je zablokován." : "Uživatel je odblokován."
             }
         } catch { status = "Operaci se nepodařilo potvrdit. Stav blokování nebyl změněn v telefonu." }
+    }
+    @MainActor private func sessionIsCurrent(_ generation: UUID) -> Bool {
+        runtime.copSessionGeneration() == generation && runtime.mobilitySessionScope() == expectedScope &&
+            runtime.model.actor?.subjectId == actorSubjectID
+    }
+}
+
+enum CSMCommunicationSafetyActionPolicy {
+    static func permitsReport(reporting: Bool?, pending: Bool) -> Bool { pending || reporting == true }
+    static func permitsBlock(blocking: Bool?, currentlyBlocked: Bool?) -> Bool {
+        currentlyBlocked == true || (currentlyBlocked == false && blocking == true)
+    }
+    static func contactURL(email: String?) -> URL? {
+        email == "podpora@zeleznalady.cz" ? URL(string: "mailto:podpora@zeleznalady.cz") : nil
     }
 }

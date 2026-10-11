@@ -104,8 +104,8 @@ actor MatrixRustE2EEMessagingClient: MatrixDraftSending, MessagingSessionInvalid
         try Task.checkCancellation()
         lastBootstrap = bootstrap
         if authorization == nil, sessionContext?.isEquivalent(to: context) == true, let client {
-            try await refreshExistingSession(client, reason: "equivalent-bootstrap")
-            guard revision == configurationRevision else { throw CancellationError() }
+            try await refreshExistingSession(client, revision: revision, reason: "equivalent-bootstrap")
+            guard revision == configurationRevision, !Task.isCancelled else { throw CancellationError() }
             try Task.checkCancellation()
             return
         }
@@ -174,15 +174,22 @@ actor MatrixRustE2EEMessagingClient: MatrixDraftSending, MessagingSessionInvalid
                 slidingSyncVersion: .none
             )
             try await matrixClient.restoreSessionWith(session: sdkSession, roomLoadSettings: .all)
+            guard revision == configurationRevision, !Task.isCancelled else { throw CancellationError() }
             try await matrixClient.resume()
-            await matrixClient.enableAllSendQueues(enable: authorization == nil)
+            guard revision == configurationRevision, !Task.isCancelled else { throw CancellationError() }
+            // Keep automatic queues closed until session restoration and any
+            // explicit recovery finish under the same configuration revision.
+            await matrixClient.enableAllSendQueues(enable: false)
+            guard revision == configurationRevision, !Task.isCancelled else { throw CancellationError() }
             if case let .restoreBackup(recoveryKey)? = authorization {
                 let trimmed = recoveryKey.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { throw MatrixLocalStoreError(failure: .recoveryUnavailable) }
                 do {
                     let encryption = matrixClient.encryption()
                     try await encryption.recover(recoveryKey: trimmed)
+                    guard revision == configurationRevision, !Task.isCancelled else { throw CancellationError() }
                     try await encryption.enableBackups()
+                    guard revision == configurationRevision, !Task.isCancelled else { throw CancellationError() }
                     guard encryption.backupState().isEnabledForRecovery else {
                         throw MatrixLocalStoreError(failure: .recoveryUnavailable)
                     }
@@ -191,12 +198,13 @@ actor MatrixRustE2EEMessagingClient: MatrixDraftSending, MessagingSessionInvalid
                     throw MatrixLocalStoreError(failure: .recoveryUnavailable)
                 }
             }
-            guard revision == configurationRevision else {
+            guard revision == configurationRevision, !Task.isCancelled else {
                 try? await matrixClient.pause()
                 throw CancellationError()
             }
             try Task.checkCancellation()
             await matrixClient.enableAllSendQueues(enable: true)
+            guard revision == configurationRevision, !Task.isCancelled else { throw CancellationError() }
             // Do not await `waitForE2eeInitializationTasks()` here. In the current
             // pilot Synapse deployment, Matrix Rust probes secret storage
             // (`m.secret_storage.default_key`) while enabling recovery.
@@ -204,9 +212,10 @@ actor MatrixRustE2EEMessagingClient: MatrixDraftSending, MessagingSessionInvalid
             // any fresh encrypted event is sent. Fresh Megolm sends remain guarded by
             // the encrypted-room check below and by the SDK send queue.
             await syncOnceBestEffort(using: matrixClient, timeoutMs: 10_000, fullState: true, reason: "initial")
+            guard revision == configurationRevision, !Task.isCancelled else { throw CancellationError() }
             await joinKnownInvitedRooms(using: matrixClient)
 
-            guard revision == configurationRevision else {
+            guard revision == configurationRevision, !Task.isCancelled else {
                 try? await matrixClient.pause()
                 throw CancellationError()
             }
@@ -1501,12 +1510,25 @@ actor MatrixRustE2EEMessagingClient: MatrixDraftSending, MessagingSessionInvalid
         sessionContext = nil
     }
 
-    private func refreshExistingSession(_ matrixClient: Client, reason: String) async throws {
-        try await matrixClient.resume()
-        await matrixClient.enableAllSendQueues(enable: true)
-        await syncOnceBestEffort(using: matrixClient, timeoutMs: 5_000, fullState: true, reason: reason)
-        await joinKnownInvitedRooms(using: matrixClient)
-        logger.info("Matrix Rust session refreshed via \(reason, privacy: .public).")
+    private func refreshExistingSession(_ matrixClient: Client, revision: UInt64, reason: String) async throws {
+        do {
+            guard revision == configurationRevision, !Task.isCancelled else { throw CancellationError() }
+            try await matrixClient.resume()
+            guard revision == configurationRevision, !Task.isCancelled else { throw CancellationError() }
+            await matrixClient.enableAllSendQueues(enable: true)
+            guard revision == configurationRevision, !Task.isCancelled else { throw CancellationError() }
+            await syncOnceBestEffort(using: matrixClient, timeoutMs: 5_000, fullState: true, reason: reason)
+            guard revision == configurationRevision, !Task.isCancelled else { throw CancellationError() }
+            await joinKnownInvitedRooms(using: matrixClient)
+            guard revision == configurationRevision, !Task.isCancelled else { throw CancellationError() }
+            logger.info("Matrix Rust session refreshed via \(reason, privacy: .public).")
+        } catch {
+            // Cleanup is bound to this captured client, never a replacement
+            // installed for another account while this operation was suspended.
+            await matrixClient.enableAllSendQueues(enable: false)
+            try? await matrixClient.pause()
+            throw error
+        }
     }
 
     private func cancelTimelineSubscriptions() {

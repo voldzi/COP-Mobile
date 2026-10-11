@@ -398,9 +398,11 @@ public final class CSMCommunicationRuntime {
     /// warm start can complete before the host mounts or after a superseded
     /// prepare; a cached checking value must not strand an authenticated user.
     func surfaceAccessState(expectedSubjectID: String?) -> NativeCommunicationAccessState {
-        NativeCommunicationIdentityPolicy.resolve(authState: model.authState,
+        let identity = NativeCommunicationIdentityPolicy.resolve(authState: model.authState,
             actorSubjectID: model.actor?.subjectId, expectedSubjectID: expectedSubjectID,
             isLoading: model.isLoading)
+        if identity == .ready, !model.communicationProducersPermitted { return .unavailable }
+        return identity
     }
 
     func configureCurrentLocationProvider(
@@ -498,19 +500,15 @@ public final class CSMCommunicationRuntime {
 
         guard started, accessState == .ready, !model.isLoading else { return }
         await model.appDidBecomeActive()
-        guard generation == preparationGeneration else { return }
+        refreshAccessState(expectedSubjectID: expectedSubjectID)
+        guard generation == preparationGeneration, model.communicationProducersPermitted else { return }
         await model.refreshDeviceRegistrationFromSystem()
         guard generation == preparationGeneration else { return }
         await drainPendingNotifications()
     }
 
     func refreshAccessState(expectedSubjectID: String?) {
-        accessState = NativeCommunicationIdentityPolicy.resolve(
-            authState: model.authState,
-            actorSubjectID: model.actor?.subjectId,
-            expectedSubjectID: expectedSubjectID,
-            isLoading: model.isLoading
-        )
+        accessState = surfaceAccessState(expectedSubjectID: expectedSubjectID)
     }
 
     func unlock(expectedSubjectID: String?) async {
@@ -545,13 +543,15 @@ public final class CSMCommunicationRuntime {
         refreshAccessState(expectedSubjectID: expectedSubjectID)
         guard accessState == .ready else { return }
         await model.appDidBecomeActive()
+        refreshAccessState(expectedSubjectID: expectedSubjectID)
+        guard model.communicationProducersPermitted else { return }
         await model.refreshDeviceRegistrationFromSystem()
         await drainPendingNotifications()
     }
 
     func processPendingNotifications() async {
         await startIfNeeded()
-        guard started, model.authState == .signedIn, !model.isLoading else { return }
+        guard started, model.communicationProducersPermitted, !model.isLoading else { return }
         await drainPendingNotifications()
     }
 
@@ -561,8 +561,10 @@ public final class CSMCommunicationRuntime {
     }
 
     private func drainPendingNotifications() async {
+        guard model.communicationProducersPermitted else { return }
         let pending = PushNotificationManager.shared.takePendingRemoteNotifications()
         for payload in pending {
+            guard model.communicationProducersPermitted else { return }
             await handlePushPayload(payload, alreadyClaimed: true)
         }
     }
@@ -626,13 +628,14 @@ public final class CSMCommunicationRuntime {
         _ payload: CSMRemoteNotificationPayload,
         alreadyClaimed: Bool = false
     ) async {
-        guard model.authState == .signedIn, !model.isLoading else { return }
+        guard model.communicationProducersPermitted, !model.isLoading else { return }
+        let epoch = model.jizdaLifecycleSnapshot.generation
         guard alreadyClaimed || PushNotificationManager.shared.claimRemoteNotification(payload) else { return }
         if let url = payload.deepLink, url.scheme == "csm", url.host == "mobility" {
             guard payload.deliveryContext.shouldNavigate, let scope = mobilitySessionScope() else { return }
             do {
                 let invitation = try await mobilityInvitationForNotification(url: url, expectedScope: scope)
-                guard mobilitySessionScope() == scope else { return }
+                guard model.permitsCommunicationProducers(epoch: epoch), mobilitySessionScope() == scope else { return }
                 if let invitation {
                     NotificationCenter.default.post(name: .csmMobilityInvitationRequested, object: nil,
                         userInfo: ["navigation": CSMMobilityInvitationNavigation(invitation: invitation, sessionScope: scope)])
@@ -646,7 +649,7 @@ public final class CSMCommunicationRuntime {
             }
             return
         }
-        if let destination = await model.handlePushPayload(payload) {
+        if let destination = await model.handlePushPayload(payload), model.permitsCommunicationProducers(epoch: epoch) {
             NotificationCenter.default.post(
                 name: .csmNavigationDestinationRequested,
                 object: nil,
