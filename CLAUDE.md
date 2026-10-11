@@ -168,7 +168,7 @@ If retrieval scope changes, run:
 
 ## Current approved Apple toolchain
 
-For this delivery the explicitly approved pin is Xcode27.1 build27A9269 /
+For this delivery the explicitly approved pin is Xcode27.1 build27A9275 /
 iOS SDK27.1 (ADR0007 update2026-10-04). Run the exact verifier; do not bypass it.
 The minimum supported OS is unchanged.
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 required_xcode_version="${COP_REQUIRED_XCODE_VERSION:-27.1}"
-required_xcode_build="${COP_REQUIRED_XCODE_BUILD:-27A9269}"
+required_xcode_build="${COP_REQUIRED_XCODE_BUILD:-27A9275}"
 required_ios_sdk="${COP_REQUIRED_IOS_SDK:-27.1}"
 
 xcode_version="$(xcodebuild -version | sed -n '1s/^Xcode //p')"
