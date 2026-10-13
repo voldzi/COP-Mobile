@@ -44,6 +44,9 @@ controlled by a messaging permission check. Jízda must create it lazily only af
 activation and stop its own call/push lifecycle on withdrawal. The global/China
 distribution policy remains unchanged. The host also owns Dispatch loops and its
 measurement RAM queue and must fence and stop them before withdrawal.
+The additive noncreating, scoped voice suspension API is defined in
+[ADR 0024](0024-host-owned-voice-suspension.md); its source-candidate and acceptance
+status must not be inferred from the published authentication pin.
 
 This SDK change does not activate server features, add an OAuth client, implement
 per-install OAuth revocation, or prove real-device push/call acceptance.

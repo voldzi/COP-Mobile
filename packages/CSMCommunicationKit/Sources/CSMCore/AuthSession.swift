@@ -24,7 +24,7 @@ struct OIDCDiscoveryLoader: Sendable {
 /// consumer. Temporary network/identity-provider failures never erase the
 /// Keychain session. Only an explicit OAuth `invalid_grant` response proves
 /// that the refresh session is no longer usable.
-actor OIDCTokenLifecycle: AccessTokenProviding {
+actor OIDCTokenLifecycle: ScopedVoiceAccessTokenProviding {
     private let clientId: String
     private let credentialStore: any TokenCredentialStoring
     private let discoveryLoader: OIDCDiscoveryLoader
@@ -61,6 +61,27 @@ actor OIDCTokenLifecycle: AccessTokenProviding {
             // the refresh token.
             throw error
         }
+    }
+
+    func accessToken(for scope: VoiceOutboundScope) async throws -> String? {
+        let revision = sessionGeneration
+        guard scope.issuer == discoveryLoader.issuer.absoluteString, !scope.subject.isEmpty,
+              !scope.sdkScope.isEmpty else { throw CSMCOPSessionError(.accountChanged) }
+        guard let tokens = try await credentialStore.loadTokens() else { return nil }
+        guard revision == sessionGeneration,
+              mobilityTokenMatchesSelectedActor(tokens.accessToken, issuer: scope.issuer, subject: scope.subject) else {
+            throw CSMCOPSessionError(.accountChanged)
+        }
+        if tokens.isAccessTokenFresh { return tokens.accessToken }
+        guard hasRefreshToken(tokens) else { return nil }
+        do {
+            let refreshed = try await refresh(tokens, selectedScope: scope, expectedGeneration: revision)
+            guard revision == sessionGeneration,
+                  mobilityTokenMatchesSelectedActor(refreshed.accessToken, issuer: scope.issuer, subject: scope.subject) else {
+                throw CSMCOPSessionError(.accountChanged)
+            }
+            return refreshed.accessToken
+        } catch OIDCTokenRequestError.invalidSession { return nil }
     }
 
     func canUseExistingSession() async -> Bool {
@@ -123,17 +144,28 @@ actor OIDCTokenLifecycle: AccessTokenProviding {
         try await saveTokens(tokens)
     }
 
-    private func refresh(_ tokens: TokenPair) async throws -> TokenPair {
+    private func refresh(_ tokens: TokenPair, selectedScope: VoiceOutboundScope? = nil,
+                         expectedGeneration: UInt64? = nil) async throws -> TokenPair {
+        if let expectedGeneration, expectedGeneration != sessionGeneration { throw CancellationError() }
         if let refreshTask { return try await refreshTask.value }
         // Another caller may have loaded an expired credential before the previous
         // flight committed its rotated token. Never refresh that stale snapshot.
         guard let current = try await credentialStore.loadTokens() else {
             throw OIDCTokenRequestError.invalidSession
         }
+        if let expectedGeneration, expectedGeneration != sessionGeneration { throw CancellationError() }
+        if let selectedScope {
+            // Never refresh a credential that changed to B while A was loading.
+            // Claim parsing binds the selection only; COP verifies signatures.
+            guard mobilityTokenMatchesSelectedActor(current.accessToken,
+                issuer: selectedScope.issuer, subject: selectedScope.subject) else {
+                throw CSMCOPSessionError(.accountChanged)
+            }
+        }
         if let refreshTask { return try await refreshTask.value }
         if current.isAccessTokenFresh { return current }
         let generation = sessionGeneration
-        let task = Task { try await self.performRefresh(current, generation: generation) }
+        let task = Task { try await self.performRefresh(current, generation: generation, selectedScope: selectedScope) }
         refreshTask = task
         do {
             let result = try await task.value
@@ -146,7 +178,7 @@ actor OIDCTokenLifecycle: AccessTokenProviding {
         }
     }
 
-    private func performRefresh(_ tokens: TokenPair, generation: UInt64) async throws -> TokenPair {
+    private func performRefresh(_ tokens: TokenPair, generation: UInt64, selectedScope: VoiceOutboundScope? = nil) async throws -> TokenPair {
         do {
             guard let refreshToken = tokens.refreshToken, !refreshToken.isEmpty else {
                 throw OIDCTokenRequestError.invalidSession
@@ -155,6 +187,12 @@ actor OIDCTokenLifecycle: AccessTokenProviding {
             let refreshed = try await tokenExchanger.refresh(refreshToken: refreshToken,
                 clientId: clientId, tokenEndpoint: discovery.tokenEndpoint, subjectId: tokens.subjectId)
             guard generation == sessionGeneration else { throw CancellationError() }
+            if let selectedScope {
+                guard mobilityTokenMatchesSelectedActor(refreshed.accessToken,
+                    issuer: selectedScope.issuer, subject: selectedScope.subject) else {
+                    throw CSMCOPSessionError(.accountChanged)
+                }
+            }
             // Commit once, before any waiter receives a token. Joined callers do
             // not write credentials or clear the shared flight themselves.
             try await credentialStore.saveTokens(refreshed)

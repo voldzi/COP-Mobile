@@ -196,6 +196,30 @@ struct ProductionCopAPIClient: CopAPIClientProtocol {
         )
     }
 
+    func startVoiceCall(_ request: CSMVoiceCallStartRequest, voiceScope: VoiceOutboundScope) async throws -> CSMVoiceCallSession {
+        try await http.post("/api/v1/messaging/calls", body: request, transientRetryCount: 3, voiceScope: voiceScope)
+    }
+
+    func voiceCalls(roomId: String?, activeOnly: Bool, limit: Int, voiceScope: VoiceOutboundScope) async throws -> [CSMVoiceCall] {
+        var queryItems = [URLQueryItem(name: "activeOnly", value: activeOnly ? "true" : "false"),
+                          URLQueryItem(name: "limit", value: String(max(1, min(limit, 200))))]
+        if let roomId, !roomId.isEmpty { queryItems.append(URLQueryItem(name: "roomId", value: roomId)) }
+        let response: CSMVoiceCallListResponse = try await http.get("/api/v1/messaging/calls",
+            queryItems: queryItems, transientRetryCount: 3, voiceScope: voiceScope)
+        return response.calls
+    }
+
+    func voiceCall(callId: String, voiceScope: VoiceOutboundScope) async throws -> CSMVoiceCallSession {
+        try await http.get("/api/v1/messaging/calls/\(Self.pathSegment(callId))",
+            transientRetryCount: 3, voiceScope: voiceScope)
+    }
+
+    func transitionVoiceCall(callId: String, request: CSMVoiceCallActionRequest,
+                             voiceScope: VoiceOutboundScope) async throws -> CSMVoiceCallSession {
+        try await http.post("/api/v1/messaging/calls/\(Self.pathSegment(callId))/actions",
+            body: request, transientRetryCount: 3, voiceScope: voiceScope)
+    }
+
     func mobilePairingSession(code: String) async throws -> MobilePairingSessionResponse {
         try await http.get("/api/v1/mobile/pairing/sessions/\(Self.pathSegment(code))")
     }

@@ -268,3 +268,19 @@ defined in [ADR 0023](adr/0023-host-owned-communication-activation.md). Local
 feature disable preserves OIDC and encrypted history and never asserts remote
 grant revocation or account deletion. Unknown policy, identity mismatch and
 unconfirmed removal fail closed for optional producers.
+
+The explicit host voice module has a noncreating stop and account/generation
+fences across permission, runtime preparation and media awaits. OFF stops only
+this application's local voice resources and emits no server transition or
+timeline-fetch trigger. Retired providers may only finish already-delivered OS
+reports; old provider/registry/room callbacks cannot produce work for a new owner.
+The four explicit Voice REST operations also freeze issuer/subject and SDK
+generation across Keychain/refresh waits and validate the current owner before
+each URLSession attempt starts. A wrong bearer or unsupported scoped adapter is
+rejected without unscoped fallback. Local JWT claims bind selection only; server
+token signature and authorization checks remain required. This request-local
+context is never persisted or logged.
+Remote call cleanup remains unsupported/pending and is never called revoked.
+Automatic COP Mobile and signed China distribution rules are preserved. See
+[ADR 0024](adr/0024-host-owned-voice-suspension.md) and the
+[host handoff](host-voice-suspension-handoff.md).

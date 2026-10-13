@@ -747,39 +747,44 @@ final class CommunicationModel {
     func startVoiceCall(
         roomID: String,
         title: String?,
-        participantSubjectIDs: [String]?
+        participantSubjectIDs: [String]?,
+        voiceHostSnapshot: CSMHostCommunicationSnapshot? = nil
     ) async throws -> CSMVoiceCallSession {
         let epoch = jizdaLifecycleSnapshot.generation
         guard permitsCommunicationProducers(epoch: epoch) else {
             throw CSMVoiceCallControlError.authenticationRequired
         }
-        let result = try await api.startVoiceCall(
-            CSMVoiceCallStartRequest(
-                participantSubjectIds: participantSubjectIDs,
-                roomId: roomID,
-                title: title
-            )
-        )
+        let scope = try captureVoiceOutboundScope(epoch: epoch, hostSnapshot: voiceHostSnapshot)
+        let request = CSMVoiceCallStartRequest(participantSubjectIds: participantSubjectIDs, roomId: roomID, title: title)
+        let result: CSMVoiceCallSession
+        if let scope { result = try await api.startVoiceCall(request, voiceScope: scope) }
+        else { result = try await api.startVoiceCall(request) }
         guard permitsCommunicationProducers(epoch: epoch) else { throw CancellationError() }
         return result
     }
 
-    func voiceCall(callID: String) async throws -> CSMVoiceCallSession {
+    func voiceCall(callID: String, voiceHostSnapshot: CSMHostCommunicationSnapshot? = nil) async throws -> CSMVoiceCallSession {
         let epoch = jizdaLifecycleSnapshot.generation
         guard permitsCommunicationProducers(epoch: epoch) else {
             throw CSMVoiceCallControlError.authenticationRequired
         }
-        let result = try await api.voiceCall(callId: callID)
+        let scope = try captureVoiceOutboundScope(epoch: epoch, hostSnapshot: voiceHostSnapshot)
+        let result: CSMVoiceCallSession
+        if let scope { result = try await api.voiceCall(callId: callID, voiceScope: scope) }
+        else { result = try await api.voiceCall(callId: callID) }
         guard permitsCommunicationProducers(epoch: epoch) else { throw CancellationError() }
         return result
     }
 
-    func activeVoiceCalls() async throws -> [CSMVoiceCall] {
+    func activeVoiceCalls(voiceHostSnapshot: CSMHostCommunicationSnapshot? = nil) async throws -> [CSMVoiceCall] {
         let epoch = jizdaLifecycleSnapshot.generation
         guard permitsCommunicationProducers(epoch: epoch) else {
             throw CSMVoiceCallControlError.authenticationRequired
         }
-        let result = try await api.voiceCalls(roomId: nil, activeOnly: true, limit: 20)
+        let scope = try captureVoiceOutboundScope(epoch: epoch, hostSnapshot: voiceHostSnapshot)
+        let result: [CSMVoiceCall]
+        if let scope { result = try await api.voiceCalls(roomId: nil, activeOnly: true, limit: 20, voiceScope: scope) }
+        else { result = try await api.voiceCalls(roomId: nil, activeOnly: true, limit: 20) }
         guard permitsCommunicationProducers(epoch: epoch) else { throw CancellationError() }
         return result
     }
@@ -822,23 +827,41 @@ final class CommunicationModel {
         callID: String,
         action: CSMVoiceCallAction,
         expectedRevision: Int?,
-        reason: String?
+        reason: String?,
+        voiceHostSnapshot: CSMHostCommunicationSnapshot? = nil
     ) async throws -> CSMVoiceCallSession {
         let epoch = jizdaLifecycleSnapshot.generation
         guard permitsCommunicationProducers(epoch: epoch) else {
             throw CSMVoiceCallControlError.authenticationRequired
         }
-        let result = try await api.transitionVoiceCall(
-            callId: callID,
-            request: CSMVoiceCallActionRequest(
-                action: action,
-                endpointId: messagingDeviceId ?? CSMVoiceCallEndpointIdentity.current,
-                expectedRevision: expectedRevision,
-                reason: reason
-            )
-        )
+        let scope = try captureVoiceOutboundScope(epoch: epoch, hostSnapshot: voiceHostSnapshot)
+        let request = CSMVoiceCallActionRequest(action: action,
+            endpointId: messagingDeviceId ?? CSMVoiceCallEndpointIdentity.current,
+            expectedRevision: expectedRevision, reason: reason)
+        let result: CSMVoiceCallSession
+        if let scope { result = try await api.transitionVoiceCall(callId: callID, request: request, voiceScope: scope) }
+        else { result = try await api.transitionVoiceCall(callId: callID, request: request) }
         guard permitsCommunicationProducers(epoch: epoch) else { throw CancellationError() }
         return result
+    }
+
+    private func captureVoiceOutboundScope(epoch: UUID, hostSnapshot: CSMHostCommunicationSnapshot?) throws -> VoiceOutboundScope? {
+        guard requiresExplicitHostConsent || hostSnapshot != nil else { return nil }
+        guard hostIdentityVerified, !isLoading, let actor, permitsCommunicationProducers(epoch: epoch) else {
+            throw CSMVoiceCallControlError.authenticationRequired
+        }
+        if let hostSnapshot {
+            guard hostSnapshot.enabled, hostSnapshot.generation == epoch,
+                  let scope = hostSnapshot.scope, !scope.isEmpty else { throw CancellationError() }
+        }
+        let issuer = appConfiguration.oidcIssuer.absoluteString, subject = actor.subjectId
+        return .init(issuer: issuer, subject: subject,
+            sdkScope: hostSnapshot?.scope ?? hostConsentStorageKey(subject: subject), generation: epoch,
+            validateCurrent: { [weak self] in
+                guard let self, self.hostIdentityVerified, !self.isLoading,
+                      self.actor?.subjectId == subject, self.appConfiguration.oidcIssuer.absoluteString == issuer,
+                      self.permitsCommunicationProducers(epoch: epoch) else { throw CancellationError() }
+            })
     }
 
     func signIn(forceAuthentication: Bool = false, loginHint: String? = nil, authenticationOnly: Bool = false) async {

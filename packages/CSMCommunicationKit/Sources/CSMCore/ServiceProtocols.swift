@@ -33,6 +33,11 @@ protocol CopAPIClientProtocol: Sendable {
         callId: String,
         request: CSMVoiceCallActionRequest
     ) async throws -> CSMVoiceCallSession
+    func startVoiceCall(_ request: CSMVoiceCallStartRequest, voiceScope: VoiceOutboundScope) async throws -> CSMVoiceCallSession
+    func voiceCalls(roomId: String?, activeOnly: Bool, limit: Int, voiceScope: VoiceOutboundScope) async throws -> [CSMVoiceCall]
+    func voiceCall(callId: String, voiceScope: VoiceOutboundScope) async throws -> CSMVoiceCallSession
+    func transitionVoiceCall(callId: String, request: CSMVoiceCallActionRequest,
+                             voiceScope: VoiceOutboundScope) async throws -> CSMVoiceCallSession
     func mobilePairingSession(code: String) async throws -> MobilePairingSessionResponse
     func claimMobilePairingSession(code: String, request: MobilePairingClaimRequest) async throws -> MobilePairingSessionResponse
     func conversations() async throws -> [Conversation]
@@ -48,6 +53,20 @@ protocol CopAPIClientProtocol: Sendable {
 }
 
 extension CopAPIClientProtocol {
+    // A scoped host must never silently fall back to an unscoped adapter.
+    func startVoiceCall(_ request: CSMVoiceCallStartRequest, voiceScope: VoiceOutboundScope) async throws -> CSMVoiceCallSession {
+        throw CSMVoiceCallControlError.authenticationRequired
+    }
+    func voiceCalls(roomId: String?, activeOnly: Bool, limit: Int, voiceScope: VoiceOutboundScope) async throws -> [CSMVoiceCall] {
+        throw CSMVoiceCallControlError.authenticationRequired
+    }
+    func voiceCall(callId: String, voiceScope: VoiceOutboundScope) async throws -> CSMVoiceCallSession {
+        throw CSMVoiceCallControlError.authenticationRequired
+    }
+    func transitionVoiceCall(callId: String, request: CSMVoiceCallActionRequest,
+                             voiceScope: VoiceOutboundScope) async throws -> CSMVoiceCallSession {
+        throw CSMVoiceCallControlError.authenticationRequired
+    }
     func messagingBootstrap(deviceId: String, installationId: UUID?) async throws -> MessagingBootstrap {
         guard installationId == nil else { throw CSMServiceError.unavailable("Instalaci Jízdy nelze ověřit.") }
         return try await messagingBootstrap(deviceId: deviceId)

@@ -325,13 +325,7 @@ private enum LiveKitCallEvent: Sendable {
   case participantDisconnected(id: String)
 }
 
-private final class CallCompletionBox: @unchecked Sendable {
-  let completion: () -> Void
-
-  init(_ completion: @escaping () -> Void) {
-    self.completion = completion
-  }
-}
+private final class VoiceCallRoomBinding: @unchecked Sendable { weak var room: Room? }
 
 private final class LiveKitCallObserver: NSObject, RoomDelegate, @unchecked Sendable {
   let handler: @Sendable (LiveKitCallEvent) -> Void
@@ -370,7 +364,43 @@ private final class LiveKitCallObserver: NSObject, RoomDelegate, @unchecked Send
 public final class VoiceCallService:
   NSObject, @preconcurrency CXProviderDelegate, @preconcurrency PKPushRegistryDelegate
 {
-  public static let shared = VoiceCallService()
+  private static var existingInstance: VoiceCallService?
+  public static var shared: VoiceCallService {
+    if let existingInstance { return existingInstance }
+    let service = VoiceCallService()
+    existingInstance = service
+    return service
+  }
+  /// Reading this property never constructs the voice, audio or push service.
+  public static var existingHostState: VoiceCallHostState? { existingInstance?.hostState }
+  public var hostState: VoiceCallHostState { lifecycle.state }
+
+  /// Call with the account snapshot captured before withdrawing communication.
+  /// This is exclusively local; remote cleanup needs server assistance.
+  public static func suspendExisting(expectedScope: String, expectedGeneration: UUID) -> VoiceCallSuspensionResult {
+    guard let existingInstance else { return .notInitialized }
+    return existingInstance.suspend(expectedScope: expectedScope, expectedGeneration: expectedGeneration)
+  }
+
+  @discardableResult
+  public func resumeForHostCommunication(expectedScope: String, expectedGeneration: UUID) throws -> VoiceCallHostState {
+    let snapshot = controls.snapshot()
+    guard snapshot.enabled, snapshot.scope == expectedScope, snapshot.generation == expectedGeneration,
+      snapshot.policy == .explicitHostConsent else { throw VoiceCallHostLifecycleError.ownerChanged }
+    if !lifecycle.suspended, !lifecycle.matches(scope: expectedScope, generation: expectedGeneration) {
+      suspendLocally()
+    }
+    pruneRetiredSystemBindings()
+    // One current provider and at most one report-only retiring provider. Never
+    // allocate an unbounded series while the OS holds a report completion.
+    if presentationMode == .system, activeSystemBinding == nil, systemBindings.count >= 2 {
+      throw VoiceCallHostLifecycleError.systemCleanupPending
+    }
+    try lifecycle.resume(snapshot: snapshot, expectedScope: expectedScope,
+      expectedGeneration: expectedGeneration, endpointID: controls.endpointID())
+    activateNativeResources()
+    return hostState
+  }
   public let presentationMode: VoiceCallPresentationMode
 
   public static func recordDiagnostic(_ event: String, result: String? = nil) {
@@ -378,6 +408,7 @@ public final class VoiceCallService:
   }
 
   private struct CallContext {
+    let owner: VoiceCallOwner
     var call: CSMVoiceCall
     var avatarDataURL: String?
     var registeredWithCallKit: Bool
@@ -423,42 +454,71 @@ public final class VoiceCallService:
   private var tokenRegistrationRecoveryAttempted = false
   private var proximityMonitoringEnabled = false
   private var foregroundReconciliationTask: Task<Void, Never>?
+  private let lifecycle: VoiceCallHostLifecycle
+  private let controls: VoiceCallServiceControls
+  private var hardwareObserversInstalled = false
+  private var audioConfiguredEpoch: UUID?
+  private var activeSystemBinding: VoiceCallSystemBinding?
+  private var systemBindings: [UUID: VoiceCallSystemBinding] = [:]
+  private var providerBindings: [ObjectIdentifier: VoiceCallSystemBinding] = [:]
+  private var registryBindings: [ObjectIdentifier: VoiceCallSystemBinding] = [:]
+  private var activeRoomObserver: LiveKitCallObserver?
+  private var startAttemptTask: Task<Void, Never>?
+  private var startAttemptID: UUID?
 
-  private lazy var roomObserver = LiveKitCallObserver { [weak self] event in
-    Task { @MainActor in
-      self?.handleLiveKitEvent(event)
-    }
+  private override convenience init() {
+    let value = Bundle.main.object(forInfoDictionaryKey: "CSMCommunicationActivationPolicy")
+    let policy: CSMCommunicationActivationPolicy = value == nil || value as? String == "automatic"
+      ? .automatic : value as? String == "explicit_host_consent" ? .explicitHostConsent : .invalid
+    self.init(presentationMode: VoiceCallDistributionPolicy.currentMode, activationPolicy: policy, controls: .live)
   }
 
-  private override init() {
-    presentationMode = VoiceCallDistributionPolicy.currentMode
+  init(presentationMode: VoiceCallPresentationMode, activationPolicy: CSMCommunicationActivationPolicy,
+       controls: VoiceCallServiceControls) {
+    self.presentationMode = presentationMode
+    self.controls = controls
+    lifecycle = VoiceCallHostLifecycle(policy: activationPolicy)
+    if activationPolicy == .explicitHostConsent {
+      let snapshot = controls.snapshot()
+      if snapshot.enabled, let scope = snapshot.scope {
+        try? lifecycle.resume(snapshot: snapshot, expectedScope: scope,
+          expectedGeneration: snapshot.generation, endpointID: controls.endpointID())
+      }
+    }
     pushTokenState = VoiceCallPushTokenState(
-      cachedToken: presentationMode == .system ? VoiceCallPushTokenStore.load() : nil
+      cachedToken: presentationMode == .system && !lifecycle.suspended ? VoiceCallPushTokenStore.load() : nil
     )
     super.init()
-
-    AudioManager.shared.audioSession.isAutomaticConfigurationEnabled = false
-    try? AudioManager.shared.setEngineAvailability(.none)
-
-    if presentationMode == .system {
-      let configuration = CXProviderConfiguration()
-      configuration.includesCallsInRecents = false
-      configuration.maximumCallGroups = 1
-      configuration.maximumCallsPerCallGroup = 1
-      configuration.supportedHandleTypes = [.generic]
-      configuration.supportsVideo = false
-      let provider = CXProvider(configuration: configuration)
-      self.provider = provider
-      callController = CXCallController()
-      provider.setDelegate(self, queue: .main)
-      let registry = PKPushRegistry(queue: .main)
-      self.registry = registry
-      registry.delegate = self
-      registry.desiredPushTypes = [.voIP]
-    } else {
+    if activationPolicy != .automatic {
+      NotificationCenter.default.addObserver(self, selector: #selector(hostCommunicationChanged),
+        name: .csmHostCommunicationConsentChanged, object: nil)
+      NotificationCenter.default.addObserver(self, selector: #selector(hostCommunicationChanged),
+        name: .csmJizdaLifecycleReadinessChanged, object: nil)
+    }
+    if presentationMode == .inApp {
       VoiceCallPushTokenStore.remove()
       CallDiagnosticStore.record("voice.in-app.no-callkit-pushkit")
     }
+    if !lifecycle.suspended { activateNativeResources() }
+  }
+
+  private func activateNativeResources() {
+    guard !lifecycle.suspended else { return }
+    pruneRetiredSystemBindings()
+    if audioConfiguredEpoch != lifecycle.epoch {
+      controls.initializeAudio()
+      audioConfiguredEpoch = lifecycle.epoch
+    }
+    if presentationMode == .system, activeSystemBinding == nil {
+      let binding = controls.makeSystem(self, lifecycle.epoch)
+      activeSystemBinding = binding
+      systemBindings[binding.id] = binding
+      provider = binding.provider; callController = binding.controller; registry = binding.registry
+      if let provider { providerBindings[ObjectIdentifier(provider)] = binding }
+      if let registry { registryBindings[ObjectIdentifier(registry)] = binding }
+    }
+    guard controls.observeHardware, !hardwareObserversInstalled else { return }
+    hardwareObserversInstalled = true
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(proximityStateDidChange),
@@ -483,8 +543,75 @@ public final class VoiceCallService:
     }
   }
 
+  @discardableResult
+  func suspend(expectedScope: String, expectedGeneration: UUID) -> VoiceCallSuspensionResult {
+    guard lifecycle.policy != .automatic else { return .automaticPolicy }
+    guard lifecycle.matches(scope: expectedScope, generation: expectedGeneration) else { return .ownerMismatch }
+    if !lifecycle.suspended { suspendLocally() }
+    return .suspended(hostState)
+  }
+
+  private func suspendLocally() {
+    lifecycle.suspend(needsServerAssistance: !calls.isEmpty || callStartInFlight)
+    startAttemptTask?.cancel(); startAttemptTask = nil; startAttemptID = nil; callStartInFlight = false
+    statePollingTask?.cancel(); statePollingTask = nil
+    foregroundReconciliationTask?.cancel(); foregroundReconciliationTask = nil
+    tokenTimeoutTask?.cancel(); tokenTimeoutTask = nil
+    tokenRegistrationRecoveryTask?.cancel(); tokenRegistrationRecoveryTask = nil
+    tokenContinuation?.resume(throwing: VoiceCallPushRegistrationError.registrationFailed)
+    tokenContinuation = nil
+    pushTokenState.invalidate(); VoiceCallPushTokenStore.remove()
+    tokenRegistrationRecoveryAttempted = false
+    let endingBinding = activeSystemBinding
+    endingBinding?.retire()
+    activeSystemBinding = nil; provider = nil; registry = nil; callController = nil
+    // Stop only this app's engine. CallKit remains the system audio owner.
+    if audioActivated { controls.stopAudio() }
+    for uuid in Array(calls.keys) {
+      if endingBinding?.reportIsPending(uuid) == false {
+        endingBinding?.reporter.reportEnded(uuid: uuid)
+      }
+      tearDown(uuid: uuid, reportServer: false, notifyTimeline: false)
+    }
+    audioActivated = false; presentation.setAudioActive(false)
+    cachedMedia.removeAll(); presentation.clear(); connectionDeadline.cancel()
+  }
+
+  @objc private func hostCommunicationChanged() {
+    guard lifecycle.policy != .automatic, let owner = lifecycle.owner else { return }
+    let snapshot = controls.snapshot()
+    if !snapshot.enabled || snapshot.scope != owner.scope || snapshot.generation != owner.generation {
+      if !lifecycle.suspended { suspendLocally() }
+    }
+  }
+
+  private func capturedOwner() -> VoiceCallOwner? {
+    if lifecycle.policy == .automatic {
+      return .init(scope: nil, generation: nil, epoch: lifecycle.epoch, endpointID: controls.endpointID())
+    }
+    guard let owner = lifecycle.owner, permits(owner) else { return nil }
+    return owner
+  }
+  private func permits(_ owner: VoiceCallOwner) -> Bool {
+    lifecycle.permits(owner, snapshot: lifecycle.policy == .automatic ? nil : controls.snapshot())
+  }
+  private func isCurrent(_ binding: VoiceCallSystemBinding) -> Bool {
+    activeSystemBinding === binding && !binding.retired && binding.epoch == lifecycle.epoch && !lifecycle.suspended &&
+      (lifecycle.policy == .automatic || capturedOwner() != nil)
+  }
+  private func pruneRetiredSystemBindings() {
+    let expired = systemBindings.filter { $0.value.retired && !$0.value.hasRegistry && !$0.value.hasPendingReports }
+    for (id, binding) in expired {
+      systemBindings.removeValue(forKey: id)
+      providerBindings = providerBindings.filter { $0.value !== binding }
+      registryBindings = registryBindings.filter { $0.value !== binding }
+      binding.provider?.setDelegate(nil, queue: .main)
+      binding.provider?.invalidate()
+    }
+  }
+
   public func prepareForApplicationLaunch() {
-    guard presentationMode == .system, let registry else {
+    guard capturedOwner() != nil, presentationMode == .system, let registry else {
       CallDiagnosticStore.record("voice.in-app.launch-prepared")
       return
     }
@@ -496,7 +623,7 @@ public final class VoiceCallService:
   }
 
   public func currentPushToken() async throws -> String {
-    guard presentationMode == .system else {
+    guard let owner = capturedOwner(), presentationMode == .system else {
       throw VoiceCallPushRegistrationError.registrationFailed
     }
     synchronizeCurrentPushToken()
@@ -506,7 +633,7 @@ public final class VoiceCallService:
     guard tokenContinuation == nil else {
       throw VoiceCallPushRegistrationError.registrationPending
     }
-    return try await withCheckedThrowingContinuation { continuation in
+    let token: String = try await withCheckedThrowingContinuation { continuation in
       tokenContinuation = continuation
       tokenTimeoutTask?.cancel()
       tokenTimeoutTask = Task { @MainActor [weak self] in
@@ -519,15 +646,18 @@ public final class VoiceCallService:
         continuation.resume(throwing: VoiceCallPushRegistrationError.registrationFailed)
       }
     }
+    guard permits(owner) else { throw VoiceCallPushRegistrationError.registrationFailed }
+    return token
   }
 
   public func currentPushTokenIfAvailable() async -> String? {
-    guard presentationMode == .system else { return nil }
+    guard capturedOwner() != nil, presentationMode == .system else { return nil }
     synchronizeCurrentPushToken()
     return pushTokenState.tokenForServerRegistration
   }
 
   public func applicationDidBecomeActive() {
+    guard let owner = capturedOwner() else { return }
     if presentationMode == .inApp { resumeInAppAudioIfNeeded() }
     if presentationMode == .system {
       synchronizeCurrentPushToken()
@@ -536,19 +666,22 @@ public final class VoiceCallService:
     foregroundReconciliationTask?.cancel()
     foregroundReconciliationTask = Task { @MainActor [weak self] in
       try? await Task.sleep(for: .milliseconds(350))
-      guard !Task.isCancelled, let self else { return }
+      guard !Task.isCancelled, let self, self.permits(owner) else { return }
       if self.presentationMode == .system { self.synchronizeCurrentPushToken() }
       await CSMCommunicationNotifications.prepareDeviceRegistration(
         voipDeviceTokenProvider: self.currentPushTokenIfAvailable
       )
-      guard !Task.isCancelled else { return }
+      guard !Task.isCancelled, self.permits(owner) else { return }
       await self.reconcileActiveIncomingCalls()
     }
   }
 
   public func incomingUserNotificationReceived() {
-    guard presentationMode == .inApp else { return }
-    Task { @MainActor [weak self] in await self?.reconcileActiveIncomingCalls() }
+    guard let owner = capturedOwner(), presentationMode == .inApp else { return }
+    Task { @MainActor [weak self] in
+      guard let self, self.permits(owner) else { return }
+      await self.reconcileActiveIncomingCalls()
+    }
   }
 
   public func startVoiceCall(
@@ -558,6 +691,7 @@ public final class VoiceCallService:
     avatarDataURL: String? = nil,
     registerWithSystemCallUI: Bool = true
   ) {
+    guard let owner = capturedOwner() else { return }
     presentation.clearError()
     guard !callStartInFlight else { return }
     guard presentation.activeCall == nil else {
@@ -571,20 +705,26 @@ public final class VoiceCallService:
       return
     }
     callStartInFlight = true
-    Task { @MainActor [weak self] in
+    let attemptID = UUID()
+    startAttemptID = attemptID
+    startAttemptTask = Task { @MainActor [weak self] in
       guard let self else { return }
-      defer { self.callStartInFlight = false }
+      defer {
+        if self.startAttemptID == attemptID {
+          self.callStartInFlight = false; self.startAttemptID = nil; self.startAttemptTask = nil
+        }
+      }
       do {
-        guard await AVAudioApplication.requestRecordPermission() else {
+        let permission = await self.controls.permission()
+        guard !Task.isCancelled, self.permits(owner) else { return }
+        guard permission else {
           throw CSMVoiceCallControlError.mediaUnavailable
         }
-        let session = try await CSMCommunicationRuntime.shared.startVoiceCall(
-          roomID: normalizedRoomID,
-          title: normalizedTitle,
-          participantSubjectIDs: participantSubjectIDs
-        )
+        let session = try await self.controls.start(normalizedRoomID, normalizedTitle, participantSubjectIDs, owner)
+        guard !Task.isCancelled, self.permits(owner) else { return }
         try self.install(
           session: session,
+          owner: owner,
           title: normalizedTitle,
           avatarDataURL: avatarDataURL,
           registeredWithCallKit: false,
@@ -597,25 +737,27 @@ public final class VoiceCallService:
           self.requestStartCall(uuid: uuid, title: normalizedTitle)
         } else {
           try self.activateInAppAudio(action: "start")
-          await self.connectMedia(session: session, uuid: uuid)
+          await self.connectMedia(session: session, uuid: uuid, expectedOwner: owner)
         }
       } catch {
+        guard !Task.isCancelled, self.permits(owner) else { return }
         self.failVisibleCall(error)
       }
     }
   }
 
   func answerActiveCall() {
-    guard let call = presentation.activeCall, call.direction == .incoming else { return }
+    guard let call = presentation.activeCall, call.direction == .incoming,
+      let owner = calls[call.id]?.owner, permits(owner) else { return }
     if presentationMode == .system {
       requestCallKitAction(CXAnswerCallAction(call: call.id))
     } else {
-      Task { @MainActor [weak self] in await self?.acceptAndConnect(uuid: call.id) }
+      Task { @MainActor [weak self] in await self?.acceptAndConnect(uuid: call.id, expectedOwner: owner) }
     }
   }
 
   func endActiveCall() {
-    guard let call = presentation.activeCall else { return }
+    guard let call = presentation.activeCall, let owner = calls[call.id]?.owner, permits(owner) else { return }
     if presentationMode == .system {
       requestCallKitAction(CXEndCallAction(call: call.id))
     } else if let context = calls[call.id] {
@@ -627,7 +769,7 @@ public final class VoiceCallService:
   }
 
   func toggleMute() {
-    guard let call = presentation.activeCall else { return }
+    guard let call = presentation.activeCall, let owner = calls[call.id]?.owner, permits(owner) else { return }
     if presentationMode == .system {
       requestCallKitAction(CXSetMutedCallAction(call: call.id, muted: !presentation.isMuted))
     } else if var context = calls[call.id] {
@@ -636,14 +778,18 @@ public final class VoiceCallService:
       presentation.setMuted(context.muted)
       let muted = context.muted
       Task { @MainActor [weak self] in
-        guard let room = self?.activeRoom else { return }
+        guard let self, self.permits(owner), self.activeRoomCallUUID == call.id,
+          let room = self.activeRoom else { return }
         _ = try? await room.localParticipant.setMicrophone(enabled: !muted)
+        if !self.permits(owner) || self.activeRoom !== room {
+          _ = try? await room.localParticipant.setMicrophone(enabled: false)
+        }
       }
     }
   }
 
   func toggleSpeaker() {
-    guard presentation.activeCall != nil else { return }
+    guard let call = presentation.activeCall, let owner = calls[call.id]?.owner, permits(owner) else { return }
     do {
       let session = AVAudioSession.sharedInstance()
       let enableSpeaker = !presentation.isSpeakerEnabled
@@ -659,13 +805,13 @@ public final class VoiceCallService:
     didUpdate pushCredentials: PKPushCredentials,
     for type: PKPushType
   ) {
-    guard type == .voIP else { return }
+    guard type == .voIP, let binding = registryBindings[ObjectIdentifier(registry)], isCurrent(binding) else { return }
     let token = pushCredentials.token.map { String(format: "%02x", $0) }.joined()
     acceptPushToken(token, source: "callback")
   }
 
   public func pushRegistry(_ registry: PKPushRegistry, didInvalidatePushTokenFor type: PKPushType) {
-    guard type == .voIP else { return }
+    guard type == .voIP, let binding = registryBindings[ObjectIdentifier(registry)], isCurrent(binding) else { return }
     pushTokenState.invalidate()
     VoiceCallPushTokenStore.remove()
     tokenTimeoutTask?.cancel()
@@ -685,11 +831,12 @@ public final class VoiceCallService:
       completion()
       return
     }
-    receive(payload: payload.dictionaryPayload, completion: completion)
+    guard let binding = registryBindings[ObjectIdentifier(registry)] else { completion(); return }
+    receive(payload: payload.dictionaryPayload, binding: binding, completion: completion)
   }
 
-  private func receive(payload: [AnyHashable: Any], completion: @escaping () -> Void) {
-    guard presentationMode == .system, let provider else {
+  func receive(payload: [AnyHashable: Any], binding: VoiceCallSystemBinding, completion: @escaping () -> Void) {
+    guard presentationMode == .system else {
       completion()
       return
     }
@@ -699,17 +846,27 @@ public final class VoiceCallService:
       completion()
       return
     }
+    guard isCurrent(binding), let owner = capturedOwner() else {
+      if push.event == .incoming { binding.beginReport(push.uuid) }
+      VoiceCallLatePushReporting.receive(push, reporter: binding.reporter) { [weak self] in
+        if push.event == .incoming { binding.finishReport(push.uuid) }
+        completion()
+        self?.pruneRetiredSystemBindings()
+      }
+      return
+    }
+    let provider = binding.provider
 
     if push.event == .ended || push.event == .answeredElsewhere {
       let isWinningEndpoint =
         push.event == .answeredElsewhere
-        && push.acceptedEndpointID == CSMCommunicationRuntime.shared.voiceCallEndpointID
+        && push.acceptedEndpointID == owner.endpointID
       if !isWinningEndpoint {
         let hadLocalCall = calls[push.uuid] != nil
         CallDiagnosticStore.record(
           push.event == .answeredElsewhere ? "pushkit.call.answered-elsewhere" : "pushkit.call.ended"
         )
-        provider.reportCall(
+        provider?.reportCall(
           with: push.uuid,
           endedAt: Date(),
           reason: push.event == .answeredElsewhere ? .answeredElsewhere : .remoteEnded
@@ -749,6 +906,7 @@ public final class VoiceCallService:
       updatedAt: now
     )
     calls[push.uuid] = CallContext(
+      owner: owner,
       call: call,
       avatarDataURL: nil,
       registeredWithCallKit: true,
@@ -760,35 +918,39 @@ public final class VoiceCallService:
     publish(push.uuid)
     startStatePolling(uuid: push.uuid)
 
-    let update = CXCallUpdate()
-    update.localizedCallerName = push.callerDisplayName
-    update.remoteHandle = CXHandle(type: .generic, value: push.callerDisplayName)
-    update.hasVideo = false
-    let completionBox = CallCompletionBox(completion)
-    Task { @MainActor [weak self] in
-      defer { completionBox.completion() }
-      guard let self else { return }
-      do {
-        try await provider.reportNewIncomingCall(with: push.uuid, update: update)
-        CallDiagnosticStore.record(
-          "callkit.incoming.reported",
-          result: "success"
-        )
-      } catch {
-        logger.error(
-          "CallKit rejected incoming call: \(error.localizedDescription, privacy: .public)"
-        )
-        tearDown(uuid: push.uuid, reportServer: true, action: .decline)
-        CallDiagnosticStore.record(
-          "callkit.incoming.reported",
-          result: "failed"
-        )
+    reportIncoming(push, binding: binding, owner: owner, completion: completion)
+  }
+
+  private func reportIncoming(_ push: VoiceCallPushPayload, binding: VoiceCallSystemBinding,
+                              owner: VoiceCallOwner, completion: @escaping () -> Void) {
+    reportIncoming(uuid: push.uuid, title: push.callerDisplayName, binding: binding, owner: owner) { _ in
+      completion()
+    }
+  }
+
+  private func reportIncoming(uuid: UUID, title: String, binding: VoiceCallSystemBinding,
+                              owner: VoiceCallOwner, completion: @escaping (Bool) -> Void) {
+    var result = false
+    let once = VoiceCallOnceCompletion { completion(result) }
+    binding.beginReport(uuid)
+    binding.reporter.reportIncoming(uuid: uuid, title: title) { [weak self] succeeded in
+      guard once.isPending else { return }
+      result = succeeded
+      binding.finishReport(uuid)
+      defer { once.finish(); self?.pruneRetiredSystemBindings() }
+      guard let self else { if succeeded { binding.reporter.reportEnded(uuid: uuid) }; return }
+      guard self.isCurrent(binding), self.permits(owner) else {
+        if succeeded { binding.reporter.reportEnded(uuid: uuid) }
+        self.tearDown(uuid: uuid, reportServer: false, notifyTimeline: false, expectedOwner: owner)
+        return
       }
+      if !succeeded { self.tearDown(uuid: uuid, reportServer: true, action: .decline) }
+      CallDiagnosticStore.record("callkit.incoming.reported", result: succeeded ? "success" : "failed")
     }
   }
 
   private func synchronizeCurrentPushToken() {
-    guard presentationMode == .system, let data = registry?.pushToken(for: .voIP) else { return }
+    guard capturedOwner() != nil, presentationMode == .system, let data = registry?.pushToken(for: .voIP) else { return }
     let token = data.map { String(format: "%02x", $0) }.joined()
     guard !token.isEmpty else { return }
     acceptPushToken(token, source: "registry")
@@ -800,23 +962,25 @@ public final class VoiceCallService:
   /// perform a single process-scoped unregister/register cycle so PushKit
   /// issues current credentials instead of leaving incoming calls unreachable.
   private func recoverPushRegistrationIfNeeded() {
-    guard pushTokenState.needsRegistrationRecovery,
+    guard let owner = capturedOwner(), let binding = activeSystemBinding,
+      pushTokenState.needsRegistrationRecovery,
       !tokenRegistrationRecoveryAttempted
     else { return }
     tokenRegistrationRecoveryAttempted = true
     tokenRegistrationRecoveryTask?.cancel()
     tokenRegistrationRecoveryTask = Task { @MainActor [weak self] in
       try? await Task.sleep(for: .seconds(1))
-      guard !Task.isCancelled, let self else { return }
+      guard !Task.isCancelled, let self, self.permits(owner), self.isCurrent(binding) else { return }
       self.synchronizeCurrentPushToken()
       guard self.presentationMode == .system, self.pushTokenState.needsRegistrationRecovery,
         let registry = self.registry else { return }
       CallDiagnosticStore.record("pushkit.registration.recovery.started")
       registry.desiredPushTypes = []
       await Task.yield()
+      guard !Task.isCancelled, self.permits(owner), self.isCurrent(binding), self.registry === registry else { return }
       registry.desiredPushTypes = [.voIP]
       try? await Task.sleep(for: .seconds(12))
-      guard !Task.isCancelled else { return }
+      guard !Task.isCancelled, self.permits(owner), self.isCurrent(binding) else { return }
       self.synchronizeCurrentPushToken()
       if self.pushTokenState.needsRegistrationRecovery {
         CallDiagnosticStore.record("pushkit.registration.recovery.timed-out")
@@ -826,6 +990,7 @@ public final class VoiceCallService:
   }
 
   private func acceptPushToken(_ token: String, source: String) {
+    guard capturedOwner() != nil else { return }
     let shouldRefreshServer = pushTokenState.confirm(token)
     VoiceCallPushTokenStore.save(token)
     tokenTimeoutTask?.cancel()
@@ -840,12 +1005,15 @@ public final class VoiceCallService:
     tokenRegistrationRecoveryTask = nil
   }
 
-  private func reconcileActiveIncomingCalls() async {
+  func reconcileActiveIncomingCalls() async {
+    guard let owner = capturedOwner() else { return }
     do {
-      let activeCalls = try await CSMCommunicationRuntime.shared.activeVoiceCalls()
+      let activeCalls = try await controls.list(owner)
+      guard !Task.isCancelled, permits(owner) else { return }
       for call in activeCalls where call.direction == .incoming && !call.phase.isTerminal {
         guard let uuid = UUID(uuidString: call.callId), calls[uuid] == nil else { continue }
         calls[uuid] = CallContext(
+          owner: owner,
           call: call,
           avatarDataURL: nil,
           registeredWithCallKit: presentationMode == .system,
@@ -855,29 +1023,19 @@ public final class VoiceCallService:
         )
         publish(uuid)
         startStatePolling(uuid: uuid)
-        guard let provider else { continue }
-        let update = CXCallUpdate()
-        update.localizedCallerName = call.presentationTitle
-        update.remoteHandle = CXHandle(type: .generic, value: call.presentationTitle)
-        update.hasVideo = false
-        do {
-          try await provider.reportNewIncomingCall(with: uuid, update: update)
-          CallDiagnosticStore.record(
-            "callkit.incoming.reconciled",
-            result: "success"
-          )
-        } catch {
-          CallDiagnosticStore.record(
-            "callkit.incoming.reconciled",
-            result: "failed"
-          )
-          logger.error(
-            "Reconciled incoming call was rejected: \(error.localizedDescription, privacy: .public)"
-          )
-          tearDown(uuid: uuid, reportServer: true, action: .decline)
+        guard let binding = activeSystemBinding, isCurrent(binding) else { continue }
+        // The OS report may outlive OFF. Retain this exact epoch/provider until
+        // its one completion, using the same pending accounting as PushKit.
+        let succeeded = await withCheckedContinuation { continuation in
+          reportIncoming(uuid: uuid, title: call.presentationTitle, binding: binding, owner: owner) {
+            continuation.resume(returning: $0)
+          }
         }
+        guard !Task.isCancelled, permits(owner), isCurrent(binding) else { return }
+        CallDiagnosticStore.record("callkit.incoming.reconciled", result: succeeded ? "success" : "failed")
       }
     } catch {
+      guard !Task.isCancelled, permits(owner) else { return }
       CallDiagnosticStore.record(
         "voice.active-reconciliation.failed",
         result: error.localizedDescription
@@ -886,14 +1044,17 @@ public final class VoiceCallService:
   }
 
   public func providerDidReset(_ provider: CXProvider) {
+    guard let binding = providerBindings[ObjectIdentifier(provider)], isCurrent(binding) else { return }
     let active = Array(calls.keys)
     for uuid in active {
-      tearDown(uuid: uuid, reportServer: true, action: .end)
+      tearDown(uuid: uuid, reportServer: lifecycle.policy == .automatic, action: .end,
+        notifyTimeline: lifecycle.policy == .automatic)
     }
   }
 
   public func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
-    guard var context = calls[action.callUUID] else {
+    guard let binding = providerBindings[ObjectIdentifier(provider)], isCurrent(binding),
+      var context = calls[action.callUUID], permits(context.owner) else {
       action.fail()
       return
     }
@@ -908,12 +1069,13 @@ public final class VoiceCallService:
       return
     }
     Task { @MainActor [weak self] in
-      await self?.connectMedia(session: session, uuid: action.callUUID)
+      await self?.connectMedia(session: session, uuid: action.callUUID, expectedOwner: context.owner)
     }
   }
 
   public func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
-    guard var context = calls[action.callUUID],
+    guard let binding = providerBindings[ObjectIdentifier(provider)], isCurrent(binding),
+      var context = calls[action.callUUID], permits(context.owner),
       context.call.direction == .incoming,
       !context.answered
     else {
@@ -926,12 +1088,13 @@ public final class VoiceCallService:
     publish(action.callUUID)
     action.fulfill()
     Task { @MainActor [weak self] in
-      await self?.acceptAndConnect(uuid: action.callUUID)
+      await self?.acceptAndConnect(uuid: action.callUUID, expectedOwner: context.owner)
     }
   }
 
   public func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
-    guard var context = calls[action.callUUID] else {
+    guard let binding = providerBindings[ObjectIdentifier(provider)], isCurrent(binding),
+      var context = calls[action.callUUID], permits(context.owner) else {
       action.fail()
       return
     }
@@ -940,13 +1103,18 @@ public final class VoiceCallService:
     presentation.setMuted(action.isMuted)
     action.fulfill()
     Task { @MainActor [weak self] in
-      guard let room = self?.activeRoom else { return }
+      guard let self, self.permits(context.owner), self.activeRoomCallUUID == action.callUUID,
+        let room = self.activeRoom else { return }
       _ = try? await room.localParticipant.setMicrophone(enabled: !action.isMuted)
+      if !self.permits(context.owner) || self.activeRoom !== room {
+        _ = try? await room.localParticipant.setMicrophone(enabled: false)
+      }
     }
   }
 
   public func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
-    guard let context = calls[action.callUUID] else {
+    guard let binding = providerBindings[ObjectIdentifier(provider)], isCurrent(binding),
+      let context = calls[action.callUUID], permits(context.owner) else {
       action.fulfill()
       return
     }
@@ -960,6 +1128,7 @@ public final class VoiceCallService:
 
   public func provider(_ provider: CXProvider, timedOutPerforming action: CXAction) {
     action.fail()
+    guard let binding = providerBindings[ObjectIdentifier(provider)], isCurrent(binding) else { return }
     if let callAction = action as? CXCallAction {
       fail(
         uuid: callAction.callUUID,
@@ -969,18 +1138,25 @@ public final class VoiceCallService:
   }
 
   public func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+    guard let binding = providerBindings[ObjectIdentifier(provider)] else { return }
+    systemAudioDidActivate(binding: binding, audioSession: audioSession)
+  }
+
+  func systemAudioDidActivate(binding: VoiceCallSystemBinding, audioSession: AVAudioSession) {
+    guard isCurrent(binding) else { return }
     do {
       // CallKit has already activated this session. Mutating its category here
       // can synchronously block the main thread on iOS 27. The category is
       // prepared before fulfilling the start/answer action instead.
-      try AudioManager.shared.setEngineAvailability(.default)
+      try controls.activateSystemAudio()
       audioActivated = true
       if let uuid = activeRoomCallUUID { refreshConnectionDeadline(uuid: uuid) }
       presentation.setAudioActive(true)
       updateAudioRoute(using: audioSession)
       updateProximityPolicy()
       Task { @MainActor [weak self] in
-        await self?.publishMicrophoneIfReady()
+        guard let self, self.isCurrent(binding) else { return }
+        await self.publishMicrophoneIfReady()
       }
     } catch {
       if let uuid = activeRoomCallUUID {
@@ -990,10 +1166,16 @@ public final class VoiceCallService:
   }
 
   public func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+    guard let binding = providerBindings[ObjectIdentifier(provider)] else { return }
+    systemAudioDidDeactivate(binding: binding)
+  }
+
+  func systemAudioDidDeactivate(binding: VoiceCallSystemBinding) {
+    guard isCurrent(binding) else { return }
     audioActivated = false
     if let uuid = activeRoomCallUUID { refreshConnectionDeadline(uuid: uuid) }
     presentation.setAudioActive(false)
-    try? AudioManager.shared.setEngineAvailability(.none)
+    controls.stopAudio()
     updateProximityPolicy()
   }
 
@@ -1005,15 +1187,17 @@ public final class VoiceCallService:
   }
 
   private func requestCallKitAction(_ action: CXAction) {
-    guard presentationMode == .system, let callController else { return }
+    guard let callAction = action as? CXCallAction, let owner = calls[callAction.callUUID]?.owner,
+      permits(owner), presentationMode == .system, let callController else { return }
     callController.request(CXTransaction(action: action)) { [weak self] error in
       guard let error else { return }
       Task { @MainActor in
-        self?.logger.error(
+        guard let self, self.permits(owner), self.calls[callAction.callUUID]?.owner == owner else { return }
+        self.logger.error(
           "CallKit transaction failed: \(error.localizedDescription, privacy: .public)"
         )
         if let callAction = action as? CXCallAction {
-          self?.fail(uuid: callAction.callUUID, error: error)
+          self.fail(uuid: callAction.callUUID, error: error)
         }
       }
     }
@@ -1021,16 +1205,18 @@ public final class VoiceCallService:
 
   private func install(
     session: CSMVoiceCallSession,
+    owner: VoiceCallOwner,
     title: String,
     avatarDataURL: String?,
     registeredWithCallKit: Bool,
     answered: Bool
   ) throws {
-    guard let uuid = UUID(uuidString: session.call.callId), calls[uuid] == nil else {
+    guard permits(owner), let uuid = UUID(uuidString: session.call.callId), calls[uuid] == nil else {
       throw CSMVoiceCallControlError.mediaUnavailable
     }
     let call = replacingTitle(session.call, title: title)
     calls[uuid] = CallContext(
+      owner: owner,
       call: call,
       avatarDataURL: avatarDataURL,
       registeredWithCallKit: registeredWithCallKit,
@@ -1057,41 +1243,43 @@ public final class VoiceCallService:
     )
   }
 
-  private func acceptAndConnect(uuid: UUID) async {
-    guard let context = calls[uuid] else { return }
+  private func acceptAndConnect(uuid: UUID, expectedOwner: VoiceCallOwner) async {
+    guard let context = calls[uuid], context.owner == expectedOwner, permits(context.owner) else { return }
     do {
-      guard await AVAudioApplication.requestRecordPermission() else {
+      let permission = await controls.permission()
+      guard !Task.isCancelled, permits(context.owner), calls[uuid]?.owner == context.owner else { return }
+      guard permission else {
         throw CSMVoiceCallControlError.mediaUnavailable
       }
       if presentationMode == .inApp { try activateInAppAudio(action: "answer") }
-      let accepted = try await CSMCommunicationRuntime.shared.transitionVoiceCall(
-        callID: context.call.callId,
-        action: .accept,
-        expectedRevision: context.call.revision
-      )
+      let accepted = try await controls.transition(context.call.callId, .accept, context.call.revision, nil, context.owner)
+      guard !Task.isCancelled, permits(context.owner), calls[uuid]?.owner == context.owner else { return }
       if var current = calls[uuid] {
         current.answered = true
         calls[uuid] = current
       }
       apply(accepted, uuid: uuid)
-      await connectMedia(session: accepted, uuid: uuid)
+      await connectMedia(session: accepted, uuid: uuid, expectedOwner: context.owner)
     } catch {
+      guard !Task.isCancelled, permits(context.owner), calls[uuid]?.owner == context.owner else { return }
       // Another app or device of the same account may have won the atomic
       // accept. Reconcile before reporting a media failure; a losing endpoint
       // must never terminate the call that is already active elsewhere.
-      if let session = try? await CSMCommunicationRuntime.shared.voiceCall(
-        callID: context.call.callId
-      ), answeredElsewhere(session.call) {
+      if let session = try? await controls.fetch(context.call.callId, context.owner),
+        permits(context.owner), calls[uuid]?.owner == context.owner,
+        answeredElsewhere(session.call, owner: context.owner) {
         provider?.reportCall(with: uuid, endedAt: Date(), reason: .answeredElsewhere)
         tearDown(uuid: uuid, reportServer: false)
         return
       }
+      guard permits(context.owner), calls[uuid]?.owner == context.owner else { return }
       fail(uuid: uuid, error: error)
     }
   }
 
-  private func connectMedia(session: CSMVoiceCallSession, uuid: UUID) async {
-    guard calls[uuid] != nil else { return }
+  private func connectMedia(session: CSMVoiceCallSession, uuid: UUID, expectedOwner: VoiceCallOwner) async {
+    guard let context = calls[uuid], context.owner == expectedOwner, permits(context.owner) else { return }
+    let owner = context.owner
     guard let media = session.media else {
       fail(uuid: uuid, error: CSMVoiceCallControlError.mediaUnavailable)
       return
@@ -1101,17 +1289,27 @@ public final class VoiceCallService:
     roomConnected = false
     microphonePublished = false
 
+    let roomBinding = VoiceCallRoomBinding()
+    let observer = LiveKitCallObserver { [weak self, roomBinding] event in
+      Task { @MainActor in
+        guard let room = roomBinding.room else { return }
+        self?.handleLiveKitEvent(event, uuid: uuid, room: room, owner: owner)
+      }
+    }
     let room = Room(
-      delegate: roomObserver,
+      delegate: observer,
       roomOptions: RoomOptions(
         encryptionOptions: .sharedKey(media.e2eeKey)
       )
     )
+    roomBinding.room = room
+    activeRoomObserver = observer
     activeRoom = room
     refreshConnectionDeadline(uuid: uuid)
     do {
       try await room.connect(url: media.serverUrl.absoluteString, token: media.token)
-      guard activeRoomCallUUID == uuid, calls[uuid] != nil else {
+      guard !Task.isCancelled, permits(owner), activeRoom === room,
+        activeRoomCallUUID == uuid, calls[uuid]?.owner == owner else {
         await room.disconnect()
         return
       }
@@ -1119,10 +1317,12 @@ public final class VoiceCallService:
       refreshConnectionDeadline(uuid: uuid)
       presentation.clearError()
       await publishMicrophoneIfReady()
+      guard permits(owner), activeRoom === room, calls[uuid]?.owner == owner else { return }
       if !room.remoteParticipants.isEmpty {
         markMediaConnected(uuid: uuid)
       }
     } catch {
+      guard permits(owner), calls[uuid]?.owner == owner else { return }
       fail(uuid: uuid, error: error)
     }
   }
@@ -1130,27 +1330,36 @@ public final class VoiceCallService:
   private func publishMicrophoneIfReady() async {
     guard audioActivated, roomConnected, !microphonePublished,
       let uuid = activeRoomCallUUID,
-      let context = calls[uuid],
+      let context = calls[uuid], permits(context.owner),
       let room = activeRoom
     else { return }
     do {
       try await room.localParticipant.setMicrophone(enabled: !context.muted)
+      guard permits(context.owner), activeRoom === room, activeRoomCallUUID == uuid,
+        calls[uuid]?.owner == context.owner else {
+        _ = try? await room.localParticipant.setMicrophone(enabled: false)
+        return
+      }
       microphonePublished = true
       refreshConnectionDeadline(uuid: uuid)
       markMediaConnected(uuid: uuid)
     } catch {
+      guard permits(context.owner), activeRoom === room, calls[uuid]?.owner == context.owner else { return }
       fail(uuid: uuid, error: error)
     }
   }
 
-  private func handleLiveKitEvent(_ event: LiveKitCallEvent) {
-    guard let uuid = activeRoomCallUUID, var context = calls[uuid] else { return }
+  private func handleLiveKitEvent(_ event: LiveKitCallEvent, uuid: UUID, room: Room, owner: VoiceCallOwner) {
+    guard permits(owner), activeRoom === room, activeRoomCallUUID == uuid,
+      var context = calls[uuid], context.owner == owner else { return }
     switch event {
     case .connected:
       roomConnected = true
       refreshConnectionDeadline(uuid: uuid)
       Task { @MainActor [weak self] in
-        await self?.publishMicrophoneIfReady()
+        guard let self, self.permits(owner), self.activeRoom === room,
+          self.activeRoomCallUUID == uuid else { return }
+        await self.publishMicrophoneIfReady()
       }
     case .participantConnected(let id, let name):
       context.participants.removeAll { $0.userID == id }
@@ -1196,7 +1405,7 @@ public final class VoiceCallService:
   }
 
   private func markMediaConnected(uuid: UUID) {
-    guard var context = calls[uuid], let stage = connectionStage(uuid: uuid),
+    guard var context = calls[uuid], permits(context.owner), let stage = connectionStage(uuid: uuid),
       stage == .connected || stage == .waitingForServerAck else { return }
     refreshConnectionDeadline(uuid: uuid)
     if context.call.phase == .connected {
@@ -1213,19 +1422,18 @@ public final class VoiceCallService:
     context.mediaTransitionInFlight = true
     calls[uuid] = context
     Task { @MainActor [weak self] in
-      guard let self, let latest = self.calls[uuid] else { return }
+      guard let self, let latest = self.calls[uuid], latest.owner == context.owner,
+        self.permits(latest.owner) else { return }
       do {
-        let session = try await CSMCommunicationRuntime.shared.transitionVoiceCall(
-          callID: latest.call.callId, action: .mediaConnected,
-          expectedRevision: latest.call.revision
-        )
-        guard var current = self.calls[uuid] else { return }
+        let session = try await self.controls.transition(latest.call.callId, .mediaConnected,
+          latest.call.revision, nil, latest.owner)
+        guard self.permits(latest.owner), var current = self.calls[uuid], current.owner == latest.owner else { return }
         current.mediaTransitionInFlight = false
         self.calls[uuid] = current
         self.apply(session, uuid: uuid)
         self.markMediaConnected(uuid: uuid)
       } catch {
-        guard var current = self.calls[uuid] else { return }
+        guard self.permits(latest.owner), var current = self.calls[uuid], current.owner == latest.owner else { return }
         current.mediaTransitionInFlight = false
         self.calls[uuid] = current
         self.recordConnectionDiagnostic(uuid: uuid, event: "voice.media.server_ack_pending")
@@ -1238,14 +1446,14 @@ public final class VoiceCallService:
     statePollingTask = Task { @MainActor [weak self] in
       while !Task.isCancelled {
         try? await Task.sleep(for: .seconds(1))
-        guard !Task.isCancelled, let self, let context = self.calls[uuid] else { return }
+        guard !Task.isCancelled, let self, let context = self.calls[uuid], self.permits(context.owner) else { return }
         do {
-          let session = try await CSMCommunicationRuntime.shared.voiceCall(
-            callID: context.call.callId
-          )
+          let session = try await self.controls.fetch(context.call.callId, context.owner)
+          guard !Task.isCancelled, self.permits(context.owner), self.calls[uuid]?.owner == context.owner else { return }
           self.apply(session, uuid: uuid)
           if session.call.phase.isTerminal { return }
         } catch {
+          guard !Task.isCancelled, self.permits(context.owner), self.calls[uuid]?.owner == context.owner else { return }
           self.logger.debug(
             "Call state poll failed: \(error.localizedDescription, privacy: .public)"
           )
@@ -1255,8 +1463,8 @@ public final class VoiceCallService:
   }
 
   private func apply(_ session: CSMVoiceCallSession, uuid: UUID) {
-    guard var context = calls[uuid] else { return }
-    if !context.answered && answeredElsewhere(session.call) {
+    guard var context = calls[uuid], permits(context.owner) else { return }
+    if !context.answered && answeredElsewhere(session.call, owner: context.owner) {
       provider?.reportCall(with: uuid, endedAt: Date(), reason: .answeredElsewhere)
       tearDown(uuid: uuid, reportServer: false)
       return
@@ -1289,17 +1497,17 @@ public final class VoiceCallService:
   }
 
 
-  private func answeredElsewhere(_ call: CSMVoiceCall) -> Bool {
+  private func answeredElsewhere(_ call: CSMVoiceCall, owner: VoiceCallOwner) -> Bool {
     guard call.direction == .incoming,
       let acceptedEndpointID = call.acceptedByEndpointId
     else { return false }
-    let localEndpointID = CSMCommunicationRuntime.shared.voiceCallEndpointID
+    let localEndpointID = owner.endpointID
     return acceptedEndpointID != localEndpointID
       && (call.phase == .accepted || call.phase == .connectingMedia || call.phase == .connected)
   }
 
   private func publish(_ uuid: UUID) {
-    guard let context = calls[uuid] else { return }
+    guard let context = calls[uuid], permits(context.owner) else { return }
     let phase: VoiceCallPhase = switch context.call.phase {
     case .created, .ringing:
       context.call.direction == .incoming && !context.answered ? .ringing : .connecting
@@ -1344,30 +1552,31 @@ public final class VoiceCallService:
 
   private func fail(uuid: UUID, error: Error) {
     recordConnectionDiagnostic(uuid: uuid, event: "voice.call.failed")
-    guard let context = calls[uuid] else { return }
+    guard let context = calls[uuid], permits(context.owner) else { return }
     var failed = context
     failed.call = replacingPhase(context.call, phase: .failed, connectedAt: nil)
     calls[uuid] = failed
     publish(uuid)
     provider?.reportCall(with: uuid, endedAt: Date(), reason: .failed)
     Task { @MainActor [weak self] in
-      _ = try? await CSMCommunicationRuntime.shared.transitionVoiceCall(
-        callID: context.call.callId,
-        action: .mediaFailed,
-        expectedRevision: context.call.revision,
-        reason: "native_media_failed"
-      )
+      guard let self, self.permits(context.owner) else { return }
+      _ = try? await self.controls.transition(context.call.callId, .mediaFailed,
+        context.call.revision, "native_media_failed", context.owner)
       try? await Task.sleep(for: .seconds(1))
-      self?.tearDown(uuid: uuid, reportServer: false)
+      guard self.permits(context.owner) else { return }
+      self.tearDown(uuid: uuid, reportServer: false, expectedOwner: context.owner)
     }
   }
 
   private func tearDown(
     uuid: UUID,
     reportServer: Bool,
-    action: CSMVoiceCallAction = .end
+    action: CSMVoiceCallAction = .end,
+    notifyTimeline: Bool = true,
+    expectedOwner: VoiceCallOwner? = nil
   ) {
-    guard let context = calls.removeValue(forKey: uuid) else { return }
+    guard let context = calls[uuid], expectedOwner == nil || expectedOwner == context.owner else { return }
+    calls.removeValue(forKey: uuid)
     statePollingTask?.cancel()
     statePollingTask = nil
     connectionDeadline.cancel()
@@ -1376,6 +1585,7 @@ public final class VoiceCallService:
     if activeRoomCallUUID == uuid {
       let room = activeRoom
       activeRoom = nil
+      activeRoomObserver = nil
       activeRoomCallUUID = nil
       roomConnected = false
       microphonePublished = false
@@ -1396,15 +1606,13 @@ public final class VoiceCallService:
 
     if reportServer {
       Task { @MainActor [weak self] in
-        _ = try? await CSMCommunicationRuntime.shared.transitionVoiceCall(
-          callID: context.call.callId,
-          action: action,
-          expectedRevision: context.call.revision,
-          reason: nil
-        )
-        self?.notifyCallTimelineChanged(roomID: context.call.roomId)
+        guard let self, self.permits(context.owner) else { return }
+        _ = try? await self.controls.transition(context.call.callId, action,
+          context.call.revision, nil, context.owner)
+        guard self.permits(context.owner), notifyTimeline else { return }
+        self.notifyCallTimelineChanged(roomID: context.call.roomId)
       }
-    } else {
+    } else if notifyTimeline {
       notifyCallTimelineChanged(roomID: context.call.roomId)
     }
   }
@@ -1467,6 +1675,7 @@ public final class VoiceCallService:
   }
 
   private func activateInAppAudio(action: String) throws {
+    guard capturedOwner() != nil else { throw VoiceCallHostLifecycleError.ownerChanged }
     let session = AVAudioSession.sharedInstance()
     try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP])
     try session.setActive(true)
@@ -1491,11 +1700,12 @@ public final class VoiceCallService:
   }
 
   @objc private func audioRouteDidChange() {
+    guard !lifecycle.suspended else { return }
     updateAudioRoute(using: AVAudioSession.sharedInstance())
   }
 
   @objc private func audioSessionWasInterrupted(_ notification: Notification) {
-    guard presentationMode == .inApp, let value = (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? NSNumber)?.uintValue,
+    guard capturedOwner() != nil, presentationMode == .inApp, let value = (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? NSNumber)?.uintValue,
       let type = AVAudioSession.InterruptionType(rawValue: value), activeRoomCallUUID != nil
     else { return }
     switch type {
@@ -1517,10 +1727,14 @@ public final class VoiceCallService:
   }
 
   private func resumeInAppAudioIfNeeded() {
-    guard presentationMode == .inApp, !audioActivated, activeRoomCallUUID != nil else { return }
+    guard let owner = capturedOwner(), presentationMode == .inApp, !audioActivated,
+      let uuid = activeRoomCallUUID else { return }
     do {
       try activateInAppAudio(action: "resume")
-      Task { @MainActor [weak self] in await self?.publishMicrophoneIfReady() }
+      Task { @MainActor [weak self] in
+        guard let self, self.permits(owner), self.activeRoomCallUUID == uuid else { return }
+        await self.publishMicrophoneIfReady()
+      }
     } catch {
       CallDiagnosticStore.record("audio.in-app.resume-failed", result: error.localizedDescription)
       logger.warning("In-app audio resume failed: \(error.localizedDescription, privacy: .public)")

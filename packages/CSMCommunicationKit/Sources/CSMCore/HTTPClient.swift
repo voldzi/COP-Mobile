@@ -4,6 +4,20 @@ protocol AccessTokenProviding: Sendable {
     func accessToken() async throws -> String?
 }
 
+/// A request-local selection fence, not an authorization grant. COP still
+/// verifies the access-token signature and permissions. Never persist it.
+struct VoiceOutboundScope: Sendable {
+    let issuer: String
+    let subject: String
+    let sdkScope: String
+    let generation: UUID
+    let validateCurrent: @MainActor @Sendable () throws -> Void
+}
+
+protocol ScopedVoiceAccessTokenProviding: AccessTokenProviding {
+    func accessToken(for scope: VoiceOutboundScope) async throws -> String?
+}
+
 struct KeychainAccessTokenProvider: AccessTokenProviding {
     var store: KeychainCredentialStore
 
@@ -36,10 +50,11 @@ struct HTTPClient: Sendable {
     func get<Response: Decodable & Sendable>(
         _ path: String,
         queryItems: [URLQueryItem] = [],
-        transientRetryCount: Int = 0
+        transientRetryCount: Int = 0,
+        voiceScope: VoiceOutboundScope? = nil
     ) async throws -> Response {
-        let request = try await request(path, method: "GET", queryItems: queryItems)
-        return try await send(request, transientRetryCount: transientRetryCount)
+        let request = try await request(path, method: "GET", queryItems: queryItems, voiceScope: voiceScope)
+        return try await send(request, transientRetryCount: transientRetryCount, voiceScope: voiceScope)
     }
 
     /// Security-gating reads cannot reuse a cached permission or follow a
@@ -86,9 +101,14 @@ struct HTTPClient: Sendable {
         body: RequestBody,
         transientRetryCount: Int = 0,
         authorizationBearerToken: String? = nil,
-        headers: [String: String] = [:]
+        headers: [String: String] = [:],
+        voiceScope: VoiceOutboundScope? = nil
     ) async throws -> Response {
-        var request = try await request(path, method: "POST")
+        guard voiceScope == nil || (authorizationBearerToken == nil &&
+            !headers.keys.contains(where: { $0.lowercased() == "authorization" })) else {
+            throw CSMVoiceCallControlError.authenticationRequired
+        }
+        var request = try await request(path, method: "POST", voiceScope: voiceScope)
         request.httpBody = try CSMJSONCoding.encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
@@ -99,7 +119,7 @@ struct HTTPClient: Sendable {
             }
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        return try await send(request, transientRetryCount: transientRetryCount)
+        return try await send(request, transientRetryCount: transientRetryCount, voiceScope: voiceScope)
     }
 
     func post<Response: Decodable & Sendable>(_ path: String) async throws -> Response {
@@ -191,7 +211,8 @@ struct HTTPClient: Sendable {
     private func request(
         _ path: String,
         method: String,
-        queryItems: [URLQueryItem] = []
+        queryItems: [URLQueryItem] = [],
+        voiceScope: VoiceOutboundScope? = nil
     ) async throws -> URLRequest {
         let url = try resolvedURL(path, queryItems: queryItems)
 
@@ -201,7 +222,21 @@ struct HTTPClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(UUID().uuidString, forHTTPHeaderField: "x-correlation-id")
 
-        let rawToken = try await tokenProvider?.accessToken()
+        let rawToken: String?
+        if let voiceScope {
+            guard let provider = tokenProvider as? any ScopedVoiceAccessTokenProviding else {
+                throw CSMVoiceCallControlError.authenticationRequired
+            }
+            rawToken = try await provider.accessToken(for: voiceScope)
+            // Defense for injected providers: a scoped call never sends a
+            // different actor's bearer, even if the provider returns one.
+            guard let rawToken, mobilityTokenMatchesSelectedActor(rawToken,
+                issuer: voiceScope.issuer, subject: voiceScope.subject) else {
+                throw CSMCOPSessionError(.accountChanged)
+            }
+        } else {
+            rawToken = try await tokenProvider?.accessToken()
+        }
         let token = rawToken?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let token, !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -218,11 +253,17 @@ struct HTTPClient: Sendable {
 
     private func send<Response: Decodable & Sendable>(
         _ request: URLRequest,
-        transientRetryCount: Int = 0
+        transientRetryCount: Int = 0,
+        voiceScope: VoiceOutboundScope? = nil
     ) async throws -> Response {
         let maximumRetries = max(0, min(transientRetryCount, 4))
         for attempt in 0...maximumRetries {
-            let (data, response) = try await session.data(for: request)
+            let (data, response): (Data, URLResponse)
+            if let voiceScope {
+                (data, response) = try await sendScopedVoice(request, scope: voiceScope)
+            } else {
+                (data, response) = try await session.data(for: request)
+            }
             do {
                 let httpResponse = try validate(response, data: data)
                 if data.isEmpty, Response.self is EmptyHTTPResponse.Type {
@@ -234,6 +275,27 @@ struct HTTPClient: Sendable {
             }
         }
         throw CSMServiceError.unavailable("COP API request failed after retry.")
+    }
+
+    @MainActor
+    private func sendScopedVoice(_ request: URLRequest, scope: VoiceOutboundScope) async throws -> (Data, URLResponse) {
+        let control = ScopedHTTPTaskControl()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                do {
+                    try Task.checkCancellation()
+                    try scope.validateCurrent()
+                    // No suspension between the MainActor fence and resume.
+                    // The request already holds the immutable selected bearer.
+                    let task = session.dataTask(with: request) { data, response, error in
+                        if let error { continuation.resume(throwing: error) }
+                        else if let data, let response { continuation.resume(returning: (data, response)) }
+                        else { continuation.resume(throwing: CSMServiceError.unavailable("Missing HTTP response.")) }
+                    }
+                    control.start(task)
+                } catch { continuation.resume(throwing: error) }
+            }
+        } onCancel: { control.cancel() }
     }
 
     private func sendWithoutResponse(_ request: URLRequest) async throws {
@@ -269,6 +331,22 @@ struct HTTPClient: Sendable {
             return code
         }
         return (object["error"] as? [String: Any])?["code"] as? String
+    }
+}
+
+private final class ScopedHTTPTaskControl: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: URLSessionDataTask?
+    private var cancelled = false
+    func start(_ task: URLSessionDataTask) {
+        lock.withLock {
+            self.task = task
+            if cancelled { task.cancel() }
+            task.resume()
+        }
+    }
+    func cancel() {
+        lock.withLock { cancelled = true; task?.cancel() }
     }
 }
 

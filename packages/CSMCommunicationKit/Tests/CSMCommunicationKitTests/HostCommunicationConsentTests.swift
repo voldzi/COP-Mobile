@@ -67,7 +67,7 @@ final class HostCommunicationConsentTests: XCTestCase {
     func testSingleAuthenticationEntryRemainsAuthenticationOnlyInExplicitHostMode() async {
         let api = ConsentAPI(), push = ConsentPush(), auth = ConsentAuth(existing: false), messaging = StreamLifecycleMessaging()
         let value = model(api: api, push: push, auth: auth, messaging: messaging, defaults: isolatedDefaults())
-        let runtime = CSMCommunicationRuntime(model: value)
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
         await runtime.authenticationSignIn()
         await runtime.mobilitySignIn()
         XCTAssertEqual(auth.signInCount, 1)
@@ -91,7 +91,7 @@ final class HostCommunicationConsentTests: XCTestCase {
         let api = ConsentAPI(), push = ConsentPush(), auth = ConsentAuth(), messaging = StreamLifecycleMessaging()
         let defaults = isolatedDefaults()
         let value = model(api: api, push: push, auth: auth, messaging: messaging, defaults: defaults)
-        let runtime = CSMCommunicationRuntime(model: value)
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
         await runtime.prepareAuthentication()
         let a = try XCTUnwrap(runtime.mobilitySessionScope())
         let enabled = try await runtime.setHostCommunicationEnabled(true, expectedScope: a)
@@ -131,7 +131,7 @@ final class HostCommunicationConsentTests: XCTestCase {
     func testConsentPersistsAcrossColdStartOnlyForTheSameHostAndAccount() async throws {
         let defaults = isolatedDefaults(), api = ConsentAPI()
         let first = model(api: api, push: ConsentPush(), auth: ConsentAuth(), messaging: StreamLifecycleMessaging(), defaults: defaults)
-        let runtime = CSMCommunicationRuntime(model: first)
+        let runtime = CSMCommunicationRuntime(model: first, driverReportService: DriverReportService(api: api))
         await runtime.prepareAuthentication()
         _ = try await runtime.setHostCommunicationEnabled(true, expectedScope: XCTUnwrap(runtime.mobilitySessionScope()))
         let restored = model(api: api, push: ConsentPush(), auth: ConsentAuth(), messaging: StreamLifecycleMessaging(), defaults: defaults)
@@ -150,7 +150,7 @@ final class HostCommunicationConsentTests: XCTestCase {
     func testWithdrawalFencesDelayedPushPreparationWithoutSigningOut() async throws {
         let api = ConsentAPI(), push = ConsentPush(), auth = ConsentAuth(), messaging = StreamLifecycleMessaging()
         let value = model(api: api, push: push, auth: auth, messaging: messaging, defaults: isolatedDefaults())
-        let runtime = CSMCommunicationRuntime(model: value)
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
         await runtime.prepareAuthentication()
         let scope = try XCTUnwrap(runtime.mobilitySessionScope())
         push.pauseNextPreparation = true
@@ -177,8 +177,9 @@ final class HostCommunicationConsentTests: XCTestCase {
             XCTAssertFalse(CSMHostCommunicationRequestPolicy.requiresConsent(path: path, method: "POST"))
             XCTAssertTrue(CSMHostCommunicationRequestPolicy.requiresConsent(path: path, method: "GET"))
         }
-        let value = model(api: ConsentAPI(), push: ConsentPush(), auth: ConsentAuth(), messaging: StreamLifecycleMessaging(), defaults: isolatedDefaults())
-        let runtime = CSMCommunicationRuntime(model: value)
+        let api = ConsentAPI()
+        let value = model(api: api, push: ConsentPush(), auth: ConsentAuth(), messaging: StreamLifecycleMessaging(), defaults: isolatedDefaults())
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
         await runtime.prepareAuthentication()
         do { _ = try await runtime.sharedVehicles(expectedScope: XCTUnwrap(runtime.mobilitySessionScope())); XCTFail("Disabled sharing performed HTTP") }
         catch let error as CSMServiceError {
@@ -189,7 +190,7 @@ final class HostCommunicationConsentTests: XCTestCase {
     func testOldAccountConsentCannotAuthorizeCallbacksDuringNewIdentityBootstrap() async throws {
         let api = ConsentAPI(), push = ConsentPush(), auth = ConsentAuth(), messaging = StreamLifecycleMessaging()
         let value = model(api: api, push: push, auth: auth, messaging: messaging, defaults: isolatedDefaults())
-        let runtime = CSMCommunicationRuntime(model: value)
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
         await runtime.prepareAuthentication()
         _ = try await runtime.setHostCommunicationEnabled(true, expectedScope: XCTUnwrap(runtime.mobilitySessionScope()))
         auth.existing = false
@@ -215,7 +216,7 @@ final class HostCommunicationConsentTests: XCTestCase {
     func testOldAccountTeardownCannotSuspendNewAccountAfterLocationStopAwait() async throws {
         let api = ConsentAPI(), push = ConsentPush(), auth = ConsentAuth(), messaging = ConsentMessaging()
         let value = model(api: api, push: push, auth: auth, messaging: messaging, defaults: isolatedDefaults())
-        let runtime = CSMCommunicationRuntime(model: value)
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
         await runtime.prepareAuthentication()
         let scope = try XCTUnwrap(runtime.mobilitySessionScope())
         _ = try await runtime.setHostCommunicationEnabled(true, expectedScope: scope)
@@ -240,7 +241,7 @@ final class HostCommunicationConsentTests: XCTestCase {
     func testNewAccountWithdrawalFencesImmediatelyBeforeAwaitingOldAccountTeardown() async throws {
         let api = ConsentAPI(), push = ConsentPush(), auth = ConsentAuth(), messaging = ConsentMessaging()
         let value = model(api: api, push: push, auth: auth, messaging: messaging, defaults: isolatedDefaults())
-        let runtime = CSMCommunicationRuntime(model: value)
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
         await api.selectSubject("synthetic-account-b")
         await runtime.prepareAuthentication()
         let b = try XCTUnwrap(runtime.mobilitySessionScope())
@@ -274,7 +275,7 @@ final class HostCommunicationConsentTests: XCTestCase {
         for duringConfiguration in [false, true] {
             let api = ConsentAPI(), push = ConsentPush(), auth = ConsentAuth(), messaging = ConsentMessaging()
             let value = model(api: api, push: push, auth: auth, messaging: messaging, defaults: isolatedDefaults())
-            let runtime = CSMCommunicationRuntime(model: value)
+            let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
             await runtime.prepareAuthentication()
             let scope = try XCTUnwrap(runtime.mobilitySessionScope()), pause = ConsentPause()
             if duringConfiguration { await messaging.pauseConfiguration(pause) }
@@ -296,7 +297,7 @@ final class HostCommunicationConsentTests: XCTestCase {
         let cleanup = ConsentCleanupStore(), cleanupHTTP = ConsentCleanupHTTP(), defaults = isolatedDefaults()
         let value = model(api: api, push: push, auth: auth, messaging: messaging, defaults: defaults,
             registry: registry, cleanup: cleanup, cleanupHTTP: cleanupHTTP)
-        let runtime = CSMCommunicationRuntime(model: value)
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
         await runtime.prepareAuthentication()
         let scope = try XCTUnwrap(runtime.mobilitySessionScope()), pause = ConsentPause()
         await registry.pauseRegistration(pause)
@@ -315,7 +316,7 @@ final class HostCommunicationConsentTests: XCTestCase {
         let restartedMessaging = ConsentMessaging()
         let restarted = model(api: api, push: restartedPush, auth: ConsentAuth(), messaging: restartedMessaging,
             defaults: defaults, registry: registry, cleanup: cleanup, cleanupHTTP: cleanupHTTP)
-        let restored = CSMCommunicationRuntime(model: restarted)
+        let restored = CSMCommunicationRuntime(model: restarted, driverReportService: DriverReportService(api: api))
         await restored.prepareAuthentication()
         await registry.setFailDelete(false)
         let completed = try await restored.retryHostCommunicationRegistrationRemoval(expectedScope: scope)
@@ -332,7 +333,7 @@ final class HostCommunicationConsentTests: XCTestCase {
         let defaults = isolatedDefaults(), store = ConsentCleanupStore(), http = ConsentCleanupHTTP(), pause = ConsentPause()
         await http.setFail(true)
         let value = model(api: api, push: push, auth: auth, messaging: messaging, defaults: defaults, cleanup: store, cleanupHTTP: http)
-        let runtime = CSMCommunicationRuntime(model: value)
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
         await runtime.prepareAuthentication()
         let scope = try XCTUnwrap(runtime.mobilitySessionScope())
         await messaging.pausePusher(pause)
@@ -347,7 +348,7 @@ final class HostCommunicationConsentTests: XCTestCase {
         restartedPush.currentSnapshot = .init(authorization: .authorized, deviceToken: "synthetic-rotated-apns", environment: "development", registrationRequestedAt: nil, lastFailure: nil)
         let restarted = model(api: api, push: restartedPush, auth: ConsentAuth(), messaging: restartedMessaging,
             defaults: defaults, cleanup: store, cleanupHTTP: http)
-        let restored = CSMCommunicationRuntime(model: restarted)
+        let restored = CSMCommunicationRuntime(model: restarted, driverReportService: DriverReportService(api: api))
         await restored.prepareAuthentication()
         await http.setFail(false)
         let completed = try await restored.retryHostCommunicationRegistrationRemoval(expectedScope: scope)
@@ -369,7 +370,7 @@ final class HostCommunicationConsentTests: XCTestCase {
         let defaults = isolatedDefaults(), store = ConsentCleanupStore(), http = ConsentCleanupHTTP()
         let value = model(api: api, push: push, auth: auth, messaging: ConsentMessaging(), defaults: defaults,
             registry: registry, cleanup: store, cleanupHTTP: http)
-        let runtime = CSMCommunicationRuntime(model: value)
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
         await runtime.prepareAuthentication()
         let scope = try XCTUnwrap(runtime.mobilitySessionScope())
         _ = try await runtime.setHostCommunicationEnabled(true, expectedScope: scope)
@@ -377,7 +378,7 @@ final class HostCommunicationConsentTests: XCTestCase {
         XCTAssertTrue(pending.registrationRemovalPending)
         let restarted = model(api: api, push: ConsentPush(), auth: ConsentAuth(), messaging: ConsentMessaging(), defaults: defaults,
             registry: registry, cleanup: store, cleanupHTTP: http)
-        let restored = CSMCommunicationRuntime(model: restarted)
+        let restored = CSMCommunicationRuntime(model: restarted, driverReportService: DriverReportService(api: api))
         await restored.prepareAuthentication()
         let retried = try await restored.retryHostCommunicationRegistrationRemoval(expectedScope: scope)
         XCTAssertTrue(retried.registrationRemovalPending)
@@ -417,7 +418,7 @@ final class HostCommunicationConsentTests: XCTestCase {
         let http = ConsentCleanupHTTP()
         await http.setFail(true)
         let value = model(api: api, push: push, auth: auth, messaging: wrapper, defaults: isolatedDefaults(), cleanupHTTP: http)
-        let runtime = CSMCommunicationRuntime(model: value)
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
         await runtime.prepareAuthentication()
         let scope = try XCTUnwrap(runtime.mobilitySessionScope())
         _ = try await runtime.setHostCommunicationEnabled(true, expectedScope: scope)
@@ -445,6 +446,98 @@ final class HostCommunicationConsentTests: XCTestCase {
         XCTAssertEqual(outboxAfter, outboxBefore)
     }
 
+    func testVoiceDefaultNilIntentCapturedAsACannotCallHTTPAsEnabledBWhileStartIsPaused() async throws {
+        let api = ConsentAPI(), push = ConsentPush(), auth = ConsentAuth(), messaging = ConsentMessaging()
+        let value = model(api: api, push: push, auth: auth, messaging: messaging, defaults: isolatedDefaults())
+        // Prime the model directly so the fresh Runtime still owns a real
+        // startIfNeeded await while A already has verified active intent.
+        await api.selectSubject("synthetic-account-b")
+        await value.start(authenticationOnly: true)
+        try await value.setHostCommunicationEnabled(true)
+        await api.selectSubject("synthetic-account-a")
+        await value.refreshSession(authenticationOnly: true)
+        try await value.setHostCommunicationEnabled(true)
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
+        let capturedA = runtime.hostCommunicationSnapshot
+        XCTAssertTrue(capturedA.enabled)
+        let scopeA = try XCTUnwrap(capturedA.scope), pause = ConsentPause()
+        auth.nextRestorePause = pause
+        let startingA = Task {
+            try await runtime.startVoiceCall(roomID: "synthetic-room", title: "Synthetic")
+        }
+        defer { startingA.cancel(); Task { await pause.release() } }
+        try await waitAsync { await pause.entered }
+        await api.selectSubject("synthetic-account-b")
+        await value.signIn(authenticationOnly: true)
+        let currentB = runtime.hostCommunicationSnapshot
+        XCTAssertTrue(currentB.enabled, "B must be enabled; this must prove identity fencing rather than the ordinary off gate")
+        XCTAssertNotEqual(currentB.scope, scopeA)
+        await pause.release()
+        do { _ = try await startingA.value; XCTFail("A intent started a call as B") }
+        catch is CancellationError { }
+        let starts = await api.voiceStartCount
+        XCTAssertEqual(starts, 0)
+        XCTAssertEqual(runtime.hostCommunicationSnapshot.scope, currentB.scope)
+    }
+
+    func testAllVoiceEntriesFailBeforeStartupWhenExplicitHostIsOffAndRejectIncompleteFences() async throws {
+        let api = ConsentAPI(), auth = ConsentAuth()
+        let value = model(api: api, push: ConsentPush(), auth: auth, messaging: ConsentMessaging(), defaults: isolatedDefaults())
+        await value.start(authenticationOnly: true)
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
+        let restoreCount = auth.restoreCount
+        let offCalls: [@MainActor () async throws -> Void] = [
+            { _ = try await runtime.startVoiceCall(roomID: "synthetic", title: nil) },
+            { _ = try await runtime.voiceCall(callID: "synthetic") },
+            { _ = try await runtime.activeVoiceCalls() },
+            { _ = try await runtime.transitionVoiceCall(callID: "synthetic", action: .end, expectedRevision: 1) }
+        ]
+        for call in offCalls {
+            do { try await call(); XCTFail("Disabled voice entry accepted") }
+            catch CSMVoiceCallControlError.authenticationRequired { }
+        }
+        XCTAssertEqual(auth.restoreCount, restoreCount)
+        let offControlCount = await api.voiceControlCount
+        XCTAssertEqual(offControlCount, 0)
+        let scope = try XCTUnwrap(runtime.mobilitySessionScope())
+        _ = try await runtime.setHostCommunicationEnabled(true, expectedScope: scope)
+        let current = runtime.hostCommunicationSnapshot
+        let enabledControlCount = await api.voiceControlCount
+        let invalidCalls: [@MainActor () async throws -> Void] = [
+            { _ = try await runtime.startVoiceCall(roomID: "synthetic", title: nil, expectedScope: scope) },
+            { _ = try await runtime.voiceCall(callID: "synthetic", expectedGeneration: current.generation) },
+            { _ = try await runtime.activeVoiceCalls(expectedScope: scope, expectedGeneration: UUID()) },
+            { _ = try await runtime.transitionVoiceCall(callID: "synthetic", action: .end, expectedRevision: 1,
+                                                       expectedScope: "", expectedGeneration: current.generation) }
+        ]
+        for call in invalidCalls {
+            do { try await call(); XCTFail("Incomplete or mismatched voice fence accepted") }
+            catch CSMVoiceCallControlError.authenticationRequired { }
+        }
+        let calls = await api.voiceControlCount
+        XCTAssertEqual(calls, enabledControlCount)
+    }
+
+    func testValidExplicitVoiceFenceAndAutomaticDefaultNilRemainUsable() async throws {
+        for mode in [CSMCommunicationActivationPolicy.explicitHostConsent, .automatic] {
+            let api = ConsentAPI()
+            let value = model(api: api, push: ConsentPush(), auth: ConsentAuth(), messaging: ConsentMessaging(),
+                defaults: isolatedDefaults(), mode: mode)
+            let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
+            if mode == .explicitHostConsent {
+                await runtime.prepareAuthentication()
+                _ = try await runtime.setHostCommunicationEnabled(true, expectedScope: XCTUnwrap(runtime.mobilitySessionScope()))
+                let captured = runtime.hostCommunicationSnapshot
+                _ = try await runtime.activeVoiceCalls(expectedScope: captured.scope, expectedGeneration: captured.generation)
+            } else {
+                // No pre-authentication/capture for the legacy automatic path.
+                _ = try await runtime.activeVoiceCalls()
+            }
+            let reads = await api.voiceActiveListCount
+            XCTAssertEqual(reads, 1)
+        }
+    }
+
     private func waitAsync(_ condition: () async -> Bool) async throws {
         for _ in 0..<200 {
             if await condition() { return }
@@ -467,8 +560,14 @@ final class HostCommunicationConsentTests: XCTestCase {
 @MainActor private final class ConsentAuth: AuthSessionManaging {
     var existing: Bool
     var signInCount = 0, signOutCount = 0
+    var restoreCount = 0
+    var nextRestorePause: ConsentPause?
     init(existing: Bool = true) { self.existing = existing }
-    func canUseExistingSession() async -> Bool { existing }
+    func canUseExistingSession() async -> Bool {
+        restoreCount += 1
+        if let pause = nextRestorePause { nextRestorePause = nil; await pause.wait() }
+        return existing
+    }
     func signIn() async throws { existing = true; signInCount += 1 }
     func signOut() async throws { existing = false; signOutCount += 1 }
 }
@@ -498,6 +597,8 @@ private actor ConsentAPI: CopAPIClientProtocol {
     private(set) var registrationCount = 0
     private(set) var routeCount = 0
     private(set) var catalogCount = 0
+    private(set) var voiceStartCount = 0, voiceListCount = 0, voiceActiveListCount = 0, voiceLookupCount = 0, voiceTransitionCount = 0
+    var voiceControlCount: Int { voiceStartCount + voiceListCount + voiceLookupCount + voiceTransitionCount }
     var subject = "synthetic-account-a"
     var bootstrapPause: ConsentPause?, messagingPause: ConsentPause?
     func pauseBootstrap(_ pause: ConsentPause) { bootstrapPause = pause }
@@ -516,7 +617,11 @@ private actor ConsentAPI: CopAPIClientProtocol {
         if let pause = messagingPause { messagingPause = nil; await pause.wait() }
         return try await PreviewCopAPIClient().messagingBootstrap(deviceId: deviceId)
     }
-    func voiceCalls(roomId: String?, activeOnly: Bool, limit: Int) async throws -> [CSMVoiceCall] { [] }
+    func voiceCalls(roomId: String?, activeOnly: Bool, limit: Int) async throws -> [CSMVoiceCall] {
+        voiceListCount += 1
+        if activeOnly && roomId == nil { voiceActiveListCount += 1 }
+        return []
+    }
     func drivingCapabilities() async throws -> CSMDriverRoutingCatalog { catalogCount += 1; return try await PreviewCopAPIClient().drivingCapabilities() }
     func drivingRoutes(_ request: CSMDriverRouteRequest) async throws -> CSMDriverRouteResponse { routeCount += 1; return try await PreviewCopAPIClient().drivingRoutes(request) }
     func offlineSnapshot(seconds: Int) async throws -> MobileOfflineSnapshot { return try await PreviewCopAPIClient().offlineSnapshot(seconds: seconds) }
@@ -538,9 +643,25 @@ private actor ConsentAPI: CopAPIClientProtocol {
     func acknowledgeAlert(alertId: String, note: String?) async throws -> CopAlert { return try await PreviewCopAPIClient().acknowledgeAlert(alertId: alertId, note: note) }
     func messagingStatus() async throws -> MessagingStatus { return try await PreviewCopAPIClient().messagingStatus() }
     func messagingIdentityLookup(conversationId: String) async throws -> MessagingIdentityLookup { return try await PreviewCopAPIClient().messagingIdentityLookup(conversationId: conversationId) }
-    func startVoiceCall(_ request: CSMVoiceCallStartRequest) async throws -> CSMVoiceCallSession { return try await PreviewCopAPIClient().startVoiceCall(request) }
-    func voiceCall(callId: String) async throws -> CSMVoiceCallSession { return try await PreviewCopAPIClient().voiceCall(callId: callId) }
-    func transitionVoiceCall(callId: String, request: CSMVoiceCallActionRequest) async throws -> CSMVoiceCallSession { return try await PreviewCopAPIClient().transitionVoiceCall(callId: callId, request: request) }
+    func startVoiceCall(_ request: CSMVoiceCallStartRequest) async throws -> CSMVoiceCallSession { voiceStartCount += 1; return try await PreviewCopAPIClient().startVoiceCall(request) }
+    func voiceCall(callId: String) async throws -> CSMVoiceCallSession { voiceLookupCount += 1; return try await PreviewCopAPIClient().voiceCall(callId: callId) }
+    func transitionVoiceCall(callId: String, request: CSMVoiceCallActionRequest) async throws -> CSMVoiceCallSession { voiceTransitionCount += 1; return try await PreviewCopAPIClient().transitionVoiceCall(callId: callId, request: request) }
+    func startVoiceCall(_ request: CSMVoiceCallStartRequest, voiceScope: VoiceOutboundScope) async throws -> CSMVoiceCallSession {
+        try await MainActor.run { try voiceScope.validateCurrent() }
+        return try await startVoiceCall(request)
+    }
+    func voiceCalls(roomId: String?, activeOnly: Bool, limit: Int, voiceScope: VoiceOutboundScope) async throws -> [CSMVoiceCall] {
+        try await MainActor.run { try voiceScope.validateCurrent() }
+        return try await voiceCalls(roomId: roomId, activeOnly: activeOnly, limit: limit)
+    }
+    func voiceCall(callId: String, voiceScope: VoiceOutboundScope) async throws -> CSMVoiceCallSession {
+        try await MainActor.run { try voiceScope.validateCurrent() }
+        return try await voiceCall(callId: callId)
+    }
+    func transitionVoiceCall(callId: String, request: CSMVoiceCallActionRequest, voiceScope: VoiceOutboundScope) async throws -> CSMVoiceCallSession {
+        try await MainActor.run { try voiceScope.validateCurrent() }
+        return try await transitionVoiceCall(callId: callId, request: request)
+    }
     func mobilePairingSession(code: String) async throws -> MobilePairingSessionResponse { return try await PreviewCopAPIClient().mobilePairingSession(code: code) }
     func claimMobilePairingSession(code: String, request: MobilePairingClaimRequest) async throws -> MobilePairingSessionResponse { return try await PreviewCopAPIClient().claimMobilePairingSession(code: code, request: request) }
     func conversations() async throws -> [Conversation] { return try await PreviewCopAPIClient().conversations() }

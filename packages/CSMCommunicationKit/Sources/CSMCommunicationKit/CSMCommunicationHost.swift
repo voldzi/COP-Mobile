@@ -602,24 +602,35 @@ public final class CSMCommunicationRuntime {
     public func startVoiceCall(
         roomID: String,
         title: String?,
-        participantSubjectIDs: [String]? = nil
+        participantSubjectIDs: [String]? = nil,
+        expectedScope: String? = nil,
+        expectedGeneration: UUID? = nil
     ) async throws -> CSMVoiceCallSession {
+        let fence = try captureVoiceHostFence(expectedScope: expectedScope, expectedGeneration: expectedGeneration)
         await startIfNeeded()
+        try verifyVoiceHostFence(fence)
         return try await model.startVoiceCall(
             roomID: roomID,
             title: title,
-            participantSubjectIDs: participantSubjectIDs
+            participantSubjectIDs: participantSubjectIDs,
+            voiceHostSnapshot: fence
         )
     }
 
-    public func voiceCall(callID: String) async throws -> CSMVoiceCallSession {
+    public func voiceCall(callID: String, expectedScope: String? = nil,
+                          expectedGeneration: UUID? = nil) async throws -> CSMVoiceCallSession {
+        let fence = try captureVoiceHostFence(expectedScope: expectedScope, expectedGeneration: expectedGeneration)
         await startIfNeeded()
-        return try await model.voiceCall(callID: callID)
+        try verifyVoiceHostFence(fence)
+        return try await model.voiceCall(callID: callID, voiceHostSnapshot: fence)
     }
 
-    public func activeVoiceCalls() async throws -> [CSMVoiceCall] {
+    public func activeVoiceCalls(expectedScope: String? = nil,
+                                 expectedGeneration: UUID? = nil) async throws -> [CSMVoiceCall] {
+        let fence = try captureVoiceHostFence(expectedScope: expectedScope, expectedGeneration: expectedGeneration)
         await startIfNeeded()
-        return try await model.activeVoiceCalls()
+        try verifyVoiceHostFence(fence)
+        return try await model.activeVoiceCalls(voiceHostSnapshot: fence)
     }
 
     public var voiceCallEndpointID: String { model.messagingDeviceId ?? CSMVoiceCallEndpointIdentity.current }
@@ -628,15 +639,46 @@ public final class CSMCommunicationRuntime {
         callID: String,
         action: CSMVoiceCallAction,
         expectedRevision: Int?,
-        reason: String? = nil
+        reason: String? = nil,
+        expectedScope: String? = nil,
+        expectedGeneration: UUID? = nil
     ) async throws -> CSMVoiceCallSession {
+        let fence = try captureVoiceHostFence(expectedScope: expectedScope, expectedGeneration: expectedGeneration)
         await startIfNeeded()
+        try verifyVoiceHostFence(fence)
         return try await model.transitionVoiceCall(
             callID: callID,
             action: action,
             expectedRevision: expectedRevision,
-            reason: reason
+            reason: reason,
+            voiceHostSnapshot: fence
         )
+    }
+
+    private func captureVoiceHostFence(expectedScope: String?, expectedGeneration: UUID?) throws -> CSMHostCommunicationSnapshot? {
+        // Keep the standalone legacy path exact when the caller did not opt
+        // into a fence. Explicit hosts always freeze the verified actor/epoch.
+        if !model.requiresExplicitHostConsent, expectedScope == nil, expectedGeneration == nil { return nil }
+        let current = hostCommunicationSnapshot
+        guard current.enabled, !model.isLoading, let scope = current.scope, !scope.isEmpty else {
+            throw CSMVoiceCallControlError.authenticationRequired
+        }
+        switch (expectedScope, expectedGeneration) {
+        case (nil, nil): return current
+        case let (expectedScope?, expectedGeneration?):
+            guard !expectedScope.isEmpty, expectedScope == scope, expectedGeneration == current.generation else {
+                throw CSMVoiceCallControlError.authenticationRequired
+            }
+            return current
+        default: throw CSMVoiceCallControlError.authenticationRequired
+        }
+    }
+
+    private func verifyVoiceHostFence(_ captured: CSMHostCommunicationSnapshot?) throws {
+        guard let captured else { return }
+        let current = hostCommunicationSnapshot
+        guard current.enabled, !model.isLoading, current.scope == captured.scope,
+              current.generation == captured.generation else { throw CancellationError() }
     }
 
     func handlePushPayload(
