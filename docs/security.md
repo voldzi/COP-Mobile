@@ -1,5 +1,14 @@
 # Bezpečnostní baseline
 
+Čtecí `hostAuthenticationSnapshot` dokládá pouze právě ověřenou identitu COP
+a případné místní odemknutí. Vlastní ověřovací pokus se ohradí před prvním
+čekáním; neúspěšné ověření neobnoví dřívější kladný stav. Notifikace
+`.csmHostAuthenticationChanged` neobsahuje identitu ani další payload a vyžaduje
+nové načtení snapshotu. Getter nezakládá službu ani nespouští autentizaci.
+Stav není oprávněním pro komunikaci, sdílení nebo serverovou operaci; ověřený
+účet může zůstat dostupný při vypnuté komunikaci. Podrobnosti v
+[ADR 0025](adr/0025-read-only-host-authentication-witness.md).
+
 ## Stav a hranice
 
 Repozitář neposkytuje backend. Hybridní host implementuje exact-origin/main-frame

@@ -2,6 +2,7 @@
 
 - [ADR 0023: host communication activation](adr/0023-host-owned-communication-activation.md).
 - [ADR 0024: local host voice suspension](adr/0024-host-owned-voice-suspension.md).
+- [ADR 0025: read-only host authentication witness](adr/0025-read-only-host-authentication-witness.md).
 - [Host voice suspension handoff](host-voice-suspension-handoff.md): noncreating local stop, scoped resume and separate device acceptance.
 - [Jízda one-account SDK integration](../packages/CSMCommunicationKit/HOST_COMMUNICATION_ACTIVATION.md).
 

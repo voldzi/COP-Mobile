@@ -6,6 +6,49 @@ separate gates. No host source files or production systems were changed here.
 
 ## Jízda integration
 
+For nonblocking Já and account-dependent car UI, read
+`hostAuthenticationSnapshot` and observe the payloadless
+`.csmHostAuthenticationChanged` wakeup. `identityReady` means COP identity and any
+required local unlock are currently verified; `isVerifyingIdentity` covers only
+that work and does not wait for Matrix/pushers. Scope is nil until ready. Reread
+the opaque scope and SDK generation after each await; a captured value or a
+notification is not a fresh witness. Cold start, account switching and failed
+identity rechecks are unready. Communication OFF can remain identity-ready with
+a new generation. The getter creates no resources and starts no authentication.
+An ON attempt becomes verifying before its new generation is announced. Temporary
+verification is not OFF or logout and must not terminate an already admitted
+Voice service. Keep the host's `VoiceServicesAvailable` separate and set it only
+after enable completes; the existing communication snapshot remains producer
+authority as specified in the Voice handoff.
+
+For a same-owner identity recheck the exact witness is
+`identityReady=false, isVerifyingIdentity=true, scope=nil`; if that recheck fails,
+it becomes `false, false, nil`. That nil scope is never an OFF/account-change
+signal and does not revoke a completed Voice admission. A failed COP recheck can
+retain the signed-in account and its previous communication permission while the
+authoritative fresh communication snapshot remains enabled with matching actual
+Voice owner and epoch. Continue to use that snapshot (`enabled`, scope, generation
+and pending registration removal) for already admitted services. A required
+biometric failure can legitimately lock the session and change that authority.
+OFF, logout or a real account/generation change is handled by the existing authority.
+Only a new pending admission waits for the new verified identity witness.
+
+The auth-witness addition is validated source over published
+`7fbe8878d7a47d39fc3eff11a642511df99281be`: targeted 72/72 and the mandatory
+`scripts/check.sh` both finished with terminal exit 0. The complete XCTest
+package considered 292 tests (290 passed, 2 known skips, no failures); app unit
+30, app UI 5, Swift Testing 2 and accessibility 2 passed. The first 72/1 fixture
+failure and its exact correction are retained in [ADR 0025](../../docs/adr/0025-read-only-host-authentication-witness.md).
+Use the immutable source commit delivered with this document. Publication,
+Jízda vendor integration and physical-device acceptance are separate results;
+the native tests do not establish host or physical-device acceptance.
+
+Keep the host's own pending-enable operation ticket. This witness permits account
+presentation, not communication: producer activation still needs a fresh
+`hostCommunicationSnapshot.enabled`, matching scope/generation and confirmed
+registration state. Do not turn identity readiness into another login or bypass
+the existing communication/Voice fences. See [ADR 0025](../../docs/adr/0025-read-only-host-authentication-witness.md).
+
 1. Compare the eventual exact SDK revision against Jízda's recorded vendor
    provenance first. Its newer host deltas (`expectedNotificationScope`, send
    acknowledgement, `onAccountProfileRequested` and call/account fences) must be

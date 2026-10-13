@@ -50,6 +50,14 @@ final class CommunicationModel {
     private(set) var hostCommunicationEnabled = false
     private(set) var hostRegistrationRemovalPending = false
     @ObservationIgnored private var hostIdentityVerified = false
+    // Separate UI witness. Never used as producer or authorization permission.
+    @ObservationIgnored private var hostAuthenticationAttempt = UUID()
+    @ObservationIgnored private var hostAuthenticationVerifiedSubject: String?
+    private(set) var hostAuthenticationIsVerifyingIdentity = false
+    var hostAuthenticationIdentityReady: Bool {
+        authState == .signedIn && !hostAuthenticationIsVerifyingIdentity &&
+            actor?.subjectId != nil && actor?.subjectId == hostAuthenticationVerifiedSubject
+    }
     @ObservationIgnored private let hostConsentDefaults: UserDefaults
     @ObservationIgnored private var hostProducerTeardownTask: Task<Void, Never>?
     @ObservationIgnored private var hostProducerTeardownTaskID: UUID?
@@ -73,6 +81,7 @@ final class CommunicationModel {
                 jizdaLinkLocallySuspended = false
                 hostCommunicationEnabled = false
                 hostIdentityVerified = false
+                invalidateHostAuthenticationWitness(preserveVerification: newValue == .signedIn)
             }
             chatSessionStore.update(
                 authState: newValue,
@@ -81,7 +90,7 @@ final class CommunicationModel {
                 deviceID: messagingDeviceId
             )
             if measurementSessionChanged { NotificationCenter.default.post(name: .csmDriverMeasurementSessionChanged, object: nil) }
-            if measurementSessionChanged { NotificationCenter.default.post(name: .csmMobilitySessionChanged, object: nil); publishJizdaLifecycleReadiness() }
+            if measurementSessionChanged { NotificationCenter.default.post(name: .csmMobilitySessionChanged, object: nil); publishJizdaLifecycleReadiness(); publishHostAuthenticationWitness() }
         }
     }
     private(set) var connectionMode: ConnectionMode = .offline
@@ -101,6 +110,7 @@ final class CommunicationModel {
                 matrixLocalRecoveryErrorText = nil
                 messagingTransportReadyForPusher = false
                 hostIdentityVerified = false
+                invalidateHostAuthenticationWitness(preserveVerification: newValue != nil)
                 if let subject = newValue?.subjectId {
                     let key = hostConsentStorageKey(subject: subject)
                     hostCommunicationEnabled = hostConsentDefaults.bool(forKey: key)
@@ -124,7 +134,7 @@ final class CommunicationModel {
                 deviceID: messagingDeviceId
             )
             if measurementSessionChanged { NotificationCenter.default.post(name: .csmDriverMeasurementSessionChanged, object: nil) }
-            if measurementSessionChanged { NotificationCenter.default.post(name: .csmMobilitySessionChanged, object: nil); publishJizdaLifecycleReadiness() }
+            if measurementSessionChanged { NotificationCenter.default.post(name: .csmMobilitySessionChanged, object: nil); publishJizdaLifecycleReadiness(); publishHostAuthenticationWitness() }
         }
     }
     private(set) var policy: MobileNativePolicy?
@@ -451,6 +461,36 @@ final class CommunicationModel {
               generation: jizdaLifecycleSnapshot.generation, scope: scope)
     }
 
+    private func publishHostAuthenticationWitness() {
+        NotificationCenter.default.post(name: .csmHostAuthenticationChanged, object: nil)
+    }
+
+    private func invalidateHostAuthenticationWitness(preserveVerification: Bool = false) {
+        hostAuthenticationVerifiedSubject = nil
+        if !preserveVerification { hostAuthenticationIsVerifyingIdentity = false }
+        publishHostAuthenticationWitness()
+    }
+
+    private func beginHostAuthenticationVerification() -> UUID {
+        hostAuthenticationAttempt = UUID()
+        hostAuthenticationVerifiedSubject = nil
+        hostAuthenticationIsVerifyingIdentity = true
+        publishHostAuthenticationWitness()
+        return hostAuthenticationAttempt
+    }
+
+    private func finishHostAuthenticationVerification(_ attempt: UUID, verifiedSubject: String? = nil) {
+        guard hostAuthenticationAttempt == attempt else { return }
+        hostAuthenticationVerifiedSubject = verifiedSubject
+        hostAuthenticationIsVerifyingIdentity = false
+        publishHostAuthenticationWitness()
+    }
+
+    private func finishUnverifiedHostAuthenticationAttempt(_ attempt: UUID) {
+        guard hostAuthenticationAttempt == attempt, hostAuthenticationIsVerifyingIdentity else { return }
+        finishHostAuthenticationVerification(attempt)
+    }
+
     func setHostCommunicationEnabled(_ enabled: Bool) async throws {
         guard appConfiguration.communicationActivationPolicy == .explicitHostConsent,
               authState == .signedIn, hostIdentityVerified, let owner = actor?.subjectId else {
@@ -463,12 +503,16 @@ final class CommunicationModel {
             guard !hostRegistrationRemovalPending else {
                 throw CSMServiceError.unavailable("Odregistrace oznámení ještě není potvrzena. Zkuste ji obnovit.")
             }
+            // Invalidate the old read-only proof before publishing the new
+            // activation generation. Synchronous host wakeups must not admit
+            // an earlier identity proof as this attempt's fresh verification.
+            let authenticationAttempt = beginHostAuthenticationVerification()
             hostCommunicationEnabled = true
             hostConsentDefaults.set(true, forKey: key)
             jizdaLinkLocallySuspended = false
             jizdaLifecyclePolicy.resetAccount()
             publishHostCommunicationConsent()
-            await bootstrapCommunication()
+            await bootstrapCommunication(authenticationAttempt: authenticationAttempt)
             guard authState == .signedIn, actor?.subjectId == owner else { throw CSMCOPSessionError(.accountChanged) }
             return
         }
@@ -563,6 +607,7 @@ final class CommunicationModel {
         NotificationCenter.default.post(name: .csmDriverMeasurementSessionChanged, object: nil)
         NotificationCenter.default.post(name: .csmMobilitySessionChanged, object: nil)
         publishJizdaLifecycleReadiness()
+        publishHostAuthenticationWitness()
     }
 
     func permitsCommunicationProducers(epoch: UUID) -> Bool {
@@ -721,10 +766,16 @@ final class CommunicationModel {
     func start(authenticationOnly: Bool = false) async {
         Self.recordDeviceRegistrationDiagnostic("runtime_starting")
         authState = .checking
-        if await authSession.canUseExistingSession() {
+        let attempt = beginHostAuthenticationVerification()
+        defer { finishUnverifiedHostAuthenticationAttempt(attempt) }
+        let epoch = jizdaLifecycleSnapshot.generation
+        let usable = await authSession.canUseExistingSession()
+        guard hostAuthenticationAttempt == attempt, epoch == jizdaLifecycleSnapshot.generation,
+              authState == .checking else { return }
+        if usable {
             Self.recordDeviceRegistrationDiagnostic("session_restored")
             authState = .signedIn
-            await bootstrapCommunication(authenticationOnly: authenticationOnly)
+            await bootstrapCommunication(authenticationOnly: authenticationOnly, authenticationAttempt: attempt)
         } else {
             Self.recordDeviceRegistrationDiagnostic("session_signed_out")
             authState = .signedOut
@@ -866,13 +917,21 @@ final class CommunicationModel {
 
     func signIn(forceAuthentication: Bool = false, loginHint: String? = nil, authenticationOnly: Bool = false) async {
         authState = .signingIn
+        let attempt = beginHostAuthenticationVerification()
+        let epoch = jizdaLifecycleSnapshot.generation
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            if hostAuthenticationAttempt == attempt { isLoading = false }
+            finishUnverifiedHostAuthenticationAttempt(attempt)
+        }
         do {
             try await authSession.signIn(forceAuthentication: forceAuthentication, loginHint: loginHint)
+            guard hostAuthenticationAttempt == attempt, epoch == jizdaLifecycleSnapshot.generation,
+                  authState == .signingIn else { return }
             authState = .signedIn
-            await bootstrapCommunication(authenticationOnly: authenticationOnly)
+            await bootstrapCommunication(authenticationOnly: authenticationOnly, authenticationAttempt: attempt)
         } catch {
+            guard hostAuthenticationAttempt == attempt, epoch == jizdaLifecycleSnapshot.generation else { return }
             authState = .signedOut
             lastError = error.localizedDescription
         }
@@ -983,12 +1042,18 @@ final class CommunicationModel {
 
     func refreshSession(authenticationOnly: Bool = false) async {
         guard authState == .signedIn else { return }
-        guard await authSession.canUseExistingSession() else {
+        let attempt = beginHostAuthenticationVerification()
+        defer { finishUnverifiedHostAuthenticationAttempt(attempt) }
+        let epoch = jizdaLifecycleSnapshot.generation
+        let usable = await authSession.canUseExistingSession()
+        guard hostAuthenticationAttempt == attempt, epoch == jizdaLifecycleSnapshot.generation,
+              authState == .signedIn else { return }
+        guard usable else {
             authState = .signedOut
             connectionMode = .offline
             return
         }
-        await bootstrapCommunication(authenticationOnly: authenticationOnly)
+        await bootstrapCommunication(authenticationOnly: authenticationOnly, authenticationAttempt: attempt)
     }
 
     func unlockSession() async {
@@ -1039,18 +1104,29 @@ final class CommunicationModel {
         }
     }
 
-    private func bootstrapCommunication(authenticationOnly: Bool = false) async {
+    private func bootstrapCommunication(authenticationOnly: Bool = false, authenticationAttempt: UUID? = nil) async {
+        let attempt = authenticationAttempt ?? beginHostAuthenticationVerification()
+        guard hostAuthenticationAttempt == attempt else { return }
         let initialEpoch = jizdaLifecycleSnapshot.generation
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            if hostAuthenticationAttempt == attempt {
+                isLoading = false
+                finishUnverifiedHostAuthenticationAttempt(attempt)
+            }
+        }
         do {
             let bootstrap = try await api.bootstrap(seconds: 180)
-            guard initialEpoch == jizdaLifecycleSnapshot.generation, authState == .signedIn else { return }
+            guard hostAuthenticationAttempt == attempt, initialEpoch == jizdaLifecycleSnapshot.generation,
+                  authState == .signedIn else { return }
             try await enforceSecurityUnlockIfRequired(
                 by: bootstrap.policy,
-                subjectId: bootstrap.actor.subjectId
+                subjectId: bootstrap.actor.subjectId,
+                authenticationAttempt: attempt,
+                authenticationEpoch: initialEpoch
             )
-            guard initialEpoch == jizdaLifecycleSnapshot.generation, authState == .signedIn else { return }
+            guard hostAuthenticationAttempt == attempt, initialEpoch == jizdaLifecycleSnapshot.generation,
+                  authState == .signedIn else { return }
             actor = bootstrap.actor
             policy = bootstrap.policy
             userProfile = bootstrap.profile
@@ -1076,6 +1152,7 @@ final class CommunicationModel {
             // availability states; they must not keep the host behind an auth
             // spinner. Runtime preparation still awaits the complete start task.
             isLoading = false
+            finishHostAuthenticationVerification(attempt, verifiedSubject: bootstrap.actor.subjectId)
             guard !authenticationOnly, hostCommunicationPermitted else { return }
             guard await ensureJizdaLifecycleReady(force: true) else { return }
             let epoch = jizdaLifecycleSnapshot.generation
@@ -1090,6 +1167,7 @@ final class CommunicationModel {
             await refreshConversations()
             await flushCommunityReportOutbox()
         } catch {
+            guard hostAuthenticationAttempt == attempt else { return }
             if authState == .signedOut || authState == .locked {
                 connectionMode = .offline
             } else {
@@ -1753,7 +1831,16 @@ final class CommunicationModel {
         return value
     }
 
-    private func enforceSecurityUnlockIfRequired(by policy: MobileNativePolicy, subjectId: String) async throws {
+    private func enforceSecurityUnlockIfRequired(by policy: MobileNativePolicy, subjectId: String,
+                                                authenticationAttempt: UUID? = nil,
+                                                authenticationEpoch: UUID? = nil) async throws {
+        func verifyAttempt() throws {
+            if let authenticationAttempt {
+                guard hostAuthenticationAttempt == authenticationAttempt, authState == .signedIn,
+                      authenticationEpoch == jizdaLifecycleSnapshot.generation else { throw CancellationError() }
+            }
+        }
+        try verifyAttempt()
         guard policy.requireBiometricUnlock else { return }
 
         await appendEvent(
@@ -1762,18 +1849,22 @@ final class CommunicationModel {
             subjectIdOverride: subjectId,
             metadata: ["method": "biometric"]
         )
+        try verifyAttempt()
 
         do {
             try await securityUnlock.requireUnlock(
                 reason: "CSM Messenger potrebuje potvrdit identitu pred zobrazenim krizovych dat."
             )
+            try verifyAttempt()
             await appendEvent(
                 kind: .localUnlockSucceeded,
                 summary: "Lokalni biometricke odemknuti potvrzeno.",
                 subjectIdOverride: subjectId,
                 metadata: ["method": "biometric"]
             )
+            try verifyAttempt()
         } catch {
+            try verifyAttempt()
             // A local biometric cancellation locks protected content; it is
             // not an OIDC logout and must never erase the refresh token.
             authState = .locked

@@ -22,11 +22,12 @@ final class HostCommunicationConsentTests: XCTestCase {
                        registry: (any CSMMessagingDeviceRegistering)? = nil,
                        cleanup: ConsentCleanupStore = ConsentCleanupStore(),
                        cleanupHTTP: ConsentCleanupHTTP = ConsentCleanupHTTP(),
-                       outbox: (any MessageOutboxStoring)? = nil) -> CommunicationModel {
+                       outbox: (any MessageOutboxStoring)? = nil,
+                       securityUnlock: any SecurityUnlockManaging = PreviewSecurityUnlock()) -> CommunicationModel {
         CommunicationModel(appConfiguration: configuration(mode), api: api, messaging: messaging,
             messageOutbox: outbox,
             localAI: DeterministicLocalAIService(), pushNotifications: push,
-            messagingDeviceRegistration: registry, authSession: auth, securityUnlock: PreviewSecurityUnlock(),
+            messagingDeviceRegistration: registry, authSession: auth, securityUnlock: securityUnlock,
             hostConsentDefaults: defaults, hostPusherCleanupStore: cleanup, hostPusherCleanupHTTP: cleanupHTTP)
     }
 
@@ -538,6 +539,186 @@ final class HostCommunicationConsentTests: XCTestCase {
         }
     }
 
+    func testAuthenticationWitnessReadsCreateNoResourcesAndWakeupsCarryNoPayload() async throws {
+        let api = ConsentAPI(), push = ConsentPush(), auth = ConsentAuth(), messaging = ConsentMessaging()
+        let outbox = ConsentOutbox()
+        let value = model(api: api, push: push, auth: auth, messaging: messaging, defaults: isolatedDefaults(), outbox: outbox)
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
+        let wakeups = AuthenticationWakeups()
+        let observer = NotificationCenter.default.addObserver(forName: .csmHostAuthenticationChanged, object: nil, queue: nil) { wakeups.record($0) }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        for _ in 0..<20 {
+            let snapshot = runtime.hostAuthenticationSnapshot
+            XCTAssertFalse(snapshot.identityReady); XCTAssertFalse(snapshot.isVerifyingIdentity); XCTAssertNil(snapshot.scope)
+        }
+        XCTAssertEqual(wakeups.count, 0)
+        XCTAssertEqual(auth.restoreCount, 0); XCTAssertEqual(auth.signInCount, 0); XCTAssertEqual(push.prepareCount, 0)
+        let coldBootstrap = await api.bootstrapCount, coldMatrix = await api.messagingCount, coldOutbox = await outbox.readCount
+        XCTAssertEqual(coldBootstrap, 0); XCTAssertEqual(coldMatrix, 0); XCTAssertEqual(coldOutbox, 0)
+        await runtime.prepareAuthentication()
+        let snapshot = runtime.hostAuthenticationSnapshot
+        XCTAssertTrue(snapshot.identityReady); XCTAssertFalse(snapshot.isVerifyingIdentity)
+        XCTAssertEqual(snapshot.scope, runtime.mobilitySessionScope())
+        XCTAssertEqual(snapshot.generation, runtime.hostCommunicationSnapshot.generation)
+        XCTAssertFalse(runtime.hostCommunicationSnapshot.enabled)
+        XCTAssertGreaterThan(wakeups.count, 0); XCTAssertFalse(wakeups.hasPayload)
+        let matrix = await api.messagingCount, configurations = await messaging.configurationCount, reads = await outbox.readCount
+        XCTAssertEqual(matrix, 0); XCTAssertEqual(configurations, 0); XCTAssertEqual(reads, 0); XCTAssertEqual(push.prepareCount, 0)
+    }
+
+    func testAuthenticationWitnessWaitsForCOPIdentityAndRequiredLocalUnlock() async throws {
+        let api = ConsentAPI(), push = ConsentPush(), auth = ConsentAuth(), messaging = ConsentMessaging()
+        let bootstrapPause = ConsentPause(), unlockPause = ConsentPause(), unlock = ConsentSecurityUnlock(pause: unlockPause)
+        await api.requireBiometricUnlock(true)
+        await api.pauseBootstrap(bootstrapPause)
+        let value = model(api: api, push: push, auth: auth, messaging: messaging, defaults: isolatedDefaults(), securityUnlock: unlock)
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
+        let preparing = Task { await runtime.prepareAuthentication() }
+        try await waitAsync { await bootstrapPause.entered }
+        XCTAssertFalse(runtime.hostAuthenticationSnapshot.identityReady)
+        XCTAssertTrue(runtime.hostAuthenticationSnapshot.isVerifyingIdentity); XCTAssertNil(runtime.hostAuthenticationSnapshot.scope)
+        await bootstrapPause.release()
+        try await waitAsync { await unlockPause.entered }
+        XCTAssertFalse(runtime.hostAuthenticationSnapshot.identityReady)
+        XCTAssertTrue(runtime.hostAuthenticationSnapshot.isVerifyingIdentity); XCTAssertEqual(unlock.count, 1)
+        XCTAssertEqual(push.prepareCount, 0)
+        let matrixBeforeUnlock = await api.messagingCount
+        XCTAssertEqual(matrixBeforeUnlock, 0)
+        await unlockPause.release(); await preparing.value
+        XCTAssertTrue(runtime.hostAuthenticationSnapshot.identityReady)
+        XCTAssertFalse(runtime.hostAuthenticationSnapshot.isVerifyingIdentity)
+    }
+
+    func testAuthenticationWitnessIsReadyWhileExplicitEnableWaitsForMatrix() async throws {
+        let api = ConsentAPI(), push = ConsentPush(), auth = ConsentAuth(), messaging = ConsentMessaging()
+        let value = model(api: api, push: push, auth: auth, messaging: messaging, defaults: isolatedDefaults())
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
+        await runtime.prepareAuthentication()
+        let before = runtime.hostAuthenticationSnapshot, scope = try XCTUnwrap(before.scope), pause = ConsentPause()
+        await api.pauseMessaging(pause)
+        let enabling = Task { try await runtime.setHostCommunicationEnabled(true, expectedScope: scope) }
+        try await waitAsync { await pause.entered }
+        let fresh = runtime.hostAuthenticationSnapshot
+        XCTAssertTrue(fresh.identityReady); XCTAssertFalse(fresh.isVerifyingIdentity); XCTAssertEqual(fresh.scope, scope)
+        XCTAssertNotEqual(fresh.generation, before.generation)
+        XCTAssertEqual(fresh.generation, runtime.hostCommunicationSnapshot.generation)
+        // Reading the witness cannot create another Matrix or push attempt.
+        let matrixBefore = await api.messagingCount, pushBefore = push.prepareCount
+        for _ in 0..<20 { _ = runtime.hostAuthenticationSnapshot }
+        let matrixAfter = await api.messagingCount
+        XCTAssertEqual(matrixAfter, matrixBefore); XCTAssertEqual(push.prepareCount, pushBefore)
+        await pause.release(); _ = try await enabling.value
+    }
+
+    func testEnableWakeupCannotExposeOldIdentityProofForItsNewGeneration() async throws {
+        let api = ConsentAPI(), cop = ConsentPause(), localUnlock = ConsentPause(), matrix = ConsentPause()
+        let unlock = ConsentSecurityUnlock(pause: localUnlock)
+        let value = model(api: api, push: ConsentPush(), auth: ConsentAuth(), messaging: ConsentMessaging(), defaults: isolatedDefaults(), securityUnlock: unlock)
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
+        await runtime.prepareAuthentication()
+        let before = runtime.hostAuthenticationSnapshot, scope = try XCTUnwrap(before.scope)
+        await api.requireBiometricUnlock(true); await api.pauseBootstrap(cop); await api.pauseMessaging(matrix)
+        let observed = AuthenticationSnapshots()
+        let observer = NotificationCenter.default.addObserver(forName: .csmHostCommunicationConsentChanged, object: nil, queue: nil) { _ in
+            MainActor.assumeIsolated {
+                let fresh = runtime.hostAuthenticationSnapshot
+                if fresh.generation != before.generation { observed.record(fresh) }
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        let enabling = Task { try await runtime.setHostCommunicationEnabled(true, expectedScope: scope) }
+        try await waitAsync { await cop.entered }
+        let syncWakeup = try XCTUnwrap(observed.snapshots.first)
+        XCTAssertNotEqual(syncWakeup.generation, before.generation)
+        XCTAssertEqual(syncWakeup.generation, runtime.hostCommunicationSnapshot.generation)
+        XCTAssertFalse(syncWakeup.identityReady); XCTAssertTrue(syncWakeup.isVerifyingIdentity); XCTAssertNil(syncWakeup.scope)
+        await cop.release()
+        try await waitAsync { await localUnlock.entered }
+        XCTAssertFalse(runtime.hostAuthenticationSnapshot.identityReady)
+        XCTAssertTrue(runtime.hostAuthenticationSnapshot.isVerifyingIdentity)
+        await localUnlock.release()
+        try await waitAsync { await matrix.entered }
+        let verified = runtime.hostAuthenticationSnapshot
+        XCTAssertTrue(verified.identityReady); XCTAssertFalse(verified.isVerifyingIdentity)
+        XCTAssertEqual(verified.scope, scope); XCTAssertEqual(verified.generation, syncWakeup.generation)
+        await matrix.release(); _ = try await enabling.value
+    }
+
+    func testFailedOwnIdentityRecheckNeverReusesEarlierProof() async throws {
+        let api = ConsentAPI(), auth = ConsentAuth()
+        let value = model(api: api, push: ConsentPush(), auth: auth, messaging: ConsentMessaging(), defaults: isolatedDefaults())
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
+        await runtime.prepareAuthentication()
+        let old = runtime.hostAuthenticationSnapshot, pause = ConsentPause()
+        XCTAssertTrue(old.identityReady)
+        auth.nextRestorePause = pause
+        await api.failNextBootstrap()
+        let rechecking = Task { await value.refreshSession(authenticationOnly: true) }
+        try await waitAsync { await pause.entered }
+        XCTAssertFalse(runtime.hostAuthenticationSnapshot.identityReady)
+        XCTAssertTrue(runtime.hostAuthenticationSnapshot.isVerifyingIdentity); XCTAssertNil(runtime.hostAuthenticationSnapshot.scope)
+        await pause.release(); await rechecking.value
+        XCTAssertEqual(value.authState, .signedIn)
+        XCTAssertFalse(runtime.hostAuthenticationSnapshot.identityReady)
+        XCTAssertFalse(runtime.hostAuthenticationSnapshot.isVerifyingIdentity); XCTAssertNil(runtime.hostAuthenticationSnapshot.scope)
+        await value.refreshSession(authenticationOnly: true)
+        XCTAssertTrue(runtime.hostAuthenticationSnapshot.identityReady)
+        XCTAssertEqual(runtime.hostAuthenticationSnapshot.scope, old.scope)
+    }
+
+    func testOldIdentityCompletionAndDeferCannotFinishNewAccountVerification() async throws {
+        for duringUnlock in [false, true] {
+            let api = ConsentAPI(), a = ConsentPause(), b = ConsentPause()
+            let unlock = ConsentSecurityUnlock(pause: a, shouldFail: duringUnlock)
+            let value = model(api: api, push: ConsentPush(), auth: ConsentAuth(), messaging: ConsentMessaging(), defaults: isolatedDefaults(), securityUnlock: unlock)
+            let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
+            await runtime.prepareAuthentication()
+            let old = runtime.hostAuthenticationSnapshot
+            if duringUnlock { await api.requireBiometricUnlock(true) }
+            else { await api.pauseBootstrap(a) }
+            let oldRefresh = Task { await value.refreshSession(authenticationOnly: true) }
+            try await waitAsync { await a.entered }
+            await api.requireBiometricUnlock(false)
+            await api.selectSubject("synthetic-account-b"); await api.pauseBootstrap(b)
+            let newLogin = Task { await value.signIn(authenticationOnly: true) }
+            try await waitAsync { await b.entered }
+            let verifyingB = runtime.hostAuthenticationSnapshot
+            await a.release(); await oldRefresh.value
+            let afterA = runtime.hostAuthenticationSnapshot
+            XCTAssertFalse(afterA.identityReady); XCTAssertTrue(afterA.isVerifyingIdentity); XCTAssertNil(afterA.scope)
+            XCTAssertEqual(afterA.generation, verifyingB.generation); XCTAssertTrue(value.isLoading)
+            XCTAssertEqual(value.authState, .signedIn)
+            await b.release(); await newLogin.value
+            let readyB = runtime.hostAuthenticationSnapshot
+            XCTAssertTrue(readyB.identityReady); XCTAssertFalse(readyB.isVerifyingIdentity)
+            XCTAssertNotEqual(readyB.scope, old.scope); XCTAssertNotEqual(readyB.generation, old.generation)
+            XCTAssertEqual(value.actor?.subjectId, "synthetic-account-b")
+        }
+    }
+
+    func testTurningCommunicationOffPreservesIdentityWithFreshGenerationAndRouting() async throws {
+        let api = ConsentAPI(), auth = ConsentAuth(), push = ConsentPush(), messaging = ConsentMessaging()
+        let value = model(api: api, push: push, auth: auth, messaging: messaging, defaults: isolatedDefaults())
+        let runtime = CSMCommunicationRuntime(model: value, driverReportService: DriverReportService(api: api))
+        await runtime.prepareAuthentication()
+        let scope = try XCTUnwrap(runtime.hostAuthenticationSnapshot.scope)
+        _ = try await runtime.setHostCommunicationEnabled(true, expectedScope: scope)
+        let enabled = runtime.hostAuthenticationSnapshot
+        _ = try await runtime.setHostCommunicationEnabled(false, expectedScope: scope)
+        let stopped = runtime.hostAuthenticationSnapshot
+        XCTAssertTrue(stopped.identityReady); XCTAssertFalse(stopped.isVerifyingIdentity); XCTAssertEqual(stopped.scope, scope)
+        XCTAssertNotEqual(stopped.generation, enabled.generation)
+        XCTAssertEqual(stopped.generation, runtime.hostCommunicationSnapshot.generation)
+        XCTAssertFalse(runtime.hostCommunicationSnapshot.enabled)
+        let before = await api.messagingCount, catalogBefore = await api.catalogCount
+        do { _ = try await runtime.drivingCapabilities(); XCTFail("The synthetic catalog is intentionally unavailable") }
+        catch CSMDriverRoutingError.safetyRequirementsUnavailable { }
+        let after = await api.messagingCount, catalogAfter = await api.catalogCount
+        XCTAssertEqual(catalogAfter, catalogBefore + 1)
+        XCTAssertEqual(value.authState, .signedIn); XCTAssertTrue(runtime.hostAuthenticationSnapshot.identityReady)
+        XCTAssertEqual(after, before); XCTAssertEqual(auth.signInCount, 0); XCTAssertEqual(auth.signOutCount, 0)
+    }
+
     private func waitAsync(_ condition: () async -> Bool) async throws {
         for _ in 0..<200 {
             if await condition() { return }
@@ -571,6 +752,34 @@ final class HostCommunicationConsentTests: XCTestCase {
     func signIn() async throws { existing = true; signInCount += 1 }
     func signOut() async throws { existing = false; signOutCount += 1 }
 }
+
+@MainActor private final class ConsentSecurityUnlock: SecurityUnlockManaging {
+    var count = 0
+    let pause: ConsentPause
+    let shouldFail: Bool
+    init(pause: ConsentPause, shouldFail: Bool = false) { self.pause = pause; self.shouldFail = shouldFail }
+    func requireUnlock(reason: String) async throws {
+        count += 1; await pause.wait()
+        if shouldFail { throw URLError(.userAuthenticationRequired) }
+    }
+}
+
+private final class AuthenticationWakeups: @unchecked Sendable {
+    private let lock = NSLock()
+    private var received = 0, payload = false
+    var count: Int { lock.withLock { received } }
+    var hasPayload: Bool { lock.withLock { payload } }
+    func record(_ notification: Notification) {
+        lock.withLock { received += 1; payload = payload || notification.object != nil || notification.userInfo != nil }
+    }
+}
+
+private final class AuthenticationSnapshots: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [CSMHostAuthenticationSnapshot] = []
+    var snapshots: [CSMHostAuthenticationSnapshot] { lock.withLock { values } }
+    func record(_ snapshot: CSMHostAuthenticationSnapshot) { lock.withLock { values.append(snapshot) } }
+}
 @MainActor private final class ConsentPush: PushNotificationManaging {
     var currentSnapshot = MobilePushSnapshot.unavailable
     var prepareCount = 0
@@ -601,14 +810,21 @@ private actor ConsentAPI: CopAPIClientProtocol {
     var voiceControlCount: Int { voiceStartCount + voiceListCount + voiceLookupCount + voiceTransitionCount }
     var subject = "synthetic-account-a"
     var bootstrapPause: ConsentPause?, messagingPause: ConsentPause?
+    var bootstrapShouldFail = false, requiresBiometricUnlock = false
+    func failNextBootstrap() { bootstrapShouldFail = true }
+    func requireBiometricUnlock(_ required: Bool) { requiresBiometricUnlock = required }
     func pauseBootstrap(_ pause: ConsentPause) { bootstrapPause = pause }
     func pauseMessaging(_ pause: ConsentPause) { messagingPause = pause }
     func selectSubject(_ subject: String) { self.subject = subject }
     func bootstrap(seconds: Int) async throws -> MobileBootstrap {
         bootstrapCount += 1
+        let responseSubject = subject, fail = bootstrapShouldFail, biometric = requiresBiometricUnlock
+        bootstrapShouldFail = false
         if let pause = bootstrapPause { bootstrapPause = nil; await pause.wait() }
+        if fail { throw CSMServiceError.unavailable("Synthetic identity verification outage") }
         var value = try await PreviewCopAPIClient().bootstrap(seconds: seconds)
-        value.actor.subjectId = subject
+        value.actor.subjectId = responseSubject
+        value.policy.requireBiometricUnlock = biometric
         value.capabilities.pushNotifications = true
         return value
     }
