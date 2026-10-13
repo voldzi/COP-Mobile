@@ -82,7 +82,7 @@ public extension CSMCommunicationRuntime {
     /// Returns only user-facing metadata suitable for a glanceable in-car list.
     func carPlayConversations(limit: Int = 8) async throws -> [CSMCarPlayConversation] {
         await startIfNeeded()
-        guard model.authState == .signedIn else {
+        guard model.communicationProducersPermitted else {
             throw CSMCarPlayCommunicationError.authenticationRequired
         }
 
@@ -107,7 +107,8 @@ public extension CSMCommunicationRuntime {
     /// Loads a bounded timeline through the existing encrypted messaging runtime.
     func carPlayMessages(conversationID: String, limit: Int = 10) async throws -> [CSMCarPlayMessage] {
         await startIfNeeded()
-        guard model.authState == .signedIn else {
+        let epoch = model.jizdaLifecycleSnapshot.generation
+        guard model.permitsCommunicationProducers(epoch: epoch) else {
             throw CSMCarPlayCommunicationError.authenticationRequired
         }
         guard let conversation = model.visibleConversations.first(where: { $0.conversationId == conversationID }) else {
@@ -115,6 +116,7 @@ public extension CSMCommunicationRuntime {
         }
 
         await model.selectConversation(conversation)
+        guard model.permitsCommunicationProducers(epoch: epoch) else { throw CSMCarPlayCommunicationError.authenticationRequired }
         return model.messages
             .filter { !$0.isDeleted }
             .suffix(max(0, limit))
@@ -139,7 +141,8 @@ public extension CSMCommunicationRuntime {
         }
 
         await startIfNeeded()
-        guard model.authState == .signedIn else {
+        let epoch = model.jizdaLifecycleSnapshot.generation
+        guard model.permitsCommunicationProducers(epoch: epoch) else {
             throw CSMCarPlayCommunicationError.authenticationRequired
         }
         guard let conversation = model.visibleConversations.first(where: { $0.conversationId == conversationID }) else {
@@ -147,9 +150,11 @@ public extension CSMCommunicationRuntime {
         }
 
         await model.selectConversation(conversation)
+        guard model.permitsCommunicationProducers(epoch: epoch) else { throw CSMCarPlayCommunicationError.authenticationRequired }
         guard await model.sendMessage(normalizedBody) else {
             throw CSMCarPlayCommunicationError.sendFailed
         }
+        guard model.permitsCommunicationProducers(epoch: epoch) else { throw CSMCarPlayCommunicationError.authenticationRequired }
 
         let sent = model.messages.last(where: {
             $0.isOwnMessage && $0.body == normalizedBody && !$0.isDeleted

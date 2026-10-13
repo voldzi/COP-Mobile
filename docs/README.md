@@ -1,5 +1,8 @@
 # COP Mobile Documentation
 
+- [ADR 0023: host communication activation](adr/0023-host-owned-communication-activation.md).
+- [Jízda one-account SDK integration](../packages/CSMCommunicationKit/HOST_COMMUNICATION_ACTIVATION.md).
+
 - [Jízda lifecycle completion and v2 transfer](integration/JIZDA_LIFECYCLE_COMPLETION.md).
 
 Toto je aktivní dokumentační sada pro tenký nativní host COP. Historické a

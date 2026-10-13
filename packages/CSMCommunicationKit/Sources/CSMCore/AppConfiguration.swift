@@ -19,6 +19,8 @@ struct AppConfiguration: Sendable, Equatable {
     var oidcScope: String
     var resetStateForUITesting: Bool
     var appScope: String? = nil
+    var communicationActivationPolicy: CSMCommunicationActivationPolicy = .automatic
+    var hostBundleID: String = "cz.voldzi.copmobile"
 
     static let preview = AppConfiguration(
         copBaseURL: URL(string: "https://cop.zeleznalady.cz")!,
@@ -82,7 +84,9 @@ struct AppConfiguration: Sendable, Equatable {
             oidcRedirectScheme: redirectScheme ?? preview.oidcRedirectScheme,
             oidcScope: scope ?? preview.oidcScope,
             resetStateForUITesting: resetStateForUITesting,
-            appScope: info["CSMAppScope"] as? String
+            appScope: info["CSMAppScope"] as? String,
+            communicationActivationPolicy: .fromBundleValue(info["CSMCommunicationActivationPolicy"]),
+            hostBundleID: info["CFBundleIdentifier"] as? String ?? "cz.voldzi.copmobile"
         )
     }
 

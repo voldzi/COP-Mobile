@@ -261,3 +261,10 @@ Typed local-store diagnostics are scoped to the Matrix provider/homeserver/user/
 ## Matrix submission ownership and trust
 
 The encrypted journal binds account/device and original Matrix room. Configuration revision checks after awaited persistence/removal prevent a late old-account result entering a new session. Unknown SDK submissions cannot be blindly retried or normally discarded; trust-required failures do not authorize ignoreDeviceTrustAndResend or verification withdrawal. Preserve history/crypto/outbox on sign-out. Older SDK downgrade may bypass the journal and is prohibited with tracked pending drafts. See [delivery handoff](matrix-delivery-acceptance-handoff.md).
+# Explicit host communication activation
+
+The opt-in host boundary and private, installation-owned pusher cleanup are
+defined in [ADR 0023](adr/0023-host-owned-communication-activation.md). Local
+feature disable preserves OIDC and encrypted history and never asserts remote
+grant revocation or account deletion. Unknown policy, identity mismatch and
+unconfirmed removal fail closed for optional producers.

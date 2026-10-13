@@ -501,3 +501,9 @@ Whole Jízda integration requires the complete SDK union, not only identity3f: [
 ## Explicit local Matrix recovery
 
 The shared runtime adds typed `localChatStoreFailure`, `isRecoveringChatStore` and explicit `recoverChatStore(authorization:confirmed:)`; the existing authenticated messaging bootstrap accepts the new device ID. No COP REST/Device API contract changed. HTTP 401 retains normal same-device refresh; 429/503 do not trigger recovery. See [the complete Swift interface and acceptance](matrix-store-recovery-handoff.md).
+# Host authentication and activation facade
+
+The additive Swift authentication/activation API is documented in
+[HOST_COMMUNICATION_ACTIVATION](../packages/CSMCommunicationKit/HOST_COMMUNICATION_ACTIVATION.md).
+It consumes existing COP/Matrix endpoints; no new REST endpoint or OAuth client is
+introduced. The COP OpenAPI remains authoritative.

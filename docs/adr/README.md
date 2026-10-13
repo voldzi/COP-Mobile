@@ -41,3 +41,5 @@ Use ADRs for important, costly, risky, or hard-to-reverse technical decisions.
 - [0021 - Device-scoped Matrix store recovery](0021-device-scoped-matrix-store-recovery.md): atomic key creation, explicit new-device recovery, immutable old stores and physical acceptance.
 
 - [0022 - Exact Matrix delivery and lifecycle](0022-exact-matrix-delivery-and-lifecycle.md): durable scoped acknowledgements, stream fencing and authoritative voice connection.
+
+- [0023 - Host communication activation](0023-host-owned-communication-activation.md): one existing account, authentication-only routing and explicit local producer activation with owned pending cleanup.

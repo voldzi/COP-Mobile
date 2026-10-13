@@ -31,11 +31,12 @@ public extension CSMCommunicationRuntime {
                 catch { model.recordCOPSessionRestoreFailure(error); return }
             }
             guard status == .ready || status == .authenticationRequired else { return }
-            await model.refreshSession()
+            await model.refreshSession(authenticationOnly: model.requiresExplicitHostConsent)
             refreshAccessState(expectedSubjectID: nil)
             return
         }
-        await signIn(expectedSubjectID: nil, switchAccount: switchAccount, loginHint: loginHint)
+        await signIn(expectedSubjectID: nil, switchAccount: switchAccount, loginHint: loginHint,
+                     authenticationOnly: model.requiresExplicitHostConsent)
     }
 
     func mobilityCapabilities(expectedScope: String) async throws -> CSMMobilityCapabilities {
@@ -224,6 +225,11 @@ public extension CSMCommunicationRuntime {
 
     func mobilityRequest<Response: Decodable>(path: String, method: String, body: Data?, query: [URLQueryItem], expectedScope: String, ifMatch: String? = nil, idempotencyKey: String? = nil, responseValidator: (@Sendable (Int, Response) throws -> Void)? = nil) async throws -> Response {
         let generation = MobilitySessionGeneration.shared.value
+        let producerEpoch = model.jizdaLifecycleSnapshot.generation
+        let requiresConsent = CSMHostCommunicationRequestPolicy.requiresConsent(path: path, method: method)
+        if requiresConsent, !model.permitsCommunicationProducers(epoch: producerEpoch) {
+            throw CSMServiceError.disabled("Komunikace a sdílení jsou pro tuto aplikaci vypnuté.")
+        }
         guard mobilitySessionScope() == expectedScope else { throw CSMCOPSessionError(.accountChanged) }
         let configuration = AppConfiguration.fromBundle()
         guard let selectedSubject = model.actor?.subjectId else { throw CSMServiceError.authenticationRequired("Přihlášení COP vypršelo.") }
@@ -241,6 +247,7 @@ public extension CSMCommunicationRuntime {
               mobilityTokenMatchesSelectedActor(token, issuer: configuration.oidcIssuer.absoluteString, subject: selectedSubject) else {
             throw CSMCOPSessionError(.accountChanged)
         }
+        if requiresConsent, !model.permitsCommunicationProducers(epoch: producerEpoch) { throw CSMCOPSessionError(.accountChanged) }
         guard var components = URLComponents(url: configuration.copBaseURL, resolvingAgainstBaseURL: false) else { throw CSMServiceError.invalidState("Neplatná adresa COP.") }
         components.path = path; components.queryItems = query.isEmpty ? nil : query
         guard let url = components.url else { throw CSMServiceError.invalidState("Neplatná adresa COP.") }
@@ -259,6 +266,7 @@ public extension CSMCommunicationRuntime {
         let session = URLSession(configuration: config, delegate: MobilityNoRedirect(), delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
         let (data, response) = try await session.data(for: request)
+        if requiresConsent, !model.permitsCommunicationProducers(epoch: producerEpoch) { throw CSMCOPSessionError(.accountChanged) }
         guard generation == MobilitySessionGeneration.shared.value, mobilitySessionScope() == expectedScope else {
             throw CSMCOPSessionError(.accountChanged)
         }

@@ -379,7 +379,7 @@ public final class CSMCommunicationRuntime {
     // The standalone native communication runtime owns its APNs + PushKit
     // record. Delivery must not depend on a hidden web session being mounted.
     let model: CommunicationModel
-    let driverReportService = ServiceFactory.makeDriverReportService()
+    let driverReportService: DriverReportService
     private(set) var accessState: NativeCommunicationAccessState = .checking
     var copSessionRestoreTask: Task<Void, any Error>?
     private var started = false
@@ -392,7 +392,10 @@ public final class CSMCommunicationRuntime {
         self.init(model: ServiceFactory.makeCommunicationModel(managesMessagingDeviceRegistration: true))
     }
 
-    init(model: CommunicationModel) { self.model = model }
+    init(model: CommunicationModel, driverReportService: DriverReportService? = nil) {
+        self.model = model
+        self.driverReportService = driverReportService ?? ServiceFactory.makeDriverReportService()
+    }
 
     /// The mounted surface observes the current model directly. A process-owned
     /// warm start can complete before the host mounts or after a superseded
@@ -455,7 +458,18 @@ public final class CSMCommunicationRuntime {
         }
     }
 
-    func startIfNeeded() async {
+    func startAuthenticationIfNeeded() async {
+        await startIfNeeded(authenticationOnly: true)
+    }
+
+    /// Preserve existing standalone behavior; opt-in hosts never bootstrap
+    /// optional communication as a side effect of a route or catalog request.
+    func prepareRoutingAuthentication() async {
+        if model.requiresExplicitHostConsent { await startAuthenticationIfNeeded() }
+        else { await startIfNeeded() }
+    }
+
+    func startIfNeeded(authenticationOnly: Bool = false) async {
         guard !started else { return }
         if let startTask {
             await startTask.value
@@ -464,7 +478,7 @@ public final class CSMCommunicationRuntime {
             return
         }
         let task = Task { @MainActor [model] in
-            await model.start()
+            await model.start(authenticationOnly: authenticationOnly)
         }
         startTask = task
         await task.value
@@ -526,22 +540,23 @@ public final class CSMCommunicationRuntime {
     func signIn(
         expectedSubjectID: String?,
         switchAccount: Bool = false,
-        loginHint: String? = nil
+        loginHint: String? = nil,
+        authenticationOnly: Bool = false
     ) async {
         preparationGeneration &+= 1
-        await startIfNeeded()
+        await startIfNeeded(authenticationOnly: authenticationOnly)
         if switchAccount, model.authState == .signedIn {
             await model.signOut()
         }
         guard model.authState != .signedIn else {
-            await model.refreshSession()
+            await model.refreshSession(authenticationOnly: authenticationOnly)
             refreshAccessState(expectedSubjectID: expectedSubjectID)
             return
         }
         accessState = .checking
-        await model.signIn(forceAuthentication: switchAccount, loginHint: loginHint)
+        await model.signIn(forceAuthentication: switchAccount, loginHint: loginHint, authenticationOnly: authenticationOnly)
         refreshAccessState(expectedSubjectID: expectedSubjectID)
-        guard accessState == .ready else { return }
+        guard accessState == .ready, !authenticationOnly else { return }
         await model.appDidBecomeActive()
         refreshAccessState(expectedSubjectID: expectedSubjectID)
         guard model.communicationProducersPermitted else { return }

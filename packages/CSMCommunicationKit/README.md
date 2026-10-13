@@ -1,5 +1,8 @@
 # CSMCommunicationKit
 
+- [One-account host communication activation](HOST_COMMUNICATION_ACTIVATION.md)
+  separates verified authentication/routing from optional host communication.
+
 Tento adresář je zdroj pravdy pro znovupoužitelnou nativní komunikační vrstvu.
 Balíček vlastní repozitář COP Mobile; přímo jej sestavuje COP Mobile a přes
 lokální Swift Package referenci také Jizda. Žádný host nemá build ani runtime

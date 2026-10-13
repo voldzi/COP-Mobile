@@ -28,7 +28,7 @@ extension TokenCredentialStoring {
     }
 }
 
-actor KeychainCredentialStore: TokenCredentialStoring, MatrixStoreKeyAccessing, CSMJizdaLifecyclePersisting {
+actor KeychainCredentialStore: HostPusherCleanupStoring, TokenCredentialStoring, MatrixStoreKeyAccessing, CSMJizdaLifecyclePersisting {
     private let service: String
     private let accessGroup: String?
     private let matrixItems: any MatrixKeychainItemAccessing
@@ -55,6 +55,26 @@ actor KeychainCredentialStore: TokenCredentialStoring, MatrixStoreKeyAccessing, 
 
     func loadSymmetricKey(account: String) throws -> Data? {
         try load(account: "symmetric-key.\(account)")
+    }
+    func targets(scope: String) throws -> [HostPusherCleanupTarget] {
+        guard let data = try load(account: "host-pusher-cleanup.\(scope)") else { return [] }
+        let records = try JSONDecoder().decode([HostPusherCleanupTarget].self, from: data)
+        guard records.count <= 32, records.allSatisfy(\.isValid), Set(records.map(\.id)).count == records.count else {
+            throw CSMCOPSessionError(.invalidResponse)
+        }
+        return records
+    }
+    func save(_ target: HostPusherCleanupTarget, scope: String) throws {
+        guard target.isValid else { throw CSMCOPSessionError(.invalidResponse) }
+        var records = try targets(scope: scope).filter { $0.id != target.id }
+        guard records.count < 32 else { throw CSMServiceError.unavailable("Nejprve dokončete odregistraci oznámení.") }
+        records.append(target)
+        try save(JSONEncoder().encode(records), account: "host-pusher-cleanup.\(scope)")
+    }
+    func remove(_ target: HostPusherCleanupTarget, scope: String) throws {
+        let records = try targets(scope: scope).filter { $0 != target }
+        if records.isEmpty { try delete(account: "host-pusher-cleanup.\(scope)") }
+        else { try save(JSONEncoder().encode(records), account: "host-pusher-cleanup.\(scope)") }
     }
     func loadOrCreateInstallationID(scope: String, legacyCandidate: UUID?) throws -> UUID {
         let data = try createPersistentItem(account: "jizda-installation.\(scope)", candidate: Data((legacyCandidate ?? UUID()).uuidString.lowercased().utf8))

@@ -174,7 +174,7 @@ public extension CSMCommunicationRuntime {
     func drivingRoutes(from: CSMRoutePoint, to: CSMRoutePoint, trip: CSMRoadTrip, alternatives: Int = 3) async throws -> CSMDriverRouteResponse {
         guard from.isValid, to.isValid else { throw CSMDriverRoutingError.invalidCoordinates }
         guard trip.isValid, (1...3).contains(alternatives) else { throw CSMDriverRoutingError.invalidTrip }
-        await startIfNeeded()
+        await prepareRoutingAuthentication()
         let request = CSMDriverRouteRequest(from: from, to: to, alternatives: alternatives,
             includeRoadAttributes: true, trip: trip, avoid: ["road_closure"])
         let response = try await driverReportService.drivingRoutes(request)
@@ -212,7 +212,7 @@ public struct CSMRoadTripIntentCapability: Codable, Sendable { public let intent
 public struct CSMRoadTripClosureCapability: Codable, Sendable { public let mode: String; public let state: String; public let oneDirection: String }
 public extension CSMCommunicationRuntime {
     func drivingCapabilities() async throws -> CSMDriverRoutingCatalog {
-        await startIfNeeded()
+        await prepareRoutingAuthentication()
         return try await driverReportService.drivingCapabilities()
     }
 }

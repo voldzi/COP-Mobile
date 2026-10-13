@@ -162,7 +162,7 @@ public extension CSMCommunicationRuntime {
                        alternatives: Int = 3) async throws -> CSMDriverRouteResponse {
         guard from.isValid, to.isValid else { throw CSMDriverRoutingError.invalidCoordinates }
         guard vehicleProfile.isValid else { throw CSMDriverRoutingError.invalidVehicle }
-        await startIfNeeded()
+        await prepareRoutingAuthentication()
         guard try await drivingCapabilities().mappedProfiles?.permits(vehicleProfile) == true else { throw CSMDriverRoutingError.safetyRequirementsUnavailable }
         let request = CSMDriverRouteRequest(from: from, to: to, alternatives: min(3, max(1, alternatives)),
             includeRoadAttributes: true, vehicle: nil, vehicleProfile: vehicleProfile)

@@ -287,7 +287,7 @@ public extension CSMCommunicationRuntime {
     ) async throws -> CSMDriverRouteResponse {
         guard from.isValid, to.isValid else { throw CSMDriverRoutingError.invalidCoordinates }
         guard vehicle?.isValid ?? true else { throw CSMDriverRoutingError.invalidVehicle }
-        await startIfNeeded()
+        await prepareRoutingAuthentication()
         let request = CSMDriverRouteRequest(
                 from: from,
                 to: to,
