@@ -104,6 +104,7 @@ struct ChatView: View {
     @State private var selectedAttachment: SelectedMessageAttachment?
     @State private var showsLeaveGroupConfirmation = false
     @State private var showsChatStatusDetail = false
+    @State private var opensEncryptionRecoveryAfterStatus = false
     @State private var callUnavailableMessage: String?
     @State private var isTimelineAtBottom = true
     @State private var previousVisibleMessageCount = 0
@@ -448,6 +449,10 @@ struct ChatView: View {
             )
         }
         .sheet(isPresented: $showsChatStatusDetail, onDismiss: {
+            if opensEncryptionRecoveryAfterStatus {
+                opensEncryptionRecoveryAfterStatus = false
+                showsEncryptionRecoverySheet = true
+            }
             if opensLocalRecoveryAfterStatus {
                 opensLocalRecoveryAfterStatus = false
                 if localRecoveryActionAvailable { showsLocalChatRecoverySheet = true }
@@ -465,13 +470,18 @@ struct ChatView: View {
                     showsPendingRecoveryConfirmation = true
                 } : nil,
                 onOpenEncryptionRecovery: {
-                    showsEncryptionRecoverySheet = true
+                    opensLocalRecoveryAfterStatus = false
+                    opensEncryptionRecoveryAfterStatus = true
+                    showsChatStatusDetail = false
                 },
                 localStoreFailure: appModel.matrixLocalStoreFailure,
                 onOpenLocalRecovery: localRecoveryActionAvailable ? {
+                    opensEncryptionRecoveryAfterStatus = false
                     opensLocalRecoveryAfterStatus = true
                     showsChatStatusDetail = false
-                } : nil
+                } : nil,
+                unreadableMessageCount: appModel.messages.filter(\.hasUnavailableEncryptedContent).count,
+                onRefresh: { await appModel.refreshActiveConversationMessages() }
             )
         }
         .confirmationDialog(
@@ -629,7 +639,8 @@ struct ChatView: View {
                         },
                         onOpenLocalRecovery: localRecoveryActionAvailable ? {
                             showsLocalChatRecoverySheet = true
-                        } : nil
+                        } : nil,
+                        unreadableMessageCount: appModel.messages.filter(\.hasUnavailableEncryptedContent).count
                     )
                 }
 
@@ -906,7 +917,7 @@ struct ChatView: View {
             return nil
         }
         let status = appModel.matrixEncryptionRecoveryStatus
-        return status.requiresUserAction || status.hasMatrixRustCompatibilityWarning ? status : nil
+        return status.supported ? status : nil
     }
 
     private func presentMessageActions(for message: ChatMessage) {
@@ -1563,6 +1574,7 @@ struct ChatStatusIndicator: View {
 struct ChatStatusDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showsTechnicalDetails = false
+    @State private var refreshing = false
 
     var deliveryPresentation: ChatDeliveryPresentation
     var encryptionRecoveryStatus: MatrixEncryptionRecoveryStatus?
@@ -1571,6 +1583,8 @@ struct ChatStatusDetailSheet: View {
     var onOpenEncryptionRecovery: () -> Void
     var localStoreFailure: CSMChatLocalStoreFailure? = nil
     var onOpenLocalRecovery: (() -> Void)? = nil
+    var unreadableMessageCount = 0
+    var onRefresh: (() async -> Void)? = nil
 
     var body: some View {
         NavigationStack {
@@ -1583,13 +1597,39 @@ struct ChatStatusDetailSheet: View {
                             Text(subtitle)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                            Text(detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            if !detail.isEmpty && detail != subtitle {
+                                Text(detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     } icon: {
                         Image(systemName: systemImage)
                             .foregroundStyle(tint)
+                    }
+
+                    if let onRefresh {
+                        Button {
+                            Task { @MainActor in
+                                guard !refreshing else { return }
+                                refreshing = true
+                                defer { refreshing = false }
+                                await onRefresh()
+                            }
+                        } label: {
+                            Label(CSMLocalization.text("chat.status.refresh.action", fallback: "Obnovit konverzaci"), systemImage: "arrow.clockwise")
+                        }
+                            .disabled(refreshing)
+                            .accessibilityIdentifier("chat.status.refreshConversation")
+                    }
+
+                    if unreadableMessageCount > 0 && deliveryPresentation.isVisible {
+                        Label {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(deliveryPresentation.title).font(.subheadline.weight(.semibold))
+                                Text(deliveryPresentation.subtitle).font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: { Image(systemName: deliveryPresentation.systemImage).foregroundStyle(deliveryPresentation.statusTint) }
                     }
 
                     if deliveryPresentation.canSync {
@@ -1618,7 +1658,19 @@ struct ChatStatusDetailSheet: View {
                 }
 
                 if let encryptionRecoveryStatus {
-                    Section(CSMLocalization.text("chat.status.recovery.title", fallback: "Obnova šifrování")) {
+                    Section(CSMLocalization.text("chat.status.device.section", fallback: "Ověření tohoto telefonu")) {
+                        let verification = encryptionRecoveryStatus.deviceVerification ?? .unknown
+                        Label {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(verification.title).font(.subheadline.weight(.semibold))
+                                Text(verification.userMessage).font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: verification == .verified ? "checkmark.shield" : "shield.lefthalf.filled")
+                                .foregroundStyle(verification == .verified ? CSMTheme.secureGreen : CSMTheme.warningAmber)
+                        }
+                    }
+                    Section(CSMLocalization.text("chat.status.history.section", fallback: "Obnovení historie chatu")) {
                         Label {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(encryptionRecoveryStatus.title)
@@ -1632,14 +1684,8 @@ struct ChatStatusDetailSheet: View {
                                 .foregroundStyle(recoveryTint(encryptionRecoveryStatus))
                         }
 
-                        if encryptionRecoveryStatus.requiresUserAction {
-                            Button {
-                                dismiss()
-                                onOpenEncryptionRecovery()
-                            } label: {
-                                Label(encryptionRecoveryStatus.primaryActionTitle, systemImage: "arrow.forward.circle.fill")
-                            }
-                        }
+                        Button(CSMLocalization.text("chat.status.history.options", fallback: "Možnosti obnovení historie"), systemImage: "key", action: onOpenEncryptionRecovery)
+                            .accessibilityIdentifier("chat.status.historyRecoveryOptions")
                     }
                 }
 
@@ -1683,47 +1729,28 @@ struct ChatStatusDetailSheet: View {
     }
 
     private var title: String {
-        if let encryptionRecoveryStatus, encryptionRecoveryStatus.requiresUserAction || encryptionRecoveryStatus.hasMatrixRustCompatibilityWarning {
-            return encryptionRecoveryStatus.title
-        }
-        return deliveryPresentation.isVisible
-            ? deliveryPresentation.title
-            : CSMLocalization.text("chat.status.ready.title", fallback: "Bezpečný chat")
+        summary.title
     }
 
     private var subtitle: String {
-        if let encryptionRecoveryStatus, encryptionRecoveryStatus.requiresUserAction || encryptionRecoveryStatus.hasMatrixRustCompatibilityWarning {
-            return encryptionRecoveryStatus.userMessage
-        }
-        return deliveryPresentation.isVisible
-            ? deliveryPresentation.subtitle
-            : CSMLocalization.text("chat.status.ready.subtitle", fallback: "Zprávy jsou připravené k bezpečnému odeslání.")
+        summary.subtitle
     }
 
     private var detail: String {
-        if encryptionRecoveryStatus?.hasMatrixRustCompatibilityWarning == true {
-            return CSMLocalization.text(
-                "chat.status.recovery.compatibility_warning.detail",
-                fallback: "Běžné šifrované zprávy zůstávají povolené. Před párováním dalšího nativního zařízení zkontrolujte E2EE obnovu nebo vygenerujte nový recovery cyklus."
-            )
-        }
-        return deliveryPresentation.isVisible
-            ? deliveryPresentation.detail
-            : CSMLocalization.text("chat.status.ready.detail", fallback: "Chat používá zabezpečený kanál. Stav fronty a technické detaily se zobrazí jen na vyžádání.")
+        deliveryPresentation.isVisible && unreadableMessageCount == 0 ? deliveryPresentation.detail : ""
     }
 
     private var systemImage: String {
-        if let encryptionRecoveryStatus, encryptionRecoveryStatus.requiresUserAction || encryptionRecoveryStatus.hasMatrixRustCompatibilityWarning {
-            return encryptionRecoveryStatus.keyBackupUsable ? "checkmark.seal.fill" : "key.horizontal.fill"
-        }
-        return deliveryPresentation.isVisible ? deliveryPresentation.systemImage : "lock.shield.fill"
+        summary.systemImage
     }
 
     private var tint: Color {
-        if encryptionRecoveryStatus?.requiresUserAction == true || encryptionRecoveryStatus?.hasMatrixRustCompatibilityWarning == true {
-            return CSMTheme.warningAmber
-        }
-        return deliveryPresentation.isVisible ? deliveryPresentation.statusTint : CSMTheme.secureGreen
+        summary.needsAttention ? CSMTheme.warningAmber : CSMTheme.secureGreen
+    }
+
+    private var summary: ChatStatusSummary {
+        .make(delivery: deliveryPresentation, unreadableMessageCount: unreadableMessageCount,
+              verification: encryptionRecoveryStatus?.deviceVerification)
     }
 
     private var hasTechnicalDetails: Bool {
@@ -1736,6 +1763,7 @@ struct ChatStatusDetailSheet: View {
         if status.hasMatrixRustCompatibilityWarning { return CSMTheme.warningAmber }
         return status.keyBackupUsable ? CSMTheme.secureGreen : CSMTheme.warningAmber
     }
+
 }
 
 private extension ChatDeliveryPresentation {
@@ -1769,6 +1797,7 @@ private struct ChatNavigationTitle: View {
     var onLeaveGroup: (() -> Void)?
     var onOpenCOP: () -> Void
     var onOpenLocalRecovery: (() -> Void)? = nil
+    var unreadableMessageCount = 0
 
     var body: some View {
         Menu {
@@ -1895,7 +1924,7 @@ private struct ChatNavigationTitle: View {
     }
 
     private var hasVisibleStatusIssue: Bool {
-        deliveryPresentation.isVisible ||
+        unreadableMessageCount > 0 || deliveryPresentation.isVisible ||
             encryptionRecoveryStatus?.requiresUserAction == true ||
             encryptionRecoveryStatus?.hasMatrixRustCompatibilityWarning == true
     }

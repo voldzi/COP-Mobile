@@ -260,6 +260,122 @@ final class MatrixDraftSubmissionTests: XCTestCase {
             XCTAssertEqual(calls, [0])
         }
     }
+
+    func testOneDraftAndSDKQueueEchoStayOneBubbleThroughExactServerAck() async throws {
+        let (bootstrap, conversation) = try await setup()
+        let outbox = InMemoryMessageOutbox(), history = InMemoryMessageHistoryStore()
+        let live = DraftSubmissionMessaging(confirmation: .pending)
+        let wrapper = OfflineFirstMessagingClient(liveClient: live, outbox: outbox, history: history)
+        try await wrapper.configure(with: bootstrap)
+        let pending = try await wrapper.sendMessage("Synthetic", to: conversation)
+        XCTAssertEqual(pending.matrixTransactionID, DraftSubmissionMessaging.fullTransactionID)
+        var sdkEcho = pending
+        sdkEcho.id = DraftSubmissionMessaging.fullTransactionID
+        await live.setLiveMessages([sdkEcho])
+        let queued = try await wrapper.messages(for: conversation)
+        XCTAssertEqual(queued.count, 1)
+        XCTAssertEqual(queued.first?.deliveryState, .pending)
+        var confirmed = sdkEcho
+        confirmed.id = "$one-event"; confirmed.deliveryState = .sent
+        await live.setLiveMessages([confirmed])
+        let acknowledged = try await wrapper.messages(for: conversation)
+        XCTAssertEqual(acknowledged.map(\.id), ["$one-event"])
+        let remaining = try await outbox.pendingMessageCount()
+        let calls = await live.queuedParts
+        XCTAssertEqual(remaining, 0)
+        XCTAssertEqual(calls, [0], "Snapshot reconciliation must not create another send")
+    }
+
+    func testConfirmedHistoryRetainsTransactionWhenRemoteSnapshotOmitsIt() async throws {
+        let (bootstrap, conversation) = try await setup()
+        let live = DraftSubmissionMessaging(confirmation: .confirmed)
+        let wrapper = OfflineFirstMessagingClient(liveClient: live, outbox: InMemoryMessageOutbox(), history: InMemoryMessageHistoryStore())
+        try await wrapper.configure(with: bootstrap)
+        let sent = try await wrapper.sendMessage("Synthetic", to: conversation)
+        XCTAssertEqual(sent.matrixTransactionID, DraftSubmissionMessaging.fullTransactionID)
+        var sdkEcho = sent
+        sdkEcho.id = DraftSubmissionMessaging.fullTransactionID; sdkEcho.deliveryState = .pending
+        var remote = sent
+        remote.matrixTransactionID = nil
+        await live.setLiveMessages([sdkEcho, remote])
+        let visible = try await wrapper.messages(for: conversation)
+        XCTAssertEqual(visible.map(\.id), [sent.id])
+        XCTAssertEqual(visible.first?.matrixTransactionID, DraftSubmissionMessaging.fullTransactionID)
+    }
+
+    func testExactAliasesCollapseAllThreeRepresentationsButPreserveRepeatedTextAndOwners() {
+        var draft = ChatMessage(id: "app-draft", roomId: "!room", senderId: "@sender", senderDisplayName: "Synthetic",
+            body: "Same deliberate text", sentAt: .now, deliveryState: .pending, isOwnMessage: true)
+        draft.requiresExactMatrixAcknowledgement = true; draft.matrixTransactionID = "transaction-one"
+        var sdk = draft; sdk.id = "transaction-one"
+        var remote = draft; remote.id = "$event-one"; remote.deliveryState = .sent
+        var second = draft; second.id = "another-app-draft"; second.matrixTransactionID = "transaction-two"
+        var otherRoom = sdk; otherRoom.id = "other-room-local"; otherRoom.roomId = "!other"
+        var otherSender = sdk; otherSender.id = "other-sender-local"; otherSender.senderId = "@other"
+        let result = ChatMessage.removingSupersededLocalEchoes(from: [draft, sdk, remote, second, otherRoom, otherSender])
+        XCTAssertEqual(Set(result.map(\.id)), [remote.id, second.id, otherRoom.id, otherSender.id])
+        var conflict = remote; conflict.id = "$different-server-event"
+        XCTAssertEqual(ChatMessage.removingSupersededLocalEchoes(from: [remote, conflict]).count, 2)
+    }
+
+    func testTimelineUpdatesKeepKnownExactAckWithoutResurrectingQueueEcho() {
+        var draft = ChatMessage(id: "app-draft", roomId: "!room", senderId: "@sender", senderDisplayName: "Synthetic",
+            body: "Synthetic", sentAt: .now, deliveryState: .pending, isOwnMessage: true)
+        draft.requiresExactMatrixAcknowledgement = true; draft.matrixTransactionID = "exact-tx"
+        var remote = draft; remote.id = "$confirmed"; remote.deliveryState = .sent
+        var state = TimelineState(conversationID: "synthetic")
+        TimelineReducer.reduce(&state, action: .upsert(draft))
+        TimelineReducer.reduce(&state, action: .upsert(remote))
+        remote.matrixTransactionID = nil
+        TimelineReducer.reduce(&state, action: .upsert(remote))
+        var sdk = draft; sdk.id = "exact-tx"
+        TimelineReducer.reduce(&state, action: .upsert(sdk))
+        XCTAssertEqual(state.messages.map(\.id), ["$confirmed"])
+        XCTAssertEqual(state.messages.first?.matrixTransactionID, "exact-tx")
+    }
+
+    func testReadableEditMatchingLegacyPlaceholderReplacesOldHistoryWithoutAnotherSend() async throws {
+        for text in ["unable to decrypt", "Zprávu se nepodařilo dešifrovat na tomto zařízení."] {
+            let (bootstrap, conversation) = try await setup()
+            let live = DraftSubmissionMessaging(confirmation: .confirmed)
+            let wrapper = OfflineFirstMessagingClient(liveClient: live, outbox: InMemoryMessageOutbox(), history: InMemoryMessageHistoryStore())
+            try await wrapper.configure(with: bootstrap)
+            let sent = try await wrapper.sendMessage("Original readable content", to: conversation)
+            var edited = sent
+            edited.body = text
+            edited.matrixTransactionID = nil
+            XCTAssertNil(edited.decryptionFailure)
+            await live.setLiveMessages([edited])
+            let visible = try await wrapper.messages(for: conversation)
+            XCTAssertEqual(visible.count, 1)
+            XCTAssertEqual(visible.first?.body, text, "Readable live content must not be inferred from its wording")
+            XCTAssertNil(visible.first?.decryptionFailure)
+            XCTAssertEqual(visible.first?.matrixTransactionID, sent.matrixTransactionID)
+            let refreshed = try await wrapper.messages(for: conversation)
+            XCTAssertEqual(refreshed.first?.body, text)
+            let calls = await live.queuedParts
+            XCTAssertEqual(calls, [0])
+        }
+    }
+
+    func testTypedUndecryptableUpdateCannotOverwriteReadableHistoryAndKeepsExactLink() async throws {
+        let (bootstrap, conversation) = try await setup()
+        let history = InMemoryMessageHistoryStore()
+        let live = DraftSubmissionMessaging(confirmation: .confirmed)
+        let wrapper = OfflineFirstMessagingClient(liveClient: live, outbox: InMemoryMessageOutbox(), history: history)
+        try await wrapper.configure(with: bootstrap)
+        let sent = try await wrapper.sendMessage("Synthetic readable content", to: conversation)
+        var old = sent; old.matrixTransactionID = nil
+        try await history.saveMessages([old], conversationId: conversation.conversationId)
+        var unavailable = sent
+        unavailable.body = MessageDecryptionFailure.missingKeys.userMessage
+        unavailable.decryptionFailure = .missingKeys
+        await live.setLiveMessages([unavailable])
+        let visible = try await wrapper.messages(for: conversation)
+        XCTAssertEqual(visible.first?.body, "Synthetic readable content")
+        XCTAssertNil(visible.first?.decryptionFailure)
+        XCTAssertEqual(visible.first?.matrixTransactionID, sent.matrixTransactionID)
+    }
 }
 
 private actor DraftSubmissionMessaging: MessagingClientProtocol, MatrixDraftSending {

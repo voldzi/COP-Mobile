@@ -1090,6 +1090,7 @@ struct ChatMessage: Codable, Identifiable, Equatable, Hashable, Sendable {
     var isOwnMessage: Bool
     var matrixTransactionID: String? = nil
     var requiresExactMatrixAcknowledgement = false
+    var decryptionFailure: MessageDecryptionFailure? = nil
 
     init(
         id: String,
@@ -1106,7 +1107,8 @@ struct ChatMessage: Codable, Identifiable, Equatable, Hashable, Sendable {
         isDeleted: Bool = false,
         sentAt: Date,
         deliveryState: MessageDeliveryState,
-        isOwnMessage: Bool
+        isOwnMessage: Bool,
+        decryptionFailure: MessageDecryptionFailure? = nil
     ) {
         self.id = id
         self.roomId = roomId
@@ -1123,6 +1125,7 @@ struct ChatMessage: Codable, Identifiable, Equatable, Hashable, Sendable {
         self.sentAt = sentAt
         self.deliveryState = deliveryState
         self.isOwnMessage = isOwnMessage
+        self.decryptionFailure = decryptionFailure
     }
 
     var replyReference: MessageReplyReference {
@@ -1210,6 +1213,7 @@ struct ChatMessage: Codable, Identifiable, Equatable, Hashable, Sendable {
         case isOwnMessage
         case matrixTransactionID
         case requiresExactMatrixAcknowledgement
+        case decryptionFailure
     }
 
     init(from decoder: Decoder) throws {
@@ -1231,6 +1235,7 @@ struct ChatMessage: Codable, Identifiable, Equatable, Hashable, Sendable {
         isOwnMessage = try container.decode(Bool.self, forKey: .isOwnMessage)
         matrixTransactionID = try container.decodeIfPresent(String.self, forKey: .matrixTransactionID)
         requiresExactMatrixAcknowledgement = try container.decodeIfPresent(Bool.self, forKey: .requiresExactMatrixAcknowledgement) ?? false
+        decryptionFailure = try container.decodeIfPresent(MessageDecryptionFailure.self, forKey: .decryptionFailure)
         if id.hasPrefix("matrix-unconfirmed-") || id.hasPrefix("matrix-awaiting-") {
             deliveryState = .pending
             requiresExactMatrixAcknowledgement = true
@@ -1293,20 +1298,42 @@ extension ChatMessage {
         var indexById: [String: Int] = [:]
         for message in messages {
             if let existingIndex = indexById[message.id] {
-                uniqueMessages[existingIndex] = message
+                uniqueMessages[existingIndex] = message.retainingKnownMatrixTransaction(from: uniqueMessages[existingIndex])
             } else {
                 indexById[message.id] = uniqueMessages.count
                 uniqueMessages.append(message)
             }
         }
 
+        // One journalled send may have an application draft, a Matrix queue
+        // echo and a server event. They are aliases only with the complete
+        // transaction plus the same room and sender, never body/time equality.
+        var exactGroups: [MatrixEchoIdentity: [Int]] = [:]
+        for index in uniqueMessages.indices {
+            let message = uniqueMessages[index]
+            guard message.isOwnMessage, !message.roomId.isEmpty, !message.senderId.isEmpty,
+                  let transaction = message.matrixTransactionID, !transaction.isEmpty else { continue }
+            exactGroups[MatrixEchoIdentity(room: message.roomId, sender: message.senderId, transaction: transaction), default: []].append(index)
+        }
+        var removedLocalIndices: Set<Int> = []
+        for (identity, indices) in exactGroups {
+            let confirmed = indices.filter { uniqueMessages[$0].id.hasPrefix("$") }
+            // Conflicting server IDs are not proof that either event is an echo.
+            guard Set(confirmed.map { uniqueMessages[$0].id }).count <= 1 else { continue }
+            let retained = confirmed.last
+                ?? indices.first { uniqueMessages[$0].id != identity.transaction }
+                ?? indices[0]
+            removedLocalIndices.formUnion(indices.filter { $0 != retained })
+        }
+
         let confirmedIndices = uniqueMessages.indices.filter { index in
+            !removedLocalIndices.contains(index) &&
             uniqueMessages[index].isOwnMessage && uniqueMessages[index].id.hasPrefix("$")
         }
         var availableLocalIndices = Set(uniqueMessages.indices.filter { index in
+            !removedLocalIndices.contains(index) &&
             uniqueMessages[index].isOwnMessage && !uniqueMessages[index].id.hasPrefix("$")
         })
-        var removedLocalIndices: Set<Int> = []
 
         for confirmedIndex in confirmedIndices {
             let confirmed = uniqueMessages[confirmedIndex]
@@ -1326,6 +1353,25 @@ extension ChatMessage {
         return uniqueMessages.enumerated().compactMap { index, message in
             removedLocalIndices.contains(index) ? nil : message
         }
+    }
+
+    /// A later server snapshot can omit unsigned.transaction_id. Keep a link
+    /// already proved for this exact event; never transfer it across owners.
+    func retainingKnownMatrixTransaction(from previous: ChatMessage) -> ChatMessage {
+        guard id == previous.id, isOwnMessage, previous.isOwnMessage,
+              roomId == previous.roomId, senderId == previous.senderId,
+              matrixTransactionID == nil, let transaction = previous.matrixTransactionID,
+              !transaction.isEmpty else { return self }
+        var result = self
+        result.matrixTransactionID = transaction
+        result.requiresExactMatrixAcknowledgement = true
+        return result
+    }
+
+    private struct MatrixEchoIdentity: Hashable {
+        let room: String
+        let sender: String
+        let transaction: String
     }
 
     private static func localEcho(_ local: ChatMessage, matches confirmed: ChatMessage) -> Bool {

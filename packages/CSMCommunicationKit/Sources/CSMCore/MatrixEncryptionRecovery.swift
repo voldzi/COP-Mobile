@@ -1,5 +1,24 @@
 import Foundation
 
+enum ChatDeviceVerification: String, Codable, Equatable, Sendable { case unknown, verified, unverified }
+
+extension ChatDeviceVerification {
+    var title: String {
+        switch self {
+        case .unknown: CSMLocalization.text("chat.status.device.unknown.title", fallback: "Ověření telefonu není potvrzené")
+        case .verified: CSMLocalization.text("chat.status.device.verified.title", fallback: "Telefon je ověřený")
+        case .unverified: CSMLocalization.text("chat.status.device.unverified.title", fallback: "Telefon čeká na ověření")
+        }
+    }
+    var userMessage: String {
+        switch self {
+        case .unknown: CSMLocalization.text("chat.status.device.unknown.message", fallback: "Obnovte konverzaci a zkontrolujte stav znovu. Dostupnost zálohy sama o sobě nepotvrzuje ověření telefonu.")
+        case .verified: CSMLocalization.text("chat.status.device.verified.message", fallback: "Zabezpečení účtu tento telefon ověřilo. Dostupnost obsahu jednotlivých zpráv se kontroluje zvlášť.")
+        case .unverified: CSMLocalization.text("chat.status.device.unverified.message", fallback: "Zkontrolujte možnosti ověření a obnovení níže. Bez ověření nemusí být všechny zprávy dostupné.")
+        }
+    }
+}
+
 struct MatrixEncryptionRecoveryStatus: Codable, Equatable, Sendable {
     var supported: Bool
     var keyBackupExists: Bool
@@ -13,6 +32,7 @@ struct MatrixEncryptionRecoveryStatus: Codable, Equatable, Sendable {
     var backupState: String
     var recoveryState: String
     var detail: String?
+    var deviceVerification: ChatDeviceVerification?
 
     init(
         supported: Bool,
@@ -26,7 +46,8 @@ struct MatrixEncryptionRecoveryStatus: Codable, Equatable, Sendable {
         ready: Bool? = nil,
         backupState: String,
         recoveryState: String,
-        detail: String?
+        detail: String?,
+        deviceVerification: ChatDeviceVerification = .unknown
     ) {
         let backupUsable = keyBackupUsable ?? keyBackupEnabled
         self.supported = supported
@@ -41,6 +62,7 @@ struct MatrixEncryptionRecoveryStatus: Codable, Equatable, Sendable {
         self.backupState = backupState
         self.recoveryState = recoveryState
         self.detail = detail
+        self.deviceVerification = deviceVerification
     }
 
     static let notLoaded = MatrixEncryptionRecoveryStatus(
@@ -87,7 +109,7 @@ struct MatrixEncryptionRecoveryStatus: Codable, Equatable, Sendable {
     }
 
     var requiresUserAction: Bool {
-        false
+        supported && (needsRecovery || deviceVerification == .unverified)
     }
 
     var blocksSending: Bool {
@@ -109,7 +131,7 @@ struct MatrixEncryptionRecoveryStatus: Codable, Equatable, Sendable {
             if hasMatrixRustCompatibilityWarning {
                 return CSMLocalization.text(
                     "matrix.recovery.compatibility_warning.title",
-                    fallback: "Chat funguje, párování vyžaduje kontrolu"
+                    fallback: "Obnovení historie vyžaduje kontrolu"
                 )
             }
             return CSMLocalization.text("matrix.recovery.ready.title", fallback: "E2EE obnova je aktivní")
@@ -128,7 +150,7 @@ struct MatrixEncryptionRecoveryStatus: Codable, Equatable, Sendable {
             if hasMatrixRustCompatibilityWarning {
                 return CSMLocalization.text(
                     "matrix.recovery.compatibility_warning.message",
-                    fallback: "Zprávy lze používat. Účet ale nemá kompletní E2EE metadata pro bezpečné párování dalších zařízení."
+                    fallback: "Přístup k záloze je dostupný. Její použití na dalším zařízení zatím není potvrzené."
                 )
             }
             return CSMLocalization.text(

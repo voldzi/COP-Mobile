@@ -402,14 +402,17 @@ actor OfflineFirstMessagingClient: MessagingSessionInvalidating, MessagingClient
                                      conversation: Conversation, revision: UInt64) async throws -> ChatMessage {
         activeSubmissions.insert(record.id)
         defer { activeSubmissions.remove(record.id) }
+        var latestSubmission = submission
         do {
             let state = try await sender.submitMatrixDraft(draft, to: conversation, submission: submission) { state in
                 try await self.persistMatrixSubmission(state, record: record, revision: revision)
             }
+            latestSubmission = state
             guard revision == configurationRevision else { throw CancellationError() }
             if state.isConfirmed {
                 var sent = record.message
                 sent.id = state.parts[0].eventID!
+                sent.matrixTransactionID = state.parts[0].transactionID
                 sent.deliveryState = .sent
                 sent.attachments = sent.attachments.map { var value = $0; value.localOnly = false; return value }
                 try await history?.appendMessage(sent, conversationId: conversation.conversationId)
@@ -422,13 +425,16 @@ actor OfflineFirstMessagingClient: MessagingSessionInvalidating, MessagingClient
             // Draft failures belong to the scoped journal, not a transport-wide
             // banner that could block an unrelated conversation.
             lastTransportError = nil
-            return record.message
+            return pendingPresentation(record, submission: state)
         } catch {
             guard revision == configurationRevision else { throw CancellationError() }
             // The durable journal owns the result, even when the SDK call or
             // persisting its acknowledgement failed. No fresh transaction here.
             lastTransportError = nil
-            return record.message
+            let records = try await outbox.pendingRecords(for: record.conversationId)
+            guard revision == configurationRevision else { throw CancellationError() }
+            let state = records.first { $0.id == record.id }?.matrixSubmission ?? latestSubmission
+            return pendingPresentation(record, submission: state)
         }
     }
 
@@ -436,7 +442,19 @@ actor OfflineFirstMessagingClient: MessagingSessionInvalidating, MessagingClient
         let records = try await outbox.pendingRecords(for: conversation.conversationId)
         guard liveClient is any MatrixDraftSending else { return records.map(\.message) }
         let scope = lastBootstrap.flatMap(MatrixLocalStoreScope.init)
-        return records.filter { $0.matrixSubmission?.scope == scope && scope != nil && $0.matrixSubmission?.roomID == conversation.activeMatrixRoomId }.map(\.message)
+        return records.filter { $0.matrixSubmission?.scope == scope && scope != nil && $0.matrixSubmission?.roomID == conversation.activeMatrixRoomId }
+            .map { pendingPresentation($0, submission: $0.matrixSubmission) }
+    }
+
+    private func pendingPresentation(_ record: PendingMessageRecord, submission: MatrixDraftSubmission?) -> ChatMessage {
+        var message = record.message
+        message.requiresExactMatrixAcknowledgement = true
+        // A multipart draft stays pending until every part is confirmed. One
+        // part's ACK must not hide the aggregate or imply complete delivery.
+        if let submission, submission.parts.count == 1 {
+            message.matrixTransactionID = submission.parts[0].transactionID
+        }
+        return message
     }
 
     func registerPusher(pushKey: String, pushGatewayURL: URL) async throws {
@@ -737,11 +755,14 @@ actor OfflineFirstMessagingClient: MessagingSessionInvalidating, MessagingClient
         var mergedById = Dictionary(uniqueKeysWithValues: cachedMessages.map { ($0.id, $0) })
         for liveMessage in liveMessages {
             if let cachedMessage = mergedById[liveMessage.id],
-               Self.isUndecryptablePlaceholder(liveMessage),
+               liveMessage.decryptionFailure != nil,
                !Self.isUndecryptablePlaceholder(cachedMessage) {
+                mergedById[liveMessage.id] = cachedMessage.retainingKnownMatrixTransaction(from: liveMessage)
                 continue
             }
-            mergedById[liveMessage.id] = liveMessage
+            mergedById[liveMessage.id] = mergedById[liveMessage.id].map {
+                liveMessage.retainingKnownMatrixTransaction(from: $0)
+            } ?? liveMessage
         }
         return ChatMessage.removingSupersededLocalEchoes(
             from: mergedById.values.sorted { $0.sentAt < $1.sentAt }
@@ -749,10 +770,10 @@ actor OfflineFirstMessagingClient: MessagingSessionInvalidating, MessagingClient
     }
 
     private static func isUndecryptablePlaceholder(_ message: ChatMessage) -> Bool {
-        let body = message.body.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-        return body.contains("nepodarilo desifrovat") ||
-            body.contains("nelze desifrovat") ||
-            body.contains("unable to decrypt")
+        // Legacy body matching is only a compatibility hint for old cache
+        // rows. Live snapshots must carry the SDK's typed failure above;
+        // a user's exact "unable to decrypt" text is still a readable edit.
+        message.hasUnavailableEncryptedContent
     }
 
     private func synchronizeTrackedDrafts(for conversation: Conversation, sender: any MatrixDraftSending) async throws -> MessageOutboxSyncResult {
@@ -781,6 +802,7 @@ actor OfflineFirstMessagingClient: MessagingSessionInvalidating, MessagingClient
             }
             var sent = record.message
             sent.id = reconciled.parts[0].eventID!
+            sent.matrixTransactionID = reconciled.parts[0].transactionID
             sent.deliveryState = .sent
             try await history?.appendMessage(sent, conversationId: conversation.conversationId)
             guard revision == configurationRevision else { throw CancellationError() }

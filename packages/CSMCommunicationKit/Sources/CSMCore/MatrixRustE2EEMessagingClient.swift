@@ -49,6 +49,7 @@ actor MatrixRustE2EEMessagingClient: MatrixDraftSending, MessagingSessionInvalid
     private var timelineSubscriptions: [String: MatrixRustTimelineSubscription] = [:]
     private var timelineGeneration: UInt64 = 0
     private var timelineHasEarlierMessages: [String: Bool] = [:]
+    private var decryptionRetryGate = MatrixDecryptionRetryGate()
     private var avatarDataURLCache: [String: String] = [:]
     private var unavailableAvatarURLs: [String: Date] = [:]
     private var liveLocationCompatibilitySessions: [String: LiveLocationCompatibilitySession] = [:]
@@ -236,6 +237,13 @@ actor MatrixRustE2EEMessagingClient: MatrixDraftSending, MessagingSessionInvalid
 
         await loadInitialHistoryPage(subscription, roomID: room.id())
         let items = subscription.listener.snapshot()
+        let encrypted = items.compactMap { item -> EncryptedMessage? in
+            guard let event = item.asEvent(), case .msgLike(let content) = event.content,
+                  case .unableToDecrypt(let message) = content.kind else { return nil }
+            return message
+        }
+        let retrySessions = decryptionRetryGate.sessionsToRetry(encrypted, in: room.id(), now: .now)
+        if !retrySessions.isEmpty { subscription.timeline.retryDecryption(sessionIds: retrySessions) }
 
         return await mappedMessages(
             from: items,
@@ -873,6 +881,7 @@ actor MatrixRustE2EEMessagingClient: MatrixDraftSending, MessagingSessionInvalid
         }
 
         let encryption = client.encryption()
+        let revision = configurationRevision
         let backupState = encryption.backupState()
         let recoveryState = encryption.recoveryState()
         let backupExistsResult: Result<Bool, any Error>
@@ -882,11 +891,22 @@ actor MatrixRustE2EEMessagingClient: MatrixDraftSending, MessagingSessionInvalid
             backupExistsResult = .failure(error)
         }
 
-        return Self.matrixEncryptionRecoveryStatus(
+        guard revision == configurationRevision else { return .unavailable("Chat identity changed during status lookup.") }
+        var status = Self.matrixEncryptionRecoveryStatus(
             backupState: backupState,
             recoveryState: recoveryState,
             backupExistsResult: backupExistsResult
         )
+        status.deviceVerification = Self.deviceVerification(encryption.verificationState())
+        return status
+    }
+
+    static func deviceVerification(_ state: VerificationState) -> ChatDeviceVerification {
+        switch state {
+        case .verified: .verified
+        case .unverified: .unverified
+        case .unknown: .unknown
+        }
     }
 
     func createEncryptionRecovery(reset: Bool) async throws -> String {
@@ -1511,6 +1531,7 @@ actor MatrixRustE2EEMessagingClient: MatrixDraftSending, MessagingSessionInvalid
 
     private func cancelTimelineSubscriptions() {
         timelineGeneration &+= 1
+        decryptionRetryGate = MatrixDecryptionRetryGate()
         timelineSubscriptions.values.forEach {
             $0.listener.invalidate()
             $0.handle.cancel()
@@ -1821,18 +1842,20 @@ actor MatrixRustE2EEMessagingClient: MatrixDraftSending, MessagingSessionInvalid
                 deliveryState: deliveryState(from: event),
                 isOwnMessage: event.isOwn
             )
-        case .unableToDecrypt:
+        case .unableToDecrypt(let encrypted):
+            let failure = Self.decryptionFailure(for: encrypted)
             return ChatMessage(
                 id: id,
                 roomId: roomId,
                 senderId: senderId,
                 senderDisplayName: senderDisplayName,
-                body: "Zpravu se nepodarilo desifrovat na tomto zarizeni.",
+                body: failure.userMessage,
                 reactions: reactions,
                 isPinned: isPinned,
                 sentAt: sentAt,
                 deliveryState: event.isOwn ? .sent : .failed,
-                isOwnMessage: event.isOwn
+                isOwnMessage: event.isOwn,
+                decryptionFailure: failure
             )
         case .redacted:
             return ChatMessage(
@@ -1881,6 +1904,20 @@ actor MatrixRustE2EEMessagingClient: MatrixDraftSending, MessagingSessionInvalid
             )
         case .poll, .other:
             return nil
+        }
+    }
+
+    static func decryptionFailure(for message: EncryptedMessage) -> MessageDecryptionFailure {
+        guard case .megolmV1AesSha2(_, let cause) = message else { return .unsupportedEncryption }
+        return switch cause {
+        case .unknown: .missingKeys
+        case .sentBeforeWeJoined: .sentBeforeJoining
+        case .verificationViolation: .senderIdentityChanged
+        case .unsignedDevice: .senderVerificationRequired
+        case .unknownDevice: .unknownSenderDevice
+        case .historicalMessageAndBackupIsDisabled: .historicalKeysUnavailable
+        case .withheldForUnverifiedOrInsecureDevice, .historicalMessageAndDeviceIsUnverified: .recipientVerificationRequired
+        case .withheldBySender: .withheldBySender
         }
     }
 

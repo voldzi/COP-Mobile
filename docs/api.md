@@ -124,6 +124,16 @@ formát. Bridge má vlastní lokální error contract popsaný níže.
 
 Konkrétní JSON response se nesmí ručně opisovat do tohoto repozitáře. Autoritou
 zůstávají OpenAPI služby a verzované Swift modely `CSMCommunicationKit`.
+
+Stav zpráv, ověření vlastního Matrix zařízení a dostupnost zálohy historie jsou
+samostatné údaje. Lokální model zprávy má volitelnou typovanou kategorii
+`decryptionFailure`; dřívější uložené zprávy bez ní zůstávají čitelné. Kategorie
+neobsahuje klíč, obsah šifrované události ani identifikátor zařízení. Stav obnovy
+historie může navíc nést `deviceVerification` ze skutečného Matrix SDK; chybějící
+hodnota není potvrzené ověření. Tyto změny nepřidávají REST endpoint ani oprávnění.
+Přesné sloučení lokálního konceptu, SDK fronty a serverové události vyžaduje
+shodu celé transakce, místnosti a odesílatele; shodný text ani čas nejsou ACK.
+
 Komunikační modul hostu zveřejňuje pouze SwiftUI surface; nevystavuje access či
 refresh token, Matrix device secret, recovery material, decrypted timeline ani
 interní service objekty.

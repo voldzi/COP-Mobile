@@ -1335,10 +1335,9 @@ public final class VoiceCallService:
 
   private func failVisibleCall(_ error: Error) {
     CallDiagnosticStore.record("voice.start.failed", result: "transport_or_media_error")
-    logger.error("Voice call start failed: \(error.localizedDescription, privacy: .public)")
+    logger.error("Voice call start failed.")
     presentation.setError(
-      (error as? LocalizedError)?.errorDescription
-        ?? "Hovor se nepodařilo zahájit. Zkontrolujte připojení a zkuste to znovu."
+      CSMVoiceCallFailurePresentation.message(for: error)
     )
   }
 

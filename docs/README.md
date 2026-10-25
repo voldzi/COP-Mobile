@@ -68,3 +68,6 @@ Jízda community police reporting: [public SDK handoff](jizda-community-reports-
 Matrix crypto store recovery: [ADR 0021](adr/0021-device-scoped-matrix-store-recovery.md) and [Jízda integration/acceptance](matrix-store-recovery-handoff.md).
 
 Matrix delivery successor: [handoff](matrix-delivery-acceptance-handoff.md) and [ADR 0022](adr/0022-exact-matrix-delivery-and-lifecycle.md); physical acceptance remains open.
+
+Chat status and exact-echo successor: [current SDK handoff](communication62-sdk-handoff.md)
+and [ADR 0023](adr/0023-truthful-chat-status-and-exact-echoes.md).

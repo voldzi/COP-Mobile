@@ -1327,3 +1327,22 @@
 "conversation.group.avatar.change" = "Změnit avatar skupiny";
 "conversation.group.avatar.remove" = "Odstranit avatar skupiny";
 "conversation.group.avatar.saving" = "Ukládám avatar skupiny";
+
+"chat.status.content.unreadable.title" = "Některé zprávy nelze přečíst";
+"chat.status.content.unreadable.message" = "Obnovte konverzaci. Pokud potíže trvají, zkontrolujte ověření telefonu a obnovení historie.";
+"chat.status.device.section" = "Ověření tohoto telefonu";
+"chat.status.device.unknown.title" = "Ověření telefonu není potvrzené";
+"chat.status.device.unknown.message" = "Obnovte konverzaci a zkontrolujte stav znovu. Dostupnost zálohy sama o sobě nepotvrzuje ověření telefonu.";
+"chat.status.device.verified.title" = "Telefon je ověřený";
+"chat.status.device.verified.message" = "Zabezpečení účtu tento telefon ověřilo. Dostupnost obsahu jednotlivých zpráv se kontroluje zvlášť.";
+"chat.status.device.unverified.title" = "Telefon čeká na ověření";
+"chat.status.device.unverified.message" = "Zkontrolujte možnosti ověření a obnovení níže. Bez ověření nemusí být všechny zprávy dostupné.";
+"chat.status.messages.title" = "Stav zpráv";
+"chat.status.messages.message" = "Potvrzení odeslání, doručení a přečtení najdete u jednotlivých zpráv.";
+"chat.status.refresh.action" = "Obnovit konverzaci";
+"chat.status.history.options" = "Možnosti obnovení historie";
+"jizda.chat.recovery.compatibility.title" = "Obnovení historie vyžaduje kontrolu";
+"jizda.chat.recovery.compatibility.message" = "Přístup k záloze je dostupný. Její použití na dalším zařízení zatím není potvrzené; otevřete možnosti obnovení historie.";
+"matrix.recovery.compatibility_warning.title" = "Obnovení historie vyžaduje kontrolu";
+"matrix.recovery.compatibility_warning.message" = "Přístup k záloze je dostupný. Její použití na dalším zařízení zatím není potvrzené.";
+"chat.status.history.section" = "Obnovení historie chatu";

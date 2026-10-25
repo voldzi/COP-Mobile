@@ -334,7 +334,7 @@ struct MessageBubble: View {
                     if showsMetadataRow {
                         HStack(spacing: 4) {
                             Text(message.sentAt, style: .time)
-                            if message.presentationIsOwnMessage || message.deliveryState == .failed || message.deliveryState == .pending {
+                            if message.presentationIsOwnMessage {
                                 Image(systemName: deliverySymbol)
                             }
                             if showsDeliveryLabel {
@@ -533,6 +533,7 @@ struct MessageBubble: View {
     }
 
     private var showsDeliveryLabel: Bool {
+        guard message.presentationIsOwnMessage else { return false }
         switch message.deliveryState {
         case .pending, .failed:
             return true
@@ -1302,7 +1303,7 @@ private struct MessageActionPreviewBubble: View {
 
                 HStack(spacing: 4) {
                     Text(message.sentAt, style: .time)
-                    if message.presentationIsOwnMessage || message.deliveryState == .pending || message.deliveryState == .failed {
+                    if message.presentationIsOwnMessage {
                         Image(systemName: deliverySymbol)
                     }
                     if let deliveryLabel {
@@ -1354,6 +1355,7 @@ private struct MessageActionPreviewBubble: View {
     }
 
     private var deliveryLabel: String? {
+        guard message.presentationIsOwnMessage else { return nil }
         switch message.deliveryState {
         case .pending:
             return CSMLocalization.text("message.delivery.pending", fallback: "čeká")

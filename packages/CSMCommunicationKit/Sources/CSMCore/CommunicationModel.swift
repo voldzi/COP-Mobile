@@ -3782,6 +3782,40 @@ final class CommunicationModel {
         await synchronizePendingMessages(for: selectedConversation, trigger: .manual)
     }
 
+    /// Explicit status refresh; keep the canonical model's existing account/
+    /// local-recovery witnesses rather than importing a host lifecycle owner.
+    func refreshActiveConversationMessages() async {
+        guard authState == .signedIn, let subject = actor?.subjectId,
+              let conversation = selectedConversation,
+              let scope = lastMessagingBootstrap.flatMap(MatrixLocalStoreScope.init) else { return }
+        let revision = matrixLocalRecoveryRevision
+        let isCurrent = {
+            self.authState == .signedIn && self.actor?.subjectId == subject &&
+            self.matrixLocalRecoveryRevision == revision &&
+            self.lastMessagingBootstrap.flatMap(MatrixLocalStoreScope.init) == scope &&
+            self.selectedConversation?.conversationId == conversation.conversationId
+        }
+        do {
+            let loaded = try await messaging.messages(for: conversation)
+            guard isCurrent() else { return }
+            let hasEarlier = if let paging = messaging as? any MessagingHistoryPaging {
+                await paging.hasEarlierMessages(for: conversation)
+            } else { loaded.count > TimelineWindowPolicy.mobile.retainedMessageLimit }
+            guard isCurrent() else { return }
+            timelineStore.send(.replaceRemote(visibleMessages(loaded, for: conversation), hasEarlier: hasEarlier))
+            await refreshPendingMessageCount()
+            guard isCurrent() else { return }
+            await refreshMatrixEncryptionRecoveryStatus()
+            guard isCurrent() else { return }
+            startLiveMessageStream(for: conversation)
+        } catch is CancellationError {
+            return
+        } catch {
+            guard isCurrent() else { return }
+            lastError = "Konverzaci se nepodařilo obnovit. Zkontrolujte připojení a zkuste to znovu."
+        }
+    }
+
     func discardPendingMessagesForActiveConversation() async {
         guard let selectedConversation else { return }
         await discardPendingMessages(for: selectedConversation)

@@ -176,9 +176,7 @@ enum TimelineReducer {
                !state.messages.contains(where: { $0.id == message.id }) {
                 return
             }
-            var byID = Dictionary(uniqueKeysWithValues: state.messages.map { ($0.id, $0) })
-            byID[message.id] = message
-            state.messages = normalized(Array(byID.values), limit: policy.retainedMessageLimit)
+            state.messages = normalized(state.messages + [message], limit: policy.retainedMessageLimit)
             if message.isOwnMessage {
                 state.hasLaterMessages = false
             }

@@ -22,6 +22,35 @@ public enum CSMVoiceCallPhase: String, Codable, Equatable, Sendable {
     }
 }
 
+/// Ordinary call UI never presents transport codes or server-provided text.
+/// This changes only explanation; the server's authorization result still wins.
+public enum CSMVoiceCallFailurePresentation {
+    public static func message(for error: any Error) -> String {
+        if let control = error as? CSMVoiceCallControlError {
+            return control.errorDescription ?? "Hovor se nepodařilo zahájit. Zkuste to znovu."
+        }
+        if let response = error as? HTTPResponseFailure {
+            switch (response.statusCode, response.code) {
+            case (503, "COMMUNICATION_POLICY_UNAVAILABLE"):
+                return "Služba teď nemůže ověřit, zda lze hovor spojit. Hovor nebyl zahájen. Zkuste to za chvíli."
+            case (401, _):
+                return "Přihlášení se nepodařilo ověřit. Otevřete svůj účet a zkuste to znovu."
+            case (403, _):
+                return "Tento hovor teď není povolený. Zkontrolujte stav komunikace a případné blokování kontaktu."
+            case (429, _):
+                return "Proběhlo příliš mnoho pokusů o spojení. Chvíli počkejte a zavolejte znovu."
+            default:
+                return "Hovorová služba teď není dostupná. Zkuste to za chvíli."
+            }
+        }
+        if let network = error as? URLError,
+           [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotConnectToHost, .cannotFindHost].contains(network.code) {
+            return "Spojení se nepodařilo navázat. Zkontrolujte připojení a zavolejte znovu."
+        }
+        return "Hovor se nepodařilo zahájit. Zkuste to znovu."
+    }
+}
+
 public enum CSMVoiceCallDirection: String, Codable, Equatable, Sendable {
     case incoming
     case outgoing

@@ -34,6 +34,25 @@ transportu.
 
 ## Vrstvy testů
 
+### Stav a potvrzování šifrovaných zpráv
+
+Regrese sdíleného balíčku pokrývají přesnou identitu koncept/SDK/server bez
+opakovaného odeslání, zachování známé transakce v novém snapshotu, odlišné
+transakce se stejným textem a konfliktní serverové události. Typovaná chyba
+čtení přijaté zprávy nesmí působit jako chyba jejího odeslání; čitelná uložená
+historie nesmí být přepsána dočasně nečitelným snapshotem.
+
+Přehled chatu se testuje s nečitelným obsahem, poruchou doručování a skutečným
+stavem ověření zařízení nezávisle na stavu zálohy. Výslovná obnova může požádat
+SDK o nové dešifrování nanejvýš 50 relací v místnosti za 30 sekund; nevytváří
+časovač ani neobchází ověření. Prezentace chyby hovoru používá jen povolené
+lidské kategorie, nikoli volný text serveru nebo transportu.
+
+Na dvou telefonech je samostatně nutné potvrdit jednu zprávu v každém směru,
+její čitelnost po návratu do aplikace, a přijetí/ukončení hovoru s obousměrným
+audiem. Provedení těchto zkoušek vyžaduje samostatné svolení; automatizované
+testy neposílají zprávy ani nevolají skutečným uživatelům.
+
 ### Nativní UI smoke test
 
 Target `COPMobileUITests` spouští host v izolovaném preview režimu. Ověřuje, že

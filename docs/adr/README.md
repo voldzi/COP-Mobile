@@ -41,3 +41,5 @@ Use ADRs for important, costly, risky, or hard-to-reverse technical decisions.
 - [0021 - Device-scoped Matrix store recovery](0021-device-scoped-matrix-store-recovery.md): atomic key creation, explicit new-device recovery, immutable old stores and physical acceptance.
 
 - [0022 - Exact Matrix delivery and lifecycle](0022-exact-matrix-delivery-and-lifecycle.md): durable scoped acknowledgements, stream fencing and authoritative voice connection.
+
+- [0023 - Truthful chat status and exact echoes](0023-truthful-chat-status-and-exact-echoes.md): content, delivery, own-device verification and history remain separate witnesses.

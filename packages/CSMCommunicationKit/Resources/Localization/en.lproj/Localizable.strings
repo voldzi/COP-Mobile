@@ -1327,3 +1327,22 @@
 "conversation.group.avatar.change" = "Change group avatar";
 "conversation.group.avatar.remove" = "Remove group avatar";
 "conversation.group.avatar.saving" = "Saving group avatar";
+
+"chat.status.content.unreadable.title" = "Some messages cannot be read";
+"chat.status.content.unreadable.message" = "Refresh the conversation. If the problem continues, check device verification and history recovery.";
+"chat.status.device.section" = "Verification of this phone";
+"chat.status.device.unknown.title" = "Phone verification is not confirmed";
+"chat.status.device.unknown.message" = "Refresh the conversation and check again. Backup availability alone does not confirm phone verification.";
+"chat.status.device.verified.title" = "Phone verified";
+"chat.status.device.verified.message" = "Account security has verified this phone. Individual message availability is checked separately.";
+"chat.status.device.unverified.title" = "Phone verification required";
+"chat.status.device.unverified.message" = "Check verification and recovery options below. Some messages may remain unavailable until the phone is verified.";
+"chat.status.messages.title" = "Message status";
+"chat.status.messages.message" = "Sending, delivery and read confirmations are shown next to individual messages.";
+"chat.status.refresh.action" = "Refresh conversation";
+"chat.status.history.options" = "History recovery options";
+"jizda.chat.recovery.compatibility.title" = "History recovery needs attention";
+"jizda.chat.recovery.compatibility.message" = "Backup access is available. Using it on another device is not yet confirmed; open history recovery options.";
+"matrix.recovery.compatibility_warning.title" = "History recovery needs attention";
+"matrix.recovery.compatibility_warning.message" = "Backup access is available. Using it on another device is not yet confirmed.";
+"chat.status.history.section" = "Chat history recovery";
